@@ -96,6 +96,8 @@ def parse_args():
     parser.add_argument('--use_disc_bias', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
 
+    parser.add_argument('--on_policy', default=True, required=False, 
+        action='store_false', help='use bias in disc arch')
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
 

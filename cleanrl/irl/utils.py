@@ -60,11 +60,19 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
     # eval lprobs conditioned on obs, acs
     with torch.no_grad():
         if torch.cuda.is_available():
-            _, expert_lprobs_t, _, _ = policy.get_action_and_value(expert_obs_t.cuda(), expert_acs_t.cuda())
-            _, policy_lprobs_t, _, _ = policy.get_action_and_value(obs_t.cuda(), acs_t.cuda())
+            if opt.on_policy:
+                _, expert_lprobs_t, _, _ = policy.get_action_and_value(expert_obs_t.cuda(), expert_acs_t.cuda())
+                _, policy_lprobs_t, _, _ = policy.get_action_and_value(obs_t.cuda(), acs_t.cuda())
+            else:
+                _, expert_lprobs_t, _ = policy.get_action(expert_obs_t.cuda())
+                _, policy_lprobs_t, _ = policy.get_action(obs_t.cuda())
         else:
-            _, expert_lprobs_t, _, _ = policy.get_action_and_value(expert_obs_t, expert_acs_t)
-            _, policy_lprobs_t, _, _ = policy.get_action_and_value(obs_t, acs_t)
+            if opt.on_policy:
+                _, expert_lprobs_t, _, _ = policy.get_action_and_value(expert_obs_t, expert_acs_t)
+                _, policy_lprobs_t, _, _ = policy.get_action_and_value(obs_t, acs_t)
+            else:
+                _, expert_lprobs_t, _ = policy.get_action(expert_obs_t)
+                _, policy_lprobs_t, _ = policy.get_action(obs_t)
 
     all_obs = np.concatenate([expert_obs, obs], axis=0)
     all_next_obs = np.concatenate([expert_obs_next, obs_next], axis=0)
