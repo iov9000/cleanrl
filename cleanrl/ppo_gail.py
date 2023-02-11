@@ -20,7 +20,7 @@ from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.gail import GailReward, GAILDiscriminator
-from irl.utils import load_hf_demos, prepare_update_irl
+from irl.utils import load_hf_demos, prepare_batch_update_irl
 
 def parse_args():
     # fmt: off
@@ -342,7 +342,7 @@ if __name__ == "__main__":
         # Optimize the discriminator
         for epoch in range(args.irl_epochs):            
             # GAIL Discriminator Update
-            update_dict = prepare_update_irl(envs, args, demos['all'], obs, actions, agent)
+            update_dict = prepare_batch_update_irl(envs, args, demos['all'], obs, actions, agent)
 
             loss_dict = disc.compute_loss(update_dict)
 

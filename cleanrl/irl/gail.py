@@ -44,6 +44,7 @@ class GAILDiscriminator(nn.Module):
         super(GAILDiscriminator, self).__init__()
 
         # parse options
+        self.env = env
         self.layer_dims = opt.d_layer_dims
         self.lr = opt.disc_lr
         self.use_actions = opt.use_actions
