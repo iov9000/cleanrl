@@ -206,6 +206,11 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
+    if torch.cuda.is_available():
+        torch.set_default_tensor_type(torch.cuda.FloatTensor)
+    else:
+        torch.set_default_tensor_type(torch.FloatTensor)
+
     demos = load_hf_demos(args.env_id, args.demo_dir)
     # get env specs
     test_env = gym.make(args.env_id)
