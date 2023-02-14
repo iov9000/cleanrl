@@ -78,7 +78,7 @@ def parse_args():
     parser.add_argument("--target-kl", type=float, default=None,
         help="the target KL divergence threshold")
 
-    # Discriminator specific arguments
+    # Discriminator specific arguments #TODO: move to IRL parse args file
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
     parser.add_argument('--use_actions', default=True, required=False, 
@@ -96,7 +96,9 @@ def parse_args():
     parser.add_argument('--use_disc_bias', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
     parser.add_argument('--firl_disc_iter', default=1000, type=int, required=False, help='number of discriminator updates')
-    
+    parser.add_argument('--firl_use_disc_resnet', default=True, required=False, 
+        action='store_false', help='use bias in disc arch')
+
     parser.add_argument('--on_policy', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
     parser.add_argument('--verbose', default=False, required=False, 

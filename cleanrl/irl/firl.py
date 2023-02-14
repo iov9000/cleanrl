@@ -41,6 +41,51 @@ class MiniGridCNN(nn.Module):
         return x
 
 
+class ResNetAIRLDisc(nn.Module):
+    def __init__(
+        self,
+        input_dim,
+        num_layer_blocks=2,
+        hid_dim=100,
+        hid_act='relu',
+        use_bn=True,
+        clamp_magnitude=10.0
+    ):
+        super().__init__()
+
+        if hid_act == 'relu':
+            hid_act_class = nn.ReLU
+        elif hid_act == 'tanh':
+            hid_act_class = nn.Tanh
+        else:
+            raise NotImplementedError()
+
+        self.clamp_magnitude = clamp_magnitude
+        self.input_dim = input_dim
+
+        self.first_fc = nn.Linear(input_dim, hid_dim)
+
+        self.blocks_list = nn.ModuleList()
+        for i in range(num_layer_blocks - 1):
+            block = nn.ModuleList()
+            block.append(nn.Linear(hid_dim, hid_dim))
+            if use_bn: block.append(nn.BatchNorm1d(hid_dim))
+            block.append(hid_act_class())
+            self.blocks_list.append(nn.Sequential(*block))
+        self.blocks_list = self.blocks_list
+
+        self.last_fc = nn.Linear(hid_dim, 1)
+
+    def forward(self, batch):
+        x = self.first_fc(batch)
+        for block in self.blocks_list:
+            x = x + block(x)
+        output = self.last_fc(x)
+        if self.clamp_magnitude is not None:
+            output = torch.clamp(output, min=-1.0*self.clamp_magnitude, max=self.clamp_magnitude)
+        return output  
+
+
 class fIRLDiscriminator(nn.Module):
     def __init__(self, env, opt):
         super(fIRLDiscriminator, self).__init__()
@@ -55,6 +100,7 @@ class fIRLDiscriminator(nn.Module):
         self.lip_coeff = opt.lip_coeff
         self.use_cnn_base = opt.use_cnn_base
         self.bias = opt.use_disc_bias
+        self.use_resnet = opt.firl_use_disc_resnet
 
         self.clamp_magnitude = 10
 
@@ -104,17 +150,20 @@ class fIRLDiscriminator(nn.Module):
                                                         self.layer_dims[1], self.bias)),
                                         torch.nn.Tanh())
 
-        self.disc_layers = []
-        for i in range(2, len(self.layer_dims)):
-            self.disc_layers += [f(torch.nn.Linear(in_features=self.layer_dims[i - 1],
-                                                  out_features=self.layer_dims[i],
-                                                  bias=self.bias)),
-                                  torch.nn.Tanh()]
+        if self.use_resnet:
+            self.disc=ResNetAIRLDisc(input_dim=self.layer_dims[1])
+        else:          
+            self.disc_layers = []
+            for i in range(2, len(self.layer_dims)):
+                self.disc_layers += [f(torch.nn.Linear(in_features=self.layer_dims[i - 1],
+                                                    out_features=self.layer_dims[i],
+                                                    bias=self.bias)),
+                                    torch.nn.Tanh()]
 
-        self.disc_layers += [f(torch.nn.Linear(in_features=self.layer_dims[-1],
-                                              out_features=1,
-                                              bias=self.bias))]
-        self.disc = nn.Sequential(*self.disc_layers)
+            self.disc_layers += [f(torch.nn.Linear(in_features=self.layer_dims[-1],
+                                                out_features=1,
+                                                bias=self.bias))]
+            self.disc = nn.Sequential(*self.disc_layers)
 
         if torch.cuda.is_available():
             self.base.cuda()
@@ -239,8 +288,9 @@ class fIRLDiscriminator(nn.Module):
         d_out = self.disc_forward(update_dict['all_obs'], update_dict['all_acs'])
         expert_out, policy_out = torch.chunk(d_out, chunks=2, dim=0)
 
-        labels = torch.cat([torch.zeros(expert_out.size()),
-                            torch.ones(policy_out.size())])
+        ## XXX: switched order: 1 for expert, 0 for policy..
+        labels = torch.cat([torch.ones(expert_out.size()),
+                            torch.zeros(policy_out.size())])
 
         bce_loss = F.binary_cross_entropy_with_logits(d_out, labels)
 
