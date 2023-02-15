@@ -4,6 +4,7 @@ import os
 import sys
 import random
 import time
+from datetime import datetime
 from distutils.util import strtobool
 
 module_path = os.path.abspath(os.path.join('../ccl'))

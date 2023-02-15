@@ -3,6 +3,7 @@ import argparse
 import os
 import random
 import time
+from datetime import datetime
 from distutils.util import strtobool
 
 import gym
@@ -176,7 +177,9 @@ class Actor(nn.Module):
 
 if __name__ == "__main__":
     args = parse_args()
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    # run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_name = f"ts_{args.env_id}__{args.exp_name}_seed_{args.seed}_{args.irm_coeff}}"
     if args.track:
         import wandb
 
