@@ -19,8 +19,9 @@ if __name__ == '__main__':
     # algos = ['ppo', 'sac']
     algos = ['ppo', 'sac']
     # disc_types = ['gail', 'airl', 'firl']
-    disc_types = ['gail']
-    irm_coeffs = [0.0, 0.01, 0.1, 1.0, 10.0]
+    disc_types = ['airl']
+    irm_coeffs = [0.0, 0.01, 0.1, 1.0, 10.0, 50.0, 100.0]
+    # irm_coeffs = [50.0, 100.0]
     envs = ['Ant-v3', 'Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3']
     MEM_PER_CPU = 8000
     GPU_PER_CPU = 1
