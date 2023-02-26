@@ -23,6 +23,8 @@ from torch.utils.tensorboard import SummaryWriter
 from irl.airl import AirlReward, AIRLDiscriminator
 from irl.utils import load_hf_demos, prepare_batch_update_irl
 
+from parse_tb import read_tb_file, create_df_from_ea
+
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
@@ -30,6 +32,8 @@ def parse_args():
         help="the name of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
+    parser.add_argument("--logging_interval", type=int, default=500,
+        help="logging interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -46,7 +50,7 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=1000000,
+    parser.add_argument("--total-timesteps", type=int, default=3000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=3e-4,
         help="the learning rate of the optimizer")
@@ -263,8 +267,9 @@ if __name__ == "__main__":
                 if "episode" in item.keys():
                     if args.verbose:
                         print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
-                    writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
-                    writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
+                    if global_step % args.logging_interval == 0:
+                        writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
+                        writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
                     break
 
         # bootstrap value if not done
@@ -363,28 +368,35 @@ if __name__ == "__main__":
 
             disc.update(loss)
 
-            writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
-            if args.irm_coeff > 0:
-                writer.add_scalar('irl/airl_irm_loss', loss_dict['grad_penalty'], global_step)
-            writer.add_scalar('irl/airl_r_p', loss_dict['policy_reward'], global_step)
-            writer.add_scalar('irl/airl_v_p', loss_dict['policy_value'], global_step)
-            writer.add_scalar('irl/airl_r_e', loss_dict['expert_reward'], global_step)
-            writer.add_scalar('irl/airl_v_e', loss_dict['expert_value'], global_step)
-            writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
+            if global_step % args.logging_interval == 0:
+                writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
+                if args.irm_coeff > 0:
+                    writer.add_scalar('irl/airl_irm_loss', loss_dict['grad_penalty'], global_step)
+                writer.add_scalar('irl/airl_r_p', loss_dict['policy_reward'], global_step)
+                writer.add_scalar('irl/airl_v_p', loss_dict['policy_value'], global_step)
+                writer.add_scalar('irl/airl_r_e', loss_dict['expert_reward'], global_step)
+                writer.add_scalar('irl/airl_v_e', loss_dict['expert_value'], global_step)
+                writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
 
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
-        writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
-        writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
-        writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-        writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
-        writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
-        writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
-        writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        if args.verbose:
-            print("SPS:", int(global_step / (time.time() - start_time)))
-        writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        if global_step % args.logging_interval == 0:
+            writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
+            writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
+            writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
+            writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
+            writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
+            writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
+            writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
+            writer.add_scalar("losses/explained_variance", explained_var, global_step)
+            if args.verbose:
+                print("SPS:", int(global_step / (time.time() - start_time)))
+            writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     envs.close()
     writer.close()
+
+    # save df for easier parsing
+    ea = read_tb_file(f"runs/{run_name}")
+    df = create_df_from_ea(ea, "charts/episodic_return")
+    df.to_pickle(f"results_{run_name}_df.pkl")

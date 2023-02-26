@@ -5,7 +5,7 @@ import re
 import matplotlib
 import matplotlib.pyplot as plt
 # %matplotlib notebook
-%matplotlib inline
+# %matplotlib inline
 import numpy as np
 import pandas as pd
 import seaborn as sns  
@@ -179,7 +179,7 @@ if __name__ == '__main__':
     ea_dict = {}
     for d in run_dir.iterdir():
         print(d)
-        ea_dict_airl[d] = read_tb_file(d)
+        ea_dict[d] = read_tb_file(d)
 
     df_dict = {}
     df_dict['sac'] = {'Ant-v3': {0.0:{},0.01:{},0.1:{},1.0:{},10.0:{},50.0:{},100.0:{}},
@@ -192,6 +192,8 @@ if __name__ == '__main__':
                       'Walker2d-v3': {0.0:{},0.01:{},0.1:{},1.0:{},10.0:{},50.0:{},100.0:{}}}
 
     df_dict_max = {}
+    df_dict_flat = {}
+
     irm_coeffs = [0.0, 0.01, 0.1, 1.0, 10.0, 50.0, 100.0]
 
     df_dict_max['sac'] = {'Ant-v3': {0.0:{},0.01:{},0.1:{},1.0:{},10.0:{},50.0:{},100.0:{}},
@@ -222,6 +224,6 @@ if __name__ == '__main__':
         if 'ppo' in str(k):
             df_dict_flat[f"ppo_{name}_{irm}_seed{seed}"] = df
 
-    df_dict.to_pickle(f"results_{run_dir}_df.pkl")
-    df_dict_max.to_pickle(f"results_{run_dir}_df_max.pkl")
+    pkl.dump(df_dict, open(f"results_{run_dir}_df.pkl", "wb"))
+    pkl.dump(df_dict_max, open(f"results_{run_dir}_df_max.pkl", "wb"))
     #df_dict = load_dirs(run_dir, tags)
