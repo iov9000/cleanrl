@@ -8,83 +8,7 @@ import torch.nn.functional as F
 import torch.autograd as autograd
 from torch.optim import Adam
 from torch.nn.utils import spectral_norm
-
-class MiniGridCNN(nn.Module):
-    def __init__(self, layer_dims, use_actions=False):
-        super(MiniGridCNN, self).__init__()
-        self.image_conv = nn.Sequential(
-            nn.Conv2d(3, 16, (2, 2)),
-            nn.ReLU(),
-            nn.MaxPool2d((2, 2)),
-            nn.Conv2d(16, 32, (2, 2)),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, (2, 2)),
-            nn.ReLU(),
-        )
-        if use_actions:
-            self.lin = nn.Linear(65, layer_dims[1])
-        else:
-            self.lin = nn.Linear(64, layer_dims[1])
-
-        self.use_actions = use_actions
-
-    def forward(self, x, a=None):
-        x = torch.transpose(x, 1, 3)
-        x = self.image_conv(x)
-        x = x.reshape(x.shape[0], -1)
-        if a is not None and self.use_actions:
-            if len(x.shape) != len(a.shape):
-                ac = torch.unsqueeze(a, -1)
-            x = self.lin(torch.cat([x, torch.unsqueeze(a, -1)], 1))
-        else:
-            x = self.lin(x)
-        return x
-
-
-class ResNetAIRLDisc(nn.Module):
-    def __init__(
-        self,
-        input_dim,
-        num_layer_blocks=2,
-        hid_dim=100,
-        hid_act='relu',
-        use_bn=True,
-        clamp_magnitude=10.0
-    ):
-        super().__init__()
-
-        if hid_act == 'relu':
-            hid_act_class = nn.ReLU
-        elif hid_act == 'tanh':
-            hid_act_class = nn.Tanh
-        else:
-            raise NotImplementedError()
-
-        self.clamp_magnitude = clamp_magnitude
-        self.input_dim = input_dim
-
-        self.first_fc = nn.Linear(input_dim, hid_dim)
-
-        self.blocks_list = nn.ModuleList()
-        for i in range(num_layer_blocks - 1):
-            block = nn.ModuleList()
-            block.append(nn.Linear(hid_dim, hid_dim))
-            if use_bn: block.append(nn.BatchNorm1d(hid_dim))
-            block.append(hid_act_class())
-            self.blocks_list.append(nn.Sequential(*block))
-        self.blocks_list = self.blocks_list
-
-        self.last_fc = nn.Linear(hid_dim, 1)
-
-    def forward(self, batch):
-        x = self.first_fc(batch)
-        for block in self.blocks_list:
-            x = x + block(x)
-        output = self.last_fc(x)
-        if self.clamp_magnitude is not None:
-            output = torch.clamp(output, min=-1.0*self.clamp_magnitude, max=self.clamp_magnitude)
-        return output  
-
+from utils import ResNetAIRLDisc, MiniGridCNN
 
 class fIRLDiscriminator(nn.Module):
     def __init__(self, env, opt):
@@ -293,12 +217,19 @@ class fIRLDiscriminator(nn.Module):
                             torch.zeros(policy_out.size())])
 
         bce_loss = F.binary_cross_entropy_with_logits(d_out, labels)
+        grad_penalty = self.irm_penalty(d_out, labels)
+        # grad_penalty = self.irm_penalty(expert_estimate, torch.zeros(expert_estimate.size()))
+
+        # lip_penalty = self.lip_penalty(update_dict)
+        loss = bce_loss + self.irm_coeff * grad_penalty
+        if self.irm_coeff > 1.0:
+            loss /= self.irm_coeff
 
         self.d_optimizer.zero_grad()
-        bce_loss.backward()
+        loss.backward()
         self.d_optimizer.step() 
 
-        return bce_loss
+        return loss
 
     def sum_over_dones(self, t, dones):
         j = 0

@@ -5,7 +5,6 @@ import re
 import matplotlib
 import matplotlib.pyplot as plt
 # %matplotlib notebook
-# %matplotlib inline
 import numpy as np
 import pandas as pd
 # import seaborn as sns  
@@ -223,6 +222,6 @@ if __name__ == '__main__':
         if 'ppo' in str(k):
             df_dict_flat[f"ppo_{name}_{irm}_seed{seed}"] = df
 
-    df_dict.to_pickle(f"results_{run_dir}_df.pkl")
-    df_dict_max.to_pickle(f"results_{run_dir}_df_max.pkl")
+    pkl.dump(df_dict, open(f"results_{run_dir}_df.pkl", "wb"))
+    pkl.dump(df_dict_max, open(f"results_{run_dir}_df_max.pkl", "wb"))
     #df_dict = load_dirs(run_dir, tags)
