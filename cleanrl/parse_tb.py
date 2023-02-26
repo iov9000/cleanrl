@@ -5,10 +5,10 @@ import re
 import matplotlib
 import matplotlib.pyplot as plt
 # %matplotlib notebook
-%matplotlib inline
+# %matplotlib inline
 import numpy as np
 import pandas as pd
-import seaborn as sns  
+# import seaborn as sns  
 import pickle as pkl
 from tqdm import tqdm
 from tensorboard.backend.event_processing import event_accumulator
@@ -179,7 +179,7 @@ if __name__ == '__main__':
     ea_dict = {}
     for d in run_dir.iterdir():
         print(d)
-        ea_dict_airl[d] = read_tb_file(d)
+        ea_dict[d] = read_tb_file(d)
 
     df_dict = {}
     df_dict['sac'] = {'Ant-v3': {0.0:{},0.01:{},0.1:{},1.0:{},10.0:{},50.0:{},100.0:{}},
@@ -192,6 +192,7 @@ if __name__ == '__main__':
                       'Walker2d-v3': {0.0:{},0.01:{},0.1:{},1.0:{},10.0:{},50.0:{},100.0:{}}}
 
     df_dict_max = {}
+    df_dict_flat = {}
     irm_coeffs = [0.0, 0.01, 0.1, 1.0, 10.0, 50.0, 100.0]
 
     df_dict_max['sac'] = {'Ant-v3': {0.0:{},0.01:{},0.1:{},1.0:{},10.0:{},50.0:{},100.0:{}},
