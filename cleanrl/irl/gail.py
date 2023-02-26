@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import torch.autograd as autograd
 from torch.optim import Adam
 from torch.nn.utils import spectral_norm
-from utils import ResNetAIRLDisc, MiniGridCNN
+from irl.utils import ResNetAIRLDisc, MiniGridCNN
 
 class GAILDiscriminator(nn.Module):
     def __init__(self, env, opt):

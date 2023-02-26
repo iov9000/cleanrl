@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import torch.autograd as autograd
 from torch.optim import Adam
 from torch.nn.utils import spectral_norm
-from utils import ResNetAIRLDisc, MiniGridCNN
+from irl.utils import ResNetAIRLDisc, MiniGridCNN
 
 class fIRLDiscriminator(nn.Module):
     def __init__(self, env, opt):
@@ -280,6 +280,8 @@ class fIRLDiscriminator(nn.Module):
         else:
             surrogate_objective = (t1 * t2).mean() - t1.mean() * t2.mean() # sample covariance
         
+        # TODO: covariance regularization based on logits / reward output?
+
         surrogate_objective /= T
 
         return surrogate_objective, t1 / T # log of geometric mean w.r.t. traj (0 is the borderline)
