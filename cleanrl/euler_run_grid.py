@@ -6,7 +6,7 @@ from pathlib import Path
 if __name__ == '__main__':
     p = argparse.ArgumentParser()
     p.add_argument('--output_dir', type=Path, default=Path('/cluster/project/jbuhmann/oivan/cleanrl/cleanrl/slurm_out'), required=False, help='output dir path')
-    p.add_argument('--time', default=24, required=False, help='which algorithms to use')
+    p.add_argument('--time', default=72, required=False, help='which algorithms to use')
     p.add_argument('--exp_id', default='', required=False, help='which algorithms to use')
     p.add_argument('--test_run', default=False, required=False, action='store_true', help='use subproc for parallel envs')
 
@@ -18,9 +18,10 @@ if __name__ == '__main__':
     # seeds = [515]
     # algos = ['ppo', 'sac']
     algos = ['ppo', 'sac']
-    # disc_types = ['gail', 'airl', 'firl']
-    disc_types = ['airl']
-    irm_coeffs = [0.0, 0.01, 0.1, 1.0, 10.0, 50.0, 100.0]
+    disc_types = ['gail', 'airl', 'firl']
+    # disc_types = ['firl']
+    irm_coeffs = [0.0, 0.1, 1.0, 10.0, 100.0]
+    # irm_coeffs = [0.0, 1.0, 100.0]
     # irm_coeffs = [50.0, 100.0]
     envs = ['Ant-v3', 'Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3']
     MEM_PER_CPU = 8000
