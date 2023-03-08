@@ -165,12 +165,17 @@ class AIRLDiscriminator(nn.Module):
             'expert_obs_next']
         interp_obs_next.requires_grad = True  # For gradient calculation
 
-        action_epsilon = torch.rand(update_dict['policy_acs'].shape)
-        interp_acs = action_epsilon * update_dict['policy_acs'] + (1 - action_epsilon) * update_dict['expert_acs']
-        interp_acs.requires_grad = True
-        encoder_input = [interp_obs, interp_acs, interp_obs_next]
-        _, _, _, estimate = self.forward(interp_obs,
+        if self.use_actions:
+            action_epsilon = torch.rand(update_dict['policy_acs'].shape)
+            interp_acs = action_epsilon * update_dict['policy_acs'] + (1 - action_epsilon) * update_dict['expert_acs']
+            interp_acs.requires_grad = True
+            encoder_input = [interp_obs, interp_acs, interp_obs_next]
+            _, _, _, estimate = self.forward(interp_obs,
                                          interp_obs_next, interp_acs, update_dict['policy_lprobs'])
+        else:            
+            encoder_input = [interp_obs, interp_obs_next]
+            _, _, _, estimate = self.forward(interp_obs,
+                                         interp_obs_next, ac=None, lprobs=update_dict['policy_lprobs'])
 
         gradient = torch.autograd.grad(estimate.sum(), encoder_input, create_graph=True)[0]
         # Norm's gradient could be NaN at 0. Use our own safe_norm
@@ -208,10 +213,11 @@ class AIRLDiscriminator(nn.Module):
         # what are labels -> need to be expert ids!!
         # -> Jensen Shannon? Mixture of experts?
         grad_penalty = self.irm_penalty(d_out, labels)
+        lip_penalty = self.lip_penalty(update_dict)
         # grad_penalty = self.irm_penalty(expert_estimate, torch.zeros(expert_estimate.size()))
 
         # lip_penalty = self.lip_penalty(update_dict)
-        loss = discriminator_loss + self.irm_coeff * grad_penalty
+        loss = discriminator_loss + self.irm_coeff * grad_penalty + self.lip_coeff * lip_penalty
         if self.irm_coeff > 1.0:
             loss /= self.irm_coeff
 
@@ -225,7 +231,7 @@ class AIRLDiscriminator(nn.Module):
         output_dict['policy_value'] = torch.mean(v_p)
         output_dict['expert_value'] = torch.mean(v_e)
         output_dict['grad_penalty'] = grad_penalty
-        # output_dict['lip_penalty'] = lip_penalty
+        output_dict['lip_penalty'] = lip_penalty
 
         # return self.loss, discriminator_loss, policy_estimate.mean(), expert_estimate.mean(), self.grad_penalty
         return output_dict

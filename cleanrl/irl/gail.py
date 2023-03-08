@@ -105,71 +105,51 @@ class GAILDiscriminator(nn.Module):
         g2 = autograd.grad(loss[1::2].mean(), [scale], create_graph=True)[0]
         return (g1 * g2).sum()
 
-    # lipschitz penalty
     def lip_penalty(self, update_dict):
-        interp_inputs = []
-        for policy_input, expert_input in zip(update_dict['policy_obs'], update_dict['expert_obs']):
-            obs_epsilon = torch.rand(policy_input.shape)
-            interp_input = obs_epsilon * policy_input + \
-                (1 - obs_epsilon) * expert_input
-            interp_input.requires_grad = True  # For gradient calculation
-            interp_inputs.append(interp_input)
+        obs_epsilon = torch.rand(update_dict['policy_obs'].shape)
+        interp_obs = obs_epsilon * update_dict['policy_obs'] + (1 - obs_epsilon) * update_dict['expert_obs']
+        interp_obs.requires_grad = True  # For gradient calculation
+
         if self.use_actions:
             action_epsilon = torch.rand(update_dict['policy_acs'].shape)
+            interp_acs = action_epsilon * update_dict['policy_acs'] + (1 - action_epsilon) * update_dict['expert_acs']
+            interp_acs.requires_grad = True
+            encoder_input = [interp_obs, interp_acs]
+            estimate = self.forward(interp_obs, interp_acs)
+        else:            
+            encoder_input = [interp_obs]
+            estimate = self.forward(interp_obs, ac=None)
 
-            dones_epsilon = torch.rand(update_dict['policy_dones'].shape)
-            action_inputs = torch.cat(
-                [
-                    action_epsilon * update_dict['policy_acs']
-                    + (1 - action_epsilon) * update_dict['expert_acs'],
-                    dones_epsilon * update_dict['policy_dones'] +
-                    (1 - dones_epsilon) * update_dict['expert_dones'],
-                ],
-                dim=1,
-            )
-            action_inputs.requires_grad = True
-            hidden, _ = self.encoder(interp_inputs, action_inputs)
-            encoder_input = tuple(interp_inputs + [action_inputs])
-        else:
-            hidden, _ = self.encoder(interp_inputs)
-            encoder_input = tuple(interp_inputs)
-
-        estimate = self.forward(hidden).squeeze(1).sum()
-        gradient = torch.autograd.grad(
-            estimate, encoder_input, create_graph=True)[0]
+        gradient = torch.autograd.grad(estimate.sum(), encoder_input, create_graph=True)[0]
         # Norm's gradient could be NaN at 0. Use our own safe_norm
-        safe_norm = (torch.sum(gradient ** 2, dim=1) + self.EPSILON).sqrt()
+        safe_norm = (torch.sum(gradient ** 2, dim=1) + 1e-8).sqrt()
         gradient_mag = torch.mean((safe_norm - 1) ** 2)
+
         return gradient_mag
 
-    def compute_grad_pen(self,
-                         expert_state,
-                         expert_action,
-                         policy_state,
-                         policy_action,
-                         lambda_=10):
-        alpha = torch.rand(expert_state.size(0), 1)
-        expert_data = torch.cat([expert_state, expert_action], dim=1)
-        policy_data = torch.cat([policy_state, policy_action], dim=1)
+    # def compute_lip_pen(self, update_dict):
+    #     alpha = torch.rand(update_dict['expert_obs'].size(0), 1)
+    #     expert_data = torch.cat([update_dict['expert_obs'], update_dict['expert_acs']], dim=1)
+    #     policy_data = torch.cat([update_dict['policy_obs'], update_dict['policy_acs']], dim=1)
 
-        alpha = alpha.expand_as(expert_data).to(expert_data.device)
+    #     alpha = alpha.expand_as(expert_data).to(expert_data.device)
 
-        mixup_data = alpha * expert_data + (1 - alpha) * policy_data
-        mixup_data.requires_grad = True
+    #     mixup_data = alpha * expert_data + (1 - alpha) * policy_data
+    #     mixup_data.requires_grad = True
 
-        disc = self.discriminator(mixup_data)
-        ones = torch.ones(disc.size()).to(disc.device)
-        grad = autograd.grad(
-            outputs=disc,
-            inputs=mixup_data,
-            grad_outputs=ones,
-            create_graph=True,
-            retain_graph=True,
-            only_inputs=True)[0]
+    #     disc = self.discriminator(mixup_data)
+    #     ones = torch.ones(disc.size()).to(disc.device)
+    #     grad = autograd.grad(
+    #         outputs=disc,
+    #         inputs=mixup_data,
+    #         grad_outputs=ones,
+    #         create_graph=True,
+    #         retain_graph=True,
+    #         only_inputs=True)[0]
 
-        grad_pen = lambda_ * (grad.norm(2, dim=1) - 1).pow(2).mean()
+    #     grad_pen = (grad.norm(2, dim=1) - 1).pow(2).mean()
 
-        return grad_pen
+    #     return grad_pen
 
     def compute_loss(self, update_dict):
         d_out = self.forward(update_dict['all_obs'], update_dict['all_acs'])
@@ -187,9 +167,10 @@ class GAILDiscriminator(nn.Module):
 
         self.bce_loss = F.binary_cross_entropy_with_logits(d_out, labels)
         # self.grad_penalty = self.irm_penalty(d_out, labels)
+        lip_penalty = self.lip_penalty(update_dict)
         self.grad_penalty = self.irm_penalty(
             expert_out, torch.zeros(expert_out.size()))
-        self.loss = self.bce_loss + self.irm_coeff * self.grad_penalty
+        self.loss = self.bce_loss + self.irm_coeff * self.grad_penalty + self.lip_coeff * lip_penalty
 
         output_dict = {}
         output_dict['d_loss'] = self.bce_loss
