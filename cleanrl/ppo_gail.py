@@ -21,7 +21,7 @@ from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.gail import GailReward, GAILDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -86,6 +86,8 @@ def parse_args():
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
+    parser.add_argument('--enhance_demos', default=False, required=False, 
+        action='store_true', help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
@@ -209,6 +211,9 @@ if __name__ == "__main__":
         torch.set_default_tensor_type(torch.FloatTensor)
 
     demos = load_hf_demos(args.env_id, args.demo_dir)
+    if args.enhance_demos:
+        print("Enhancing demos by computing Wasserstein barycenters")
+        demos = enhance_demos_with_barycenters(demos)
     # get env specs
     test_env = gym.make(args.env_id)
     disc = GAILDiscriminator(test_env, args)

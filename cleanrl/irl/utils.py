@@ -3,8 +3,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from tqdm import tqdm
+import ot
 
-def load_hf_demos(env_name, folder=None):
+def load_hf_demos(env_name, folder=None, bary_enhance=False):
     if folder is None:
         folder = "demos"
     expert_demos = {}
@@ -15,6 +17,68 @@ def load_hf_demos(env_name, folder=None):
         assert False
 
     return expert_demos
+
+def get_trajectory_list(demos):
+    done_cnt = 0
+    trajs = []
+    ep = []
+    for i, t in enumerate(demos):
+        ep.append(t)
+        if t[-1] == 1:
+            done_cnt += 1
+            trajs.append(np.array(ep))
+            ep = []
+        
+    return trajs
+
+def compute_sw_barycenter(a,b,lr=1e3,nb_iter_max=1000,bary_size=1000,n_proj=100):
+    x1_torch = torch.tensor(a)
+    x2_torch = torch.tensor(b)
+    xbinit = np.random.randn(bary_size, a.shape[-1])
+    xbary_torch = torch.tensor(xbinit).requires_grad_(True)
+
+    #x_all = np.zeros((nb_iter_max, xbary_torch.shape[0], 2))
+
+    loss_iter = []
+
+    # generator for random permutations
+    gen = torch.Generator()
+    gen.manual_seed(42)
+
+    alpha = 0.5 # adaptive alpha schedule?
+
+    for i in tqdm(range(nb_iter_max)):
+
+        loss = alpha * ot.sliced_wasserstein_distance(xbary_torch, x2_torch, n_projections=n_proj, seed=gen) \
+            + (1 - alpha) * ot.sliced_wasserstein_distance(xbary_torch, x1_torch, n_projections=n_proj, seed=gen)
+
+        loss_iter.append(loss.clone().detach().cpu().numpy())
+        loss.backward()
+
+        # performs a step of projected gradient descent
+        with torch.no_grad():
+            grad = xbary_torch.grad
+            xbary_torch -= grad * lr  # / (1 + i / 5e1)  # step
+            xbary_torch.grad.zero_()
+            #x_all[i, :, :] = xbary_torch.clone().detach().cpu().numpy()
+
+    xb = xbary_torch.clone().detach().cpu().numpy()
+    
+    return xb
+
+def enhance_demos_with_barycenters(demos,lr=1e3,nb_iter_max=1000,bary_size=1000,n_proj=100,n_barys=10):
+    demo_list = get_trajectory_list(demos['all'])
+    pairs = [(a, b) for idx, a in enumerate(demo_list) for b in demo_list[idx + 1:]]
+    barys = []
+    for i,(a,b) in enumerate(pairs):
+        barys.append(compute_sw_barycenter(a,b,lr,nb_iter_max,bary_size,n_proj))
+        if i > n_barys:
+            break
+    
+    demo_list.extend(barys)
+    
+    return {'all': np.concatenate(demo_list,0)}
+    
 
 def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
     ac_sample = env.single_action_space.sample()

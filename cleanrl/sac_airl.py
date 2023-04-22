@@ -17,7 +17,7 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.airl import AirlReward, AIRLDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -78,6 +78,10 @@ def parse_args():
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
+    parser.add_argument('--enhance_demos', default=False, required=False, 
+        action='store_true', help='enhance demos using W2 barycenters')
+    parser.add_argument('--use_disc_bias', default=True, required=False, 
+        action='store_false', help='use bias in disc arch')
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
@@ -92,8 +96,6 @@ def parse_args():
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
-    parser.add_argument('--use_disc_bias', default=True, required=False, 
-        action='store_false', help='use bias in disc arch')
         
     parser.add_argument('--on_policy', default=False, required=False, 
         action='store_true', help='use bias in disc arch')
@@ -218,6 +220,9 @@ if __name__ == "__main__":
         torch.set_default_tensor_type(torch.FloatTensor)
 
     demos = load_hf_demos(args.env_id, args.demo_dir)
+    if args.enhance_demos:
+        print("Enhancing demos by computing Wasserstein barycenters")
+        demos = enhance_demos_with_barycenters(demos)
     # get env specs
     test_env = gym.make(args.env_id)
     disc = AIRLDiscriminator(test_env, args)
