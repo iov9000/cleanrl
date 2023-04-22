@@ -21,7 +21,7 @@ from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.airl import AirlReward, AIRLDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -86,6 +86,8 @@ def parse_args():
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
+    parser.add_argument('--enhance_demos', default=False, required=False, 
+        action='store_true', help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
@@ -212,6 +214,9 @@ if __name__ == "__main__":
         torch.set_default_tensor_type(torch.FloatTensor)
 
     demos = load_hf_demos(args.env_id, args.demo_dir)
+    if args.enhance_demos:
+        print("Enhancing demos by computing Wasserstein barycenters")
+        demos = enhance_demos_with_barycenters(demos)
     # get env specs
     test_env = gym.make(args.env_id)
     disc = AIRLDiscriminator(test_env, args)
@@ -358,28 +363,32 @@ if __name__ == "__main__":
 
         # Optimize the discriminator
         for epoch in range(args.irl_epochs):            
-            # GAIL Discriminator Update
-            update_dict = prepare_batch_update_irl(envs, args, demos['all'], obs, actions, dones, agent)
+            # GAIL Discriminator Update (exhaust demos)
+            gen_demos = demos_gen(demos['all'], args.batch_size)
+            for d in gen_demos:
+                if len(d) < args.batch_size:
+                    break
+                update_dict = prepare_batch_update_irl(envs, args, d, obs, actions, dones, agent)
 
-            loss_dict = disc.compute_loss(update_dict)
+                loss_dict = disc.compute_loss(update_dict)
 
-            loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
-            if args.irm_coeff > 1.0:
-                loss /= args.irm_coeff
-            # if args.irm_coeff == 0.0:
-                # loss /= 50
+                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
+                if args.irm_coeff > 1.0:
+                    loss /= args.irm_coeff
+                # if args.irm_coeff == 0.0:
+                    # loss /= 50
 
-            disc.update(loss)
+                disc.update(loss)
 
-            if global_step % args.logging_interval == 0:
-                writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
-                if args.irm_coeff > 0:
-                    writer.add_scalar('irl/airl_irm_loss', loss_dict['grad_penalty'], global_step)
-                writer.add_scalar('irl/airl_r_p', loss_dict['policy_reward'], global_step)
-                writer.add_scalar('irl/airl_v_p', loss_dict['policy_value'], global_step)
-                writer.add_scalar('irl/airl_r_e', loss_dict['expert_reward'], global_step)
-                writer.add_scalar('irl/airl_v_e', loss_dict['expert_value'], global_step)
-                writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
+                if global_step % args.logging_interval == 0:
+                    writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
+                    if args.irm_coeff > 0:
+                        writer.add_scalar('irl/airl_irm_loss', loss_dict['grad_penalty'], global_step)
+                    writer.add_scalar('irl/airl_r_p', loss_dict['policy_reward'], global_step)
+                    writer.add_scalar('irl/airl_v_p', loss_dict['policy_value'], global_step)
+                    writer.add_scalar('irl/airl_r_e', loss_dict['expert_reward'], global_step)
+                    writer.add_scalar('irl/airl_v_e', loss_dict['expert_value'], global_step)
+                    writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
 
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
