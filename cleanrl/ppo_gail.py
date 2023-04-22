@@ -21,7 +21,7 @@ from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.gail import GailReward, GAILDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -361,20 +361,24 @@ if __name__ == "__main__":
         # Optimize the discriminator
         for epoch in range(args.irl_epochs):            
             # GAIL Discriminator Update
-            update_dict = prepare_batch_update_irl(envs, args, demos['all'], obs, actions, dones, agent)
+            gen_demos = demos_gen(demos['all'], args.batch_size)
+            for d in gen_demos:
+                if len(d) < args.batch_size:
+                    break
+                update_dict = prepare_batch_update_irl(envs, args, d, obs, actions, dones, agent)
 
-            loss_dict = disc.compute_loss(update_dict)
+                loss_dict = disc.compute_loss(update_dict)
 
-            loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
-            if args.irm_coeff > 1.0:
-                loss /= args.irm_coeff
+                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
+                if args.irm_coeff > 1.0:
+                    loss /= args.irm_coeff
 
-            disc.update(loss)
-        
-            if global_step % args.logging_interval == 0:
-                writer.add_scalar('irl/gail_bce_loss', loss_dict['d_loss'], global_step)
-                if args.irm_coeff > 0:
-                    writer.add_scalar('irl/gail_irm_loss', loss_dict['grad_penalty'], global_step)
+                disc.update(loss)
+            
+                if global_step % args.logging_interval == 0:
+                    writer.add_scalar('irl/gail_bce_loss', loss_dict['d_loss'], global_step)
+                    if args.irm_coeff > 0:
+                        writer.add_scalar('irl/gail_irm_loss', loss_dict['grad_penalty'], global_step)
 
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes

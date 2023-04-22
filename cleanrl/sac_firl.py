@@ -17,7 +17,7 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.firl import firlReward, fIRLDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -361,24 +361,31 @@ if __name__ == "__main__":
             # Optimize the discriminator 
             for epoch in range(args.irl_epochs):            
                 # train discriminator to get density ratio
-                for i in range(args.firl_disc_iter):
-                    update_dict = prepare_batch_update_irl(envs, args, demos['all'], 
-                                                    data.observations, data.actions, data.dones, actor)
-                    disc.update_disc(update_dict)
+                gen_demos = demos_gen(demos['all'], args.batch_size)
+                for d in gen_demos:
+                    if len(d) < args.batch_size:
+                        break          
+                    # GAIL Discriminator Update                    
+                    for i in range(args.firl_disc_iter):
+                        update_dict = prepare_batch_update_irl(envs, args, d, 
+                                                        data.observations, data.actions, data.dones, actor)
+                        disc.update_disc(update_dict)
 
-                # update main loss of f-div
-                loss_dict = disc.compute_loss(update_dict)
+                    
 
-                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
-                if args.irm_coeff > 1.0:
-                    loss /= args.irm_coeff
+                    # update main loss of f-div
+                    loss_dict = disc.compute_loss(update_dict)
 
-                disc.update(loss)
-        
-                if global_step % args.logging_interval == 0:
-                    writer.add_scalar('irl/firl_loss', loss_dict['d_loss'], global_step)
-                    if args.irm_coeff > 0:
-                        writer.add_scalar('irl/firl_irm_loss', loss_dict['grad_penalty'], global_step)
+                    loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
+                    if args.irm_coeff > 1.0:
+                        loss /= args.irm_coeff
+
+                    disc.update(loss)
+            
+                    if global_step % args.logging_interval == 0:
+                        writer.add_scalar('irl/firl_loss', loss_dict['d_loss'], global_step)
+                        if args.irm_coeff > 0:
+                            writer.add_scalar('irl/firl_irm_loss', loss_dict['grad_penalty'], global_step)
 
     envs.close()
     writer.close()
