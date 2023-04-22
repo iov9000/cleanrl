@@ -66,7 +66,7 @@ def compute_sw_barycenter(a,b,lr=1e3,nb_iter_max=1000,bary_size=1000,n_proj=100)
     
     return xb
 
-def enhance_demos_with_barycenters(demos,lr=1e3,nb_iter_max=1000,bary_size=1000,n_proj=100,n_barys=10):
+def enhance_demos_with_barycenters(demos,lr=1e3,nb_iter_max=1000,bary_size=1000,n_proj=100,n_barys=20):
     demo_list = get_trajectory_list(demos['all'])
     pairs = [(a, b) for idx, a in enumerate(demo_list) for b in demo_list[idx + 1:]]
     barys = []
@@ -79,6 +79,12 @@ def enhance_demos_with_barycenters(demos,lr=1e3,nb_iter_max=1000,bary_size=1000,
     
     return {'all': np.concatenate(demo_list,0)}
     
+def demos_gen(data, batch_size):
+    """  Yields bacth of specified size """
+    if batch_size<=0:
+       return
+    for i in range(0, len(data), batch_size):
+        yield data[i : i + batch_size]
 
 def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
     ac_sample = env.single_action_space.sample()
@@ -100,7 +106,7 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
     obs_next = np.concatenate([obs[1:], np.expand_dims(obs[-1], 0)], axis=0)
 
     # sample expert_demos
-    expert_ob_ac_done_reward = expert_demos[np.random.randint(0, expert_demos.shape[0], opt.batch_size), :]
+    expert_ob_ac_done_reward = expert_demos#[np.random.randint(0, expert_demos.shape[0], opt.batch_size), :]
     expert_dones = expert_ob_ac_done_reward[:, -1]
     rewards = expert_ob_ac_done_reward[:, -2]
     expert_ob_ac = expert_ob_ac_done_reward[:, :-2]
