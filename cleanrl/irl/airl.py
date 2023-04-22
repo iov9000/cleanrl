@@ -212,9 +212,9 @@ class AIRLDiscriminator(nn.Module):
         # TODO: only compute w.r.t. expert_estimate!
         # what are labels -> need to be expert ids!!
         # -> Jensen Shannon? Mixture of experts?
-        grad_penalty = self.irm_penalty(d_out, labels)
+        # grad_penalty = self.irm_penalty(d_out, labels)
         lip_penalty = self.lip_penalty(update_dict)
-        # grad_penalty = self.irm_penalty(expert_estimate, torch.zeros(expert_estimate.size()))
+        grad_penalty = self.irm_penalty(expert_estimate, torch.zeros(expert_estimate.size()))
 
         # lip_penalty = self.lip_penalty(update_dict)
         loss = discriminator_loss + self.irm_coeff * grad_penalty + self.lip_coeff * lip_penalty
