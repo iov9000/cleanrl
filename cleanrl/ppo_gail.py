@@ -370,7 +370,7 @@ if __name__ == "__main__":
 
                 loss_dict = disc.compute_loss(update_dict)
 
-                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
+                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + args.lip_coeff * loss_dict['lip_penalty']
                 if args.irm_coeff > 1.0:
                     loss /= args.irm_coeff
 

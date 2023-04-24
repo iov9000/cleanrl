@@ -185,7 +185,7 @@ class WAILDiscriminator(nn.Module):
         output_dict = {}
         output_dict['d_loss'] = self.ot_loss
         output_dict['grad_penalty'] = self.grad_penalty
-        output_dict['lipschitz_penalty'] = lip_penalty
+        output_dict['lip_penalty'] = lip_penalty
 
         return output_dict
         

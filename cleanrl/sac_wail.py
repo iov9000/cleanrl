@@ -379,10 +379,10 @@ if __name__ == "__main__":
                     disc.update(loss)
             
                     if global_step % args.logging_interval == 0:
-                        writer.add_scalar('irl/swil_gsw_dist', loss_dict['d_loss'], global_step)
+                        writer.add_scalar('irl/wail_d_loss', loss_dict['d_loss'], global_step)
 
                         if args.irm_coeff > 0:
-                            writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
+                            writer.add_scalar('irl/wail_irm_loss', loss_dict['grad_penalty'], global_step)
 
 
 
