@@ -168,7 +168,7 @@ class GAILDiscriminator(nn.Module):
         self.bce_loss = F.binary_cross_entropy_with_logits(d_out, labels)
         # self.grad_penalty = self.irm_penalty(d_out, labels)
         lip_penalty = self.lip_penalty(update_dict)
-        ## TODO: check IRM penalty form!
+        ## TODO: check IRM penalty form! -> ones not zeros!
         self.grad_penalty = self.irm_penalty(
             expert_out, torch.ones(expert_out.size()))
         #self.grad_penalty = self.irm_penalty(
