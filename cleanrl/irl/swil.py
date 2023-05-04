@@ -235,6 +235,7 @@ class SWILDiscriminator(nn.Module):
         output_dict = {}
         output_dict['d_loss'] = gsw_dist
         output_dict['grad_penalty'] = 0
+        output_dict['lip_penalty'] = 0
 
         return output_dict
 
