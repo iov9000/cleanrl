@@ -51,17 +51,20 @@ class AIRLDiscriminator(nn.Module):
                                                       self.layer_dims[1], self.bias)),
                                       torch.nn.PReLU())
 
-        self.reward_layers = []
-        for i in range(2, len(self.layer_dims)):
-            self.reward_layers += [f(torch.nn.Linear(in_features=self.layer_dims[i - 1],
-                                                   out_features=self.layer_dims[i],
-                                                   bias=self.bias)),
-                                                   torch.nn.PReLU()]
+        if opt.airl_resnet:
+            self.reward = ResNetAIRLDisc(layer_dims[1])
+        else:
+            self.reward_layers = []
+            for i in range(2, len(self.layer_dims)):
+                self.reward_layers += [f(torch.nn.Linear(in_features=self.layer_dims[i - 1],
+                                                    out_features=self.layer_dims[i],
+                                                    bias=self.bias)),
+                                                    torch.nn.PReLU()]
 
-        self.reward_layers += [f(torch.nn.Linear(in_features=self.layer_dims[-1],
-                                               out_features=1,
-                                               bias=self.bias))]
-        self.reward = nn.Sequential(*self.reward_layers)
+            self.reward_layers += [f(torch.nn.Linear(in_features=self.layer_dims[-1],
+                                                out_features=1,
+                                                bias=self.bias))]
+            self.reward = nn.Sequential(*self.reward_layers)
 
         # shaping function h_\phi
         if self.use_cnn_base:
@@ -71,23 +74,26 @@ class AIRLDiscriminator(nn.Module):
                                                         self.layer_dims[1], self.bias)),
                                         torch.nn.PReLU())
 
-        self.value_layers = []
-        for i in range(2, len(self.layer_dims)):
-            self.value_layers += [f(torch.nn.Linear(in_features=self.layer_dims[i - 1],
-                                                  out_features=self.layer_dims[i],
-                                                  bias=self.bias)),
-                                  torch.nn.PReLU()]
+        if opt.airl_resnet:
+            self.value = ResNetAIRLDisc(layer_dims[1])
+        else:
+            self.value_layers = []
+            for i in range(2, len(self.layer_dims)):
+                self.value_layers += [f(torch.nn.Linear(in_features=self.layer_dims[i - 1],
+                                                    out_features=self.layer_dims[i],
+                                                    bias=self.bias)),
+                                    torch.nn.PReLU()]
 
-        self.value_layers += [f(torch.nn.Linear(in_features=self.layer_dims[-1],
-                                              out_features=1,
-                                              bias=self.bias))]
-        self.value = nn.Sequential(*self.value_layers)
+            self.value_layers += [f(torch.nn.Linear(in_features=self.layer_dims[-1],
+                                                out_features=1,
+                                                bias=self.bias))]
+            self.value = nn.Sequential(*self.value_layers)
 
-        if torch.cuda.is_available():
-            self.base.cuda()
-            self.base_v.cuda()
-            self.reward.cuda()
-            self.value.cuda()
+            if torch.cuda.is_available():
+                self.base.cuda()
+                self.base_v.cuda()
+                self.reward.cuda()
+                self.value.cuda()
 
         # self.module_list = nn.ModuleList([self.base, self.base_v, self.reward, self.value])
 
@@ -214,7 +220,9 @@ class AIRLDiscriminator(nn.Module):
         # -> Jensen Shannon? Mixture of experts?
         # grad_penalty = self.irm_penalty(d_out, labels)
         lip_penalty = self.lip_penalty(update_dict)
-        grad_penalty = self.irm_penalty(expert_estimate, torch.ones(expert_estimate.size()))
+        grad_penalty_ = self.irm_penalty(policy_estimate, torch.zeros(expert_estimate.size()))
+        grad_penalty__ = self.irm_penalty(expert_estimate, torch.ones(expert_estimate.size()))
+        grad_penalty = self.irm_penalty(d_out, labels)
 
         # lip_penalty = self.lip_penalty(update_dict)
         loss = discriminator_loss + self.irm_coeff * grad_penalty + self.lip_coeff * lip_penalty

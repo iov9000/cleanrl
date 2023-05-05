@@ -92,6 +92,7 @@ def parse_args():
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
     # SWIL specific 
     parser.add_argument("--n_proj", type=int, default=100, help="number of random projections")
+    parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
 
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')

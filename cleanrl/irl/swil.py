@@ -6,6 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.autograd as autograd
 from torch.optim import Adam
+from torch.optim.lr_scheduler import ExponentialLR
+
 from torch.nn.utils import spectral_norm
 from irl.utils import ResNetAIRLDisc, MiniGridCNN
 
@@ -96,6 +98,7 @@ class SWILDiscriminator(nn.Module):
         self.bias = opt.use_disc_bias
         self.n_proj = opt.n_proj
         self.l2_coeff = opt.l2_coeff
+        self.reward_type = opt.swil_reward_type
 
         ob_shapes = list(env.observation_space.shape)
         ac_shapes = list(env.action_space.shape)
@@ -117,17 +120,21 @@ class SWILDiscriminator(nn.Module):
                                                       self.layer_dims[1], bias),
                                       torch.nn.PReLU())
 
-        self.reward_layers = []
-        for i in range(2, len(self.layer_dims)):
-            self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[i - 1],
-                                                   out_features=self.layer_dims[i],
-                                                   bias=bias),
-                                   torch.nn.PReLU()]
 
-        self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[-1],
-                                               out_features=self.n_proj,
-                                               bias=bias)]
-        self.reward = nn.Sequential(*self.reward_layers)
+        if self.reward_type == 'linear':
+            self.reward_layers = []
+            for i in range(2, len(self.layer_dims)):
+                self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[i - 1],
+                                                    out_features=self.layer_dims[i],
+                                                    bias=bias),
+                                    torch.nn.PReLU()]
+
+            self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[-1],
+                                                out_features=self.n_proj,
+                                                bias=bias)]
+            self.reward = nn.Sequential(*self.reward_layers)
+        else:
+            self.reward = nn.MultiheadAttention(embed_dim=self.layer_dims[1], num_heads = 1)
 
         if torch.cuda.is_available():
             self.base.cuda()
@@ -140,6 +147,7 @@ class SWILDiscriminator(nn.Module):
         # self.module_list = nn.ModuleList([self.base, self.base_v, self.reward, self.value])
         self.d_optimizer = Adam(list(self.base.parameters()) + list(self.reward.parameters()), 
                         lr=self.lr, weight_decay=self.l2_coeff)
+        self.d_scheduler = ExponentialLR(self.d_optimizer, gamma=opt.scheduler_gamma)
         #self.d_optimizer = Adam([self.policy_obs, self.policy_acs], lr=self.lr)
 
     def forward(self, ob, ac, lprobs):
@@ -174,13 +182,17 @@ class SWILDiscriminator(nn.Module):
         else:
             base_out = self.base(ob)
 
+        if self.reward_type == 'linear':
+            return torch.mean(self.reward(base_out),-1)
+        else:
+            return torch.mean(self.reward(base_out,base_out,base_out)[0],-1)
+
         # compute distance for single ob,ac and batch of experts via projections
         #gsw_dist = self.gsw(ob, ac, self.expert_obs, self.expert_acs, random=False)
         
         # rew, v, v_n, d_out = self.forward(ob, next_ob, ac, lprobs) TODO??
         # potentially use more sophisticated mechanism for averaging out projections
         # Self-Attention sliced wasserstein distances is a weighted sum? 
-        return torch.mean(self.reward(base_out),-1)
         #return gsw_dist
 
     def gsw(self, obs_pi, acs_pi, obs_exp, acs_exp, random=True):
@@ -243,6 +255,7 @@ class SWILDiscriminator(nn.Module):
         self.d_optimizer.zero_grad()
         loss.backward()
         self.d_optimizer.step()
+        self.d_scheduler.step()
 
 
 class SwilReward(gym.Wrapper):

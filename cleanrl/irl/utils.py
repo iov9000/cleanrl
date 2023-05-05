@@ -245,7 +245,7 @@ class ResNetAIRLDisc(nn.Module):
         num_layer_blocks=2,
         hid_dim=100,
         hid_act='relu',
-        use_bn=True,
+        use_bn=False,
         clamp_magnitude=10.0
     ):
         super().__init__()
