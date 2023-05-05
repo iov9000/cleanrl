@@ -74,6 +74,9 @@ def parse_args():
             help="Entropy regularization coefficient.")
     parser.add_argument("--autotune", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
         help="automatic tuning of the entropy coefficient")
+    # SWIL specific 
+    parser.add_argument("--n_proj", type=int, default=100, help="number of projections for SWIL")
+    parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
 
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
@@ -189,7 +192,8 @@ if __name__ == "__main__":
     args = parse_args()
     # run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_{args.irm_coeff}"
+    # run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_{args.irm_coeff}"
+    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_np{args.n_proj}_{ua}"
     if args.track:
         import wandb
 

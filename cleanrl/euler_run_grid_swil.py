@@ -42,14 +42,14 @@ if __name__ == '__main__':
                     for ua in use_acs:
                         for algo in algos:
                             for env_name in envs:
-                                exp_id = (f"{ts}_{algo}_{disc_type}_{env_name}_seed_{seed}_{args.exp_id}_{irm_coeff}_lip{lip_coeff}_{ua}")
+                                exp_id = (f"{ts}_{algo}_{disc_type}_{env_name}_seed_{seed}_{args.exp_id}_{irm_coeff}_np{n_proj}_{ua}")
                                 euler_slurm = (f"sbatch --mem-per-cpu={MEM_PER_CPU} --gpus={GPU_PER_CPU} "
                                             f"--gpus=gtx_1080:1 "
                                             f"-o {args.output_dir / exp_id} "
                                             f"--time={args.time}:00:00 --wrap ")
                                 euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
                                 # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
-                                exp_cmd = (f"python {algo}_{disc_type}.py  --verbose --seed={seed} --n_proj={n_proj} --irm_coeff={irm_coeff} {ua} --lip_coeff={lip_coeff} --env-id {env_name}")
+                                exp_cmd = (f"python {algo}_{disc_type}.py  --verbose --seed={seed} --n_proj={n_proj} --irm_coeff={irm_coeff} {ua} --env-id {env_name}")
                                 cluster_cmd = euler_slurm + exp_cmd 
                                 print("Running command: ", cluster_cmd)
                                 # subprocess.run(cluster_cmd, shell=True)
