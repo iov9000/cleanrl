@@ -86,6 +86,8 @@ def parse_args():
                    help='discriminator MLP layer dimensions')
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
+    parser.add_argument("--scheduler_gamma", type=float, default=1.0,
+        help="exponential decay rate of the learning rate scheduler")
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
@@ -190,7 +192,7 @@ if __name__ == "__main__":
     # run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     # run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_{args.irm_coeff}"
-    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_np{args.n_proj}_{ua}"
+    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_np{args.n_proj}_ua{args.use_actions}"
     if args.track:
         import wandb
 
