@@ -282,3 +282,23 @@ class ResNetAIRLDisc(nn.Module):
             output = torch.clamp(output, min=-1.0*self.clamp_magnitude, max=self.clamp_magnitude)
         return output  
 
+def approximate_sw(X, Y, centering=True):
+    """
+    Approximates SW with Wasserstein distance between Gaussian approximations
+    """
+    d = X.shape[1]
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # Convert numpy arrays to torch tensors
+    X = torch.tensor(X, dtype=torch.float, device=device)
+    Y = torch.tensor(Y, dtype=torch.float, device=device)
+    if centering:
+        # Center the data
+        mean_X = torch.mean(X, dim=0)
+        mean_Y = torch.mean(Y, dim=0)
+        X = X - mean_X
+        Y = Y - mean_Y
+    # Approximate SW
+    m2_Xc = torch.mean(torch.linalg.norm(X, dim=1) ** 2) / d
+    m2_Yc = torch.mean(torch.linalg.norm(Y, dim=1) ** 2) / d
+    sw = torch.abs(m2_Xc ** (1 / 2) - m2_Yc ** (1 / 2))
+    return sw

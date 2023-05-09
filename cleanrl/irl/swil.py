@@ -49,6 +49,26 @@ def get_generalized_random_projections(projection_model, latent_dim: int, num_sa
     rand_proj = rand_samples / rand_samples.norm(dim=1).view(-1,1)
     return rand_proj # [S x D]
 
+def approximate_sw(X, Y, centering=True):
+    """
+    Approximates SW with Wasserstein distance between Gaussian approximations
+    """
+    d = X.shape[1]
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # Convert numpy arrays to torch tensors
+    X = torch.tensor(X, dtype=torch.float, device=device)
+    Y = torch.tensor(Y, dtype=torch.float, device=device)
+    if centering:
+        # Center the data
+        mean_X = torch.mean(X, dim=0)
+        mean_Y = torch.mean(Y, dim=0)
+        X = X - mean_X
+        Y = Y - mean_Y
+    # Approximate SW
+    m2_Xc = torch.mean(torch.linalg.norm(X, dim=1) ** 2) / d
+    m2_Yc = torch.mean(torch.linalg.norm(Y, dim=1) ** 2) / d
+    sw = torch.abs(m2_Xc ** (1 / 2) - m2_Yc ** (1 / 2))
+    return sw
 
 def compute_swd(z_expert: torch.Tensor,
                 z_policy: torch.Tensor,
@@ -88,6 +108,7 @@ class SWILDiscriminator(nn.Module):
         super(SWILDiscriminator, self).__init__()
 
         self.env = env
+        self.opt = opt
         self.layer_dims = opt.d_layer_dims
         self.lr = opt.disc_lr
         self.use_actions = opt.use_actions
@@ -195,7 +216,7 @@ class SWILDiscriminator(nn.Module):
         # Self-Attention sliced wasserstein distances is a weighted sum? 
         #return gsw_dist
 
-    def gsw(self, obs_pi, acs_pi, obs_exp, acs_exp, random=True):
+    def gsw(self, obs_pi, acs_pi, obs_exp, acs_exp, random=False):
         '''
         Calculates GSW between two empirical state-action distributions.
         Note that the number of samples is assumed to be equal
@@ -219,7 +240,7 @@ class SWILDiscriminator(nn.Module):
         
         return torch.sqrt(torch.sum((pi_slices_sorted-exp_slices_sorted)**2))
 
-    def max_gsw(self,X,Y,iterations=50,lr=1e-4):
+    def max_gsw(self, obs_pi, acs_pi, obs_exp, acs_exp, iterations=50,lr=1e-4):
         # N,dn = X.shape
         # M,dm = Y.shape
         # assert dn==dm and M==N
@@ -230,18 +251,22 @@ class SWILDiscriminator(nn.Module):
         total_loss=np.zeros((iterations,))
         for i in range(iterations):
             optimizer.zero_grad()
-            loss = -self.gsw(X.to(self.device),Y.to(self.device),random=False)
+            loss = -self.gsw(obs_pi, acs_pi, obs_exp, acs_exp,random=False)
             total_loss[i] = loss.item()
             loss.backward(retain_graph=True)
             optimizer.step()
         
-        return self.gsw(X.to(self.device),Y.to(self.device),random=False)
+        return self.gsw(obs_pi, acs_pi, obs_exp, acs_exp,random=False)
 
     def compute_loss(self, update_dict):
         # compute sliced Wasserstein distance here 
         self.policy_obs = update_dict['policy_obs']
         self.policy_acs = update_dict['policy_acs']
-        gsw_dist = self.gsw(self.policy_obs, self.policy_acs,
+        if self.opt.max_gsw:
+            gsw_dist = self.max_gsw(self.policy_obs, self.policy_acs,
+                            update_dict['expert_obs'], update_dict['expert_acs'])
+        else:
+            gsw_dist = self.gsw(self.policy_obs, self.policy_acs,
                             update_dict['expert_obs'], update_dict['expert_acs'], random=False)
 
         output_dict = {}
