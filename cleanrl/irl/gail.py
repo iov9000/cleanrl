@@ -15,6 +15,7 @@ class GAILDiscriminator(nn.Module):
 
         # parse options
         self.env = env
+        self.opt = opt
         self.layer_dims = opt.d_layer_dims
         self.lr = opt.disc_lr
         self.use_actions = opt.use_actions
@@ -76,7 +77,15 @@ class GAILDiscriminator(nn.Module):
             base_out = self.base(ob)
 
         d_out = self.discriminator(base_out)
-        return d_out
+
+        if self.opt.div == 'fkl':
+            d_out_ = torch.exp(d_out) # (N*T,) p/q TODO: clip
+        elif self.opt.div == 'rkl':
+            d_out_ = d_out # (N*T,) log (p/q)
+        elif self.opt.div == 'js':  # https://pytorch.org/docs/master/generated/torch.nn.Softplus.html
+            d_out_ = F.softplus(d_out) # (N*T,) log (1 + p/q)
+
+        return d_out_
 
     def get_reward(self, ob, ac):
         if self.use_actions and self.use_cnn_base:

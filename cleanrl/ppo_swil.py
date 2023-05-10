@@ -48,6 +48,11 @@ def parse_args():
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
+    parser.add_argument('--normalize_obs', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument('--clip_action', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
+
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
@@ -90,10 +95,13 @@ def parse_args():
     parser.add_argument("--n_proj", type=int, default=100, help="number of projections for SWIL")
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
     parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
+    parser.add_argument("--swil_loss", default='gsw', type=str, required=False, help="loss_type:")
 
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
+    parser.add_argument("--n_demos", type=int, default=10,
+        help="number of demos to use")
     parser.add_argument('--enhance_demos', default=False, required=False, 
         action='store_true', help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
@@ -121,8 +129,15 @@ def parse_args():
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
+
+    non_default = {
+        opt.dest: getattr(args, opt.dest)
+        for opt in parser._option_string_actions.values()
+        if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
+    }
+
     # fmt: on
-    return args
+    return args, non_default
 
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
@@ -132,9 +147,11 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env = gym.wrappers.ClipAction(env)
-        env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        if opt.clip_action:
+            env = gym.wrappers.ClipAction(env)
+        if opt.normalize_obs:
+            env = gym.wrappers.NormalizeObservation(env)
+            env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
         env = SwilReward(env, opt, disc)
         if opt.normalize_irl_rewards:
             env = gym.wrappers.NormalizeReward(env, gamma=gamma)
@@ -186,10 +203,13 @@ class Agent(nn.Module):
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    args, non_default = parse_args()
     ua = 'ua' if args.use_actions else ''
-    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_np{args.n_proj}_{ua}"
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+
+    # create output folder with non default arguments in the name
+    id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','')
+    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_np{args.n_proj}_{ua}_{non_default}"
     if args.track:
         import wandb
 
@@ -222,7 +242,7 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    demos = load_hf_demos(args.env_id, args.demo_dir)
+    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)

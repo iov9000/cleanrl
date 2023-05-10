@@ -10,6 +10,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 
 from torch.nn.utils import spectral_norm
 from irl.utils import ResNetAIRLDisc, MiniGridCNN
+from tqdm import tqdm
 
 def get_random_projections(latent_dim: int, num_samples: int, proj_dist='normal') -> torch.Tensor:
     """
@@ -53,6 +54,8 @@ def approximate_sw(X, Y, centering=True):
     """
     Approximates SW with Wasserstein distance between Gaussian approximations
     """
+    if len(X.shape) == 1:
+        X = X.unsqueeze(0)
     d = X.shape[1]
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     # Convert numpy arrays to torch tensors
@@ -203,18 +206,21 @@ class SWILDiscriminator(nn.Module):
         else:
             base_out = self.base(ob)
 
-        if self.reward_type == 'linear':
-            return torch.mean(self.reward(base_out),-1)
+        if self.opt.swil_loss == 'gsw':
+            if self.reward_type == 'linear':
+                return torch.mean(self.reward(base_out),-1)
+            else:   
+                return torch.mean(self.reward(base_out,base_out,base_out)[0],-1)
+        elif self.opt.swil_loss == 'approx_sw': 
+            return approximate_sw(torch.cat([ob,ac],-1),torch.cat([self.expert_obs, self.expert_acs],-1))
         else:
-            return torch.mean(self.reward(base_out,base_out,base_out)[0],-1)
-
-        # compute distance for single ob,ac and batch of experts via projections
-        #gsw_dist = self.gsw(ob, ac, self.expert_obs, self.expert_acs, random=False)
-        
-        # rew, v, v_n, d_out = self.forward(ob, next_ob, ac, lprobs) TODO??
-        # potentially use more sophisticated mechanism for averaging out projections
-        # Self-Attention sliced wasserstein distances is a weighted sum? 
-        #return gsw_dist
+            # compute distance for single ob,ac and batch of experts via projections
+            gsw_dist = self.gsw(ob, ac, self.expert_obs, self.expert_acs, random=False)
+            
+            # rew, v, v_n, d_out = self.forward(ob, next_ob, ac, lprobs) TODO??
+            # potentially use more sophisticated mechanism for averaging out projections
+            # Self-Attention sliced wasserstein distances is a weighted sum? 
+            return gsw_dist
 
     def gsw(self, obs_pi, acs_pi, obs_exp, acs_exp, random=False):
         '''
@@ -247,9 +253,9 @@ class SWILDiscriminator(nn.Module):
 
         # self.reward.reset()
         
-        optimizer = torch.optim.Adam(self.reward.parameters(),lr=lr)
+        optimizer = torch.optim.Adam(list(self.base.parameters()) + list(self.reward.parameters()),lr=lr)
         total_loss=np.zeros((iterations,))
-        for i in range(iterations):
+        for i in tqdm(range(iterations)):
             optimizer.zero_grad()
             loss = -self.gsw(obs_pi, acs_pi, obs_exp, acs_exp,random=False)
             total_loss[i] = loss.item()
@@ -262,15 +268,27 @@ class SWILDiscriminator(nn.Module):
         # compute sliced Wasserstein distance here 
         self.policy_obs = update_dict['policy_obs']
         self.policy_acs = update_dict['policy_acs']
-        if self.opt.max_gsw:
-            gsw_dist = self.max_gsw(self.policy_obs, self.policy_acs,
-                            update_dict['expert_obs'], update_dict['expert_acs'])
+        exp_obs = update_dict['expert_obs']
+        exp_acs = update_dict['expert_acs']
+
+        if self.opt.swil_loss == 'surr_loss':
+            # surrogate loss from maxSWGAN paper
+            surr_loss = torch.sum(self.proj(self.policy_obs,self.policy_acs)) - torch.sum(self.proj(exp_obs,exp_acs)) 
+            d_loss = surr_loss
+        elif self.opt.swil_loss == 'approx_sw':
+            d_loss = approximate_sw(torch.cat([self.policy_obs, self.policy_acs],-1), 
+                                    torch.cat([exp_obs, exp_acs],-1))
         else:
-            gsw_dist = self.gsw(self.policy_obs, self.policy_acs,
-                            update_dict['expert_obs'], update_dict['expert_acs'], random=False)
+            if self.opt.max_gsw:
+                gsw_dist = self.max_gsw(self.policy_obs, self.policy_acs,
+                            exp_obs, exp_acs)
+            else:
+                gsw_dist = self.gsw(self.policy_obs, self.policy_acs,
+                            exp_obs, exp_acs, random=False)
+            d_loss = gsw_dist
 
         output_dict = {}
-        output_dict['d_loss'] = gsw_dist
+        output_dict['d_loss'] = d_loss
         output_dict['grad_penalty'] = 0
         output_dict['lip_penalty'] = 0
 
@@ -278,7 +296,8 @@ class SWILDiscriminator(nn.Module):
 
     def update(self, loss):
         self.d_optimizer.zero_grad()
-        loss.backward()
+        if self.opt.swil_loss != 'approx_sw':        
+            loss.backward()
         self.d_optimizer.step()
         self.d_scheduler.step()
 

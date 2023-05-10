@@ -109,7 +109,7 @@ class AIRLDiscriminator(nn.Module):
 
         # calculate discriminator probability according to AIRL structure
         qfn = reward + self.gamma * fitted_value_n
-        log_p_tau = torch.squeeze(qfn - fitted_value)
+        log_p_tau = torch.squeeze(self.advantage(ob,ac))
         # log probabilities of expert actions under policy
         log_q_tau = lprobs
 
