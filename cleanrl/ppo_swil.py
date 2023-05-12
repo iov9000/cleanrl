@@ -67,8 +67,10 @@ def parse_args():
         help="the number of parallel game environments")
     parser.add_argument("--num-steps", type=int, default=2048,
         help="the number of steps to run in each environment per policy rollout")
-    parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="Toggle learning rate annealing for policy and value networks")
+    #parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
+    #    help="Toggle learning rate annealing for policy and value networks")
+    parser.add_argument('--anneal_lr', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
     parser.add_argument("--gamma", type=float, default=0.99,
         help="the discount factor gamma")
     parser.add_argument("--gae-lambda", type=float, default=0.95,
@@ -96,6 +98,8 @@ def parse_args():
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
     parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
     parser.add_argument("--swil_loss", default='gsw', type=str, required=False, help="loss_type:")
+    parser.add_argument("--proj_layer", default=False, required=False, action='store_true', 
+                                        help="use nn instead of mean of projections")
 
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",

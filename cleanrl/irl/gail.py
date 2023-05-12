@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import torch.autograd as autograd
 from torch.optim import Adam
 from torch.nn.utils import spectral_norm
-from irl.utils import ResNetAIRLDisc, MiniGridCNN
+from irl.utils import ResNetAIRLDisc, MiniGridCNN, AtariCNNBase
 
 class GAILDiscriminator(nn.Module):
     def __init__(self, env, opt):
@@ -24,6 +24,7 @@ class GAILDiscriminator(nn.Module):
         self.lip_coeff = opt.lip_coeff
         self.use_cnn_base = opt.use_cnn_base
         self.bias = opt.use_disc_bias
+        self.is_atari = 'atari' in self.opt.exp_name
 
         ob_shapes = list(env.observation_space.shape)
         ac_shapes = list(env.action_space.shape)
@@ -38,25 +39,29 @@ class GAILDiscriminator(nn.Module):
 
         layer_dims = self.layer_dims
 
-        if self.use_cnn_base:
-            self.base = MiniGridCNN(layer_dims, self.use_actions)
+        if self.is_atari:
+            self.base = AtariCNNBase(opt,env)
+            self.discriminator = nn.Linear(512, 1, bias=self.bias)
         else:
-            self.base = nn.Sequential(torch.nn.Linear(self.layer_dims[0],
-                                                      self.layer_dims[1], self.bias),
-                                      torch.nn.PReLU())
+            if self.use_cnn_base:
+                self.base = MiniGridCNN(layer_dims, self.use_actions)
+            else:
+                self.base = nn.Sequential(torch.nn.Linear(self.layer_dims[0],
+                                                        self.layer_dims[1], self.bias),
+                                        torch.nn.PReLU())
 
-        self.discriminator_layers = []
-        for i in range(2, len(layer_dims)):
-            self.discriminator_layers += [torch.nn.Linear(in_features=layer_dims[i - 1],
-                                                          out_features=layer_dims[i],
-                                                          bias=self.bias),
-                                          torch.nn.PReLU()]
+            self.discriminator_layers = []
+            for i in range(2, len(layer_dims)):
+                self.discriminator_layers += [torch.nn.Linear(in_features=layer_dims[i - 1],
+                                                            out_features=layer_dims[i],
+                                                            bias=self.bias),
+                                            torch.nn.PReLU()]
 
-        self.discriminator_layers += [torch.nn.Linear(in_features=layer_dims[-1],
-                                                      out_features=1,
-                                                      bias=self.bias)]
+            self.discriminator_layers += [torch.nn.Linear(in_features=layer_dims[-1],
+                                                        out_features=1,
+                                                        bias=self.bias)]
 
-        self.discriminator = nn.Sequential(*self.discriminator_layers)
+            self.discriminator = nn.Sequential(*self.discriminator_layers)
 
         if torch.cuda.is_available():
             self.base.cuda()
@@ -66,12 +71,13 @@ class GAILDiscriminator(nn.Module):
         base_params = list(self.base.parameters())
         d_params = list(self.discriminator.parameters())
         base_params.extend(d_params)
-        self.d_optimizer = Adam(base_params, lr=self.lr, weight_decay=self.l2_coeff)
+        #self.d_optimizer = Adam(base_params, lr=self.lr, weight_decay=self.l2_coeff)
+        self.d_optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.l2_coeff)
 
     def forward(self, ob, ac):
-        if self.use_actions and self.use_cnn_base:
+        if self.use_actions and (self.use_cnn_base or self.is_atari):
             base_out = self.base(ob, ac)
-        elif self.use_actions and not self.use_cnn_base:
+        elif self.use_actions and not (self.use_cnn_base or self.is_atari):
             base_out = self.base(torch.cat([ob, ac], axis=-1))
         else:
             base_out = self.base(ob)

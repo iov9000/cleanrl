@@ -21,7 +21,7 @@ from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.airl import AirlReward, AIRLDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen, AntCFWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -125,6 +125,9 @@ def parse_args():
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
     def thunk():
         env = gym.make(env_id)
+        if opt.env_id == 'Ant-v3':
+            print("Wrapping Ant-v3 env with AntCFWrapper")
+            env = AntCFWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
@@ -136,6 +139,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
         if opt.normalize_irl_rewards:
             env = gym.wrappers.NormalizeReward(env, gamma=gamma)
             env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+
         env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
@@ -226,6 +230,9 @@ if __name__ == "__main__":
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
     test_env = gym.make(args.env_id)
+    if args.env_id == 'Ant-v3':
+        print("Wrapping Ant-v3 test env with AntCFWrapper")
+        test_env = AntCFWrapper(test_env)
     disc = AIRLDiscriminator(test_env, args)
 
     # env setup

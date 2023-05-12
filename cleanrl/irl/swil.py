@@ -9,7 +9,7 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ExponentialLR
 
 from torch.nn.utils import spectral_norm
-from irl.utils import ResNetAIRLDisc, MiniGridCNN
+from irl.utils import ResNetAIRLDisc, MiniGridCNN, AtariCNNBase
 from tqdm import tqdm
 
 def get_random_projections(latent_dim: int, num_samples: int, proj_dist='normal') -> torch.Tensor:
@@ -139,6 +139,8 @@ class SWILDiscriminator(nn.Module):
 
         if use_cnn_base:
             self.base = MiniGridCNN(self.layer_dims, self.use_actions)
+        elif 'atari' in self.opt.exp_name:
+            self.base = AtariCNNBase()
         else:
             self.base = nn.Sequential(torch.nn.Linear(self.layer_dims[0],
                                                       self.layer_dims[1], bias),
@@ -157,20 +159,30 @@ class SWILDiscriminator(nn.Module):
                                                 out_features=self.n_proj,
                                                 bias=bias)]
             self.reward = nn.Sequential(*self.reward_layers)
+        elif 'atari' in self.opt.exp_name:
+            self.reward = nn.Linear(512,self.n_proj)
         else:
             self.reward = nn.MultiheadAttention(embed_dim=self.layer_dims[1], num_heads = 1)
+
+        if self.opt.proj_layer:
+            self.proj_layer = nn.Sequential(nn.Linear(in_features=self.n_proj,
+                                                    out_features=1,
+                                                    bias=bias), torch.nn.Tanh())
 
         if torch.cuda.is_available():
             self.base.cuda()
             self.reward.cuda()
+            if self.opt.proj_layer:
+                self.proj_layer.cuda()
 
         self.policy_obs = torch.randn([opt.batch_size, *ob_shapes], requires_grad=True)
         self.policy_acs = torch.randn([opt.batch_size, *ac_shapes], requires_grad=True)
         self.expert_obs = torch.randn([opt.batch_size, *ob_shapes])
         self.expert_acs = torch.randn([opt.batch_size, *ac_shapes])
         # self.module_list = nn.ModuleList([self.base, self.base_v, self.reward, self.value])
-        self.d_optimizer = Adam(list(self.base.parameters()) + list(self.reward.parameters()), 
-                        lr=self.lr, weight_decay=self.l2_coeff)
+        #self.d_optimizer = Adam(list(self.base.parameters()) + list(self.reward.parameters()), 
+        #                lr=self.lr, weight_decay=self.l2_coeff)
+        self.d_optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.l2_coeff)
         self.d_scheduler = ExponentialLR(self.d_optimizer, gamma=opt.scheduler_gamma)
         #self.d_optimizer = Adam([self.policy_obs, self.policy_acs], lr=self.lr)
 
@@ -208,7 +220,10 @@ class SWILDiscriminator(nn.Module):
 
         if self.opt.swil_loss == 'gsw':
             if self.reward_type == 'linear':
-                return torch.mean(self.reward(base_out),-1)
+                if self.opt.proj_layer:
+                    return self.proj_layer(self.reward(base_out))
+                else:
+                    return torch.mean(self.reward(base_out),-1)
             else:   
                 return torch.mean(self.reward(base_out,base_out,base_out)[0],-1)
         elif self.opt.swil_loss == 'approx_sw': 

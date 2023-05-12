@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import torch.autograd as autograd
 from torch.optim import Adam
 from torch.nn.utils import spectral_norm
-from irl.utils import ResNetAIRLDisc, MiniGridCNN
+from irl.utils import ResNetAIRLDisc, MiniGridCNN, AtariCNNBase
 
 class AIRLDiscriminator(nn.Module):
     def __init__(self, env, opt):
@@ -15,6 +15,7 @@ class AIRLDiscriminator(nn.Module):
 
         # parse options
         self.env = env
+        self.opt = opt
         self.layer_dims = opt.d_layer_dims
         self.lr = opt.disc_lr
         self.use_actions = opt.use_actions
@@ -24,6 +25,7 @@ class AIRLDiscriminator(nn.Module):
         self.use_cnn_base = opt.use_cnn_base
         self.bias = opt.use_disc_bias
         self.gamma = opt.airl_gamma
+        self.is_atari = 'atari' in self.opt.exp_name
 
         ob_shapes = list(env.observation_space.shape)
         ac_shapes = list(env.action_space.shape)
@@ -43,16 +45,21 @@ class AIRLDiscriminator(nn.Module):
         else:
             f = lambda x: x
 
+
         # reward function g_\psi
         if self.use_cnn_base:
             self.base = MiniGridCNN(layer_dims, self.use_actions)
+        elif self.is_atari:
+            self.base = AtariCNNBase(opt,env, self.use_actions)
         else:
             self.base = nn.Sequential(f(torch.nn.Linear(self.layer_dims[0],
-                                                      self.layer_dims[1], self.bias)),
-                                      torch.nn.PReLU())
+                                                    self.layer_dims[1], self.bias)),
+                                    torch.nn.PReLU())
 
         if opt.airl_resnet:
             self.reward = ResNetAIRLDisc(layer_dims[1])
+        elif self.is_atari:
+            self.reward = nn.Linear(512,1,bias=self.bias)
         else:
             self.reward_layers = []
             for i in range(2, len(self.layer_dims)):
@@ -69,6 +76,8 @@ class AIRLDiscriminator(nn.Module):
         # shaping function h_\phi
         if self.use_cnn_base:
             self.base_v = MiniGridCNN(layer_dims, use_actions=False)
+        elif self.is_atari:
+            self.base_v = AtariCNNBase(opt,env, use_actions=False)
         else:
             self.base_v = nn.Sequential(f(torch.nn.Linear(ob_shapes[-1],
                                                         self.layer_dims[1], self.bias)),
@@ -76,6 +85,8 @@ class AIRLDiscriminator(nn.Module):
 
         if opt.airl_resnet:
             self.value = ResNetAIRLDisc(layer_dims[1])
+        elif self.is_atari:
+            self.value = nn.Linear(512,1,bias=self.bias)
         else:
             self.value_layers = []
             for i in range(2, len(self.layer_dims)):
@@ -89,17 +100,18 @@ class AIRLDiscriminator(nn.Module):
                                                 bias=self.bias))]
             self.value = nn.Sequential(*self.value_layers)
 
-            if torch.cuda.is_available():
-                self.base.cuda()
-                self.base_v.cuda()
-                self.reward.cuda()
-                self.value.cuda()
+        if torch.cuda.is_available():
+            self.base.cuda()
+            self.base_v.cuda()
+            self.reward.cuda()
+            self.value.cuda()
 
         # self.module_list = nn.ModuleList([self.base, self.base_v, self.reward, self.value])
 
-        self.d_optimizer = Adam(list(self.base.parameters()) + list(self.base_v.parameters()) +
-                                list(self.reward.parameters()) + list(self.value.parameters()), lr=self.lr, 
-                                weight_decay=self.l2_coeff)
+        # self.d_optimizer = Adam(list(self.base.parameters()) + list(self.base_v.parameters()) +
+        #                         list(self.reward.parameters()) + list(self.value.parameters()), lr=self.lr, 
+        #                         weight_decay=self.l2_coeff)
+        self.d_optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.l2_coeff)
 
     def forward(self, ob, next_ob, ac, lprobs):
         # forward the nn models
@@ -109,7 +121,7 @@ class AIRLDiscriminator(nn.Module):
 
         # calculate discriminator probability according to AIRL structure
         qfn = reward + self.gamma * fitted_value_n
-        log_p_tau = torch.squeeze(self.advantage(ob,ac))
+        log_p_tau = torch.squeeze(qfn - fitted_value)
         # log probabilities of expert actions under policy
         log_q_tau = lprobs
 
@@ -122,7 +134,7 @@ class AIRLDiscriminator(nn.Module):
         return reward, fitted_value, fitted_value_n, d_out
 
     def get_reward(self, ob, ac):
-        if self.use_actions and self.use_cnn_base:
+        if self.use_actions and (self.use_cnn_base or self.is_atari):
             base_out = self.base(ob, ac)
         elif self.use_actions and not self.use_cnn_base:
             if len(ob.shape) != len(ac.shape):
@@ -133,7 +145,8 @@ class AIRLDiscriminator(nn.Module):
 
         # rew, v, v_n, d_out = self.forward(ob, next_ob, ac, lprobs) TODO??
         # return torch.sigmoid
-        return self.reward(base_out)
+        rew = self.reward(base_out)
+        return rew 
 
     def compute_penalty(self, logits, y):
         scale = torch.tensor(1.).requires_grad_()
@@ -143,9 +156,9 @@ class AIRLDiscriminator(nn.Module):
         return (g1 * g2).sum()
 
     def get_value(self, ob, ac):
-        if self.use_actions and self.use_cnn_base:
+        if self.use_actions and (self.use_cnn_base or self.is_atari):
             base_out = self.base(ob, ac)
-        elif self.use_actions and not self.use_cnn_base:
+        elif self.use_actions and not (self.use_cnn_base or self.is_atari):
             if len(ob.shape) != len(ac.shape):
                 ac = torch.unsqueeze(ac, -1)
             base_out = self.base(torch.cat([ob, ac], axis=-1))
@@ -274,8 +287,7 @@ class AirlReward(gym.Wrapper):
         with torch.no_grad():
             # get discriminator reward and train on that
             #print([p.norm(2) for p in self.discriminator.parameters()])
-            irl_reward = self.discriminator.get_reward(
-                obs_t, acs_t).cpu().numpy()
+            irl_reward = self.discriminator.get_reward(obs_t, acs_t).cpu().numpy()
             #irl_reward = self.discriminator.get_reward(obs_t, acs_t, next_obs_t).cpu().numpy()
         self.obs = next_obs
 

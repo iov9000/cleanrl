@@ -5,13 +5,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
 import ot
+import gym
+import pickle
 
 def load_hf_demos(env_name, folder=None, n_demos=10, bary_enhance=False):
     if folder is None:
         folder = "demos"
     expert_demos = {}
     try:
-        expert_demos['all'] = np.load(os.path.join(folder, f"demo_hf_{env_name}_{n_demos}.npy"))
+        #expert_demos['all'] = np.load(os.path.join(folder, f"demo_hf_{env_name}_{n_demos}.npy"))
+        expert_demos['all'] = pickle.load(open(os.path.join(folder, f"demo_hf_{env_name}_{n_demos}.pkl"), 'rb'))
     except:
         print("Generate demos from HuggingFace Hub first")
         assert False
@@ -86,6 +89,16 @@ def demos_gen(data, batch_size):
     for i in range(0, len(data), batch_size):
         yield data[i : i + batch_size]
 
+def demos_gen_dict(data, batch_size):
+    """  Yields bacth of specified size """
+    if batch_size<=0:
+       return
+    for i in range(0, len(data['obs']), batch_size):
+        yield {'obs': data['obs'][i : i + batch_size], 
+               'acs': data['acs'][i : i + batch_size],
+               'rew': data['rew'][i : i + batch_size],
+               'done': data['done'][i : i + batch_size]}
+
 def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
     ac_sample = env.single_action_space.sample()
     if isinstance(ac_sample, int):
@@ -101,21 +114,36 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
         dones = np.squeeze(dones.cpu().numpy())
 
     # flatten first dimension to use samples from all env
-    obs = np.reshape(obs, [-1, obs.shape[-1]])
-    acs = np.reshape(acs, [-1, ac_shape])
+    if 'atari' not in opt.exp_name:
+        obs = np.reshape(obs, [-1, obs.shape[-1]])
+        acs = np.reshape(acs, [-1, ac_shape])
+    else:
+        acs = np.reshape(acs, (-1,1))
+        obs = np.reshape(obs, [-1, *obs.shape[2:]])
+        acs = np.reshape(acs, [-1, ac_shape]) 
+        dones = np.reshape(dones, (-1))
+
+
     obs_next = np.concatenate([obs[1:], np.expand_dims(obs[-1], 0)], axis=0)
 
     # sample expert_demos
-    expert_ob_ac_done_reward = expert_demos#[np.random.randint(0, expert_demos.shape[0], opt.batch_size), :]
-    expert_dones = expert_ob_ac_done_reward[:, -1]
-    rewards = expert_ob_ac_done_reward[:, -2]
-    expert_ob_ac = expert_ob_ac_done_reward[:, :-2]
-    expert_obs = expert_ob_ac[:, :-ac_shape]
-    expert_acs = expert_ob_ac[:, -ac_shape:]
+    if isinstance(expert_demos, dict):
+        rewards = expert_demos['rew']
+        expert_obs = expert_demos['obs']
+        expert_acs = expert_demos['acs']
+        expert_dones = np.squeeze(expert_demos['done'])
+    else:
+        expert_ob_ac_done_reward = expert_demos#[np.random.randint(0, expert_demos.shape[0], opt.batch_size), :]
+        expert_dones = expert_ob_ac_done_reward[:, -1]
+        rewards = expert_ob_ac_done_reward[:, -2]
+        expert_ob_ac = expert_ob_ac_done_reward[:, :-2]
+        expert_obs = expert_ob_ac[:, :-ac_shape]
+        expert_acs = expert_ob_ac[:, -ac_shape:]
+
     expert_obs_next = np.concatenate([expert_obs[1:], np.expand_dims(expert_obs[-1], 0)],
                                      axis=0)  # repeat last observation
 
-    N = expert_demos.shape[0]
+    N = expert_obs.shape[0]
     T = 1000
 
     policy_traj = np.empty((N, T, obs.shape[-1]), dtype=np.float32)
@@ -130,6 +158,9 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
 
     # policy_ob_ac = np.concatenate([obs, acs], 1)
     # eval lprobs conditioned on obs, acs
+
+    #print(expert_obs_t.shape, expert_acs_t.shape, obs_t.shape, acs_t.shape)
+
     with torch.no_grad():
         if torch.cuda.is_available():
             if opt.on_policy:
@@ -237,6 +268,60 @@ class MiniGridCNN(nn.Module):
             x = self.lin(x)
         return x
 
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
+
+
+class AtariCNNBase(nn.Module):
+    def __init__(self, opt, env, use_actions=False):
+        super().__init__()
+        ob_shapes = list(env.observation_space.shape)
+        ac_shapes = list(env.action_space.shape)
+        if not ac_shapes:
+            ac_shapes = [1]
+
+        if use_actions:
+            ac_dim = ac_shapes[-1]
+        else:
+            ac_dim = 0
+
+        self.obs_network = nn.Sequential(
+            layer_init(nn.Conv2d(4, 32, 8, stride=4)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
+            nn.ReLU())
+            #nn.Flatten())
+            
+        self.obs_acs_network = nn.Sequential(
+            layer_init(nn.Linear(64 * 7 * 7 + ac_dim, 512)),
+            nn.ReLU(),
+        )
+        #self.critic = layer_init(nn.Linear(512, 1), std=1)
+
+    def forward(self, ob, ac=None):
+        if len(ob.shape) == 3:
+            ob = ob.unsqueeze(0)
+
+        ob_enc = self.obs_network(ob/255)
+        ob_enc = ob_enc.reshape(ob_enc.shape[0], -1)
+        if ac is not None:
+            if len(ac.shape) == 0:
+                ac = ac.unsqueeze(0).unsqueeze(0)
+            elif len(ac.shape) == 1:
+                ac = ac.unsqueeze(0)
+
+            ob_enc = torch.cat([ob_enc, ac], dim=-1)
+            x = self.obs_acs_network(ob_enc)
+        else:
+            x = self.obs_acs_network(ob_enc)
+        
+        return x
+
+
 
 class ResNetAIRLDisc(nn.Module):
     def __init__(
@@ -282,3 +367,19 @@ class ResNetAIRLDisc(nn.Module):
             output = torch.clamp(output, min=-1.0*self.clamp_magnitude, max=self.clamp_magnitude)
         return output  
 
+class AntCFWrapper(gym.Wrapper):
+    def __init__(self, env):
+        self.env = env
+        self.env.observation_space = gym.spaces.Box(low = -np.inf*np.ones((27,)), 
+                                            high = np.inf*np.ones((27,)),
+                                            dtype = np.float32)
+    
+        super().__init__(env=self.env)
+
+    def reset(self):
+        o = self.env.reset()
+        return o[:27]
+
+    def step(self, action):
+        o, r, d, i = self.env.step(action)
+        return o[:27], r, d, i
