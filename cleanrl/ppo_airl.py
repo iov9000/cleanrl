@@ -21,7 +21,7 @@ from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.airl import AirlReward, AIRLDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen, AntCFWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -54,6 +54,7 @@ def parse_args():
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=3e-4,
         help="the learning rate of the optimizer")
+    parser.add_argument("--agent_size", type=int, default=64, help='actor-critic network size')
     parser.add_argument("--num-envs", type=int, default=1,
         help="the number of parallel game environments")
     parser.add_argument("--num-steps", type=int, default=2048,
@@ -86,12 +87,17 @@ def parse_args():
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
+    parser.add_argument("--n_demos", type=int, default=10,
+        help="number of demos to use")
+    parser.add_argument('--enhance_demos', default=False, required=False, 
+        action='store_true', help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
                    help='discriminator MLP layer dimensions')
     parser.add_argument('--airl_gamma', default=0.99, type=float, 
         required=False, help='gamma for AIRL advantage')
+    parser.add_argument('--airl_resnet', default=False, action='store_true', help='use resnet for discriminator')
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
@@ -106,7 +112,9 @@ def parse_args():
         action='store_false', help='use bias in disc arch')
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
-
+    parser.add_argument('--normalize_irl_rewards', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
+        
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -117,6 +125,9 @@ def parse_args():
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
     def thunk():
         env = gym.make(env_id)
+        if opt.env_id == 'Ant-v3':
+            print("Wrapping Ant-v3 env with AntCFWrapper")
+            env = AntCFWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
@@ -125,8 +136,10 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
         env = gym.wrappers.NormalizeObservation(env)
         env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
         env = AirlReward(env, opt, disc)
-        env = gym.wrappers.NormalizeReward(env, gamma=gamma)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+        if opt.normalize_irl_rewards:
+            env = gym.wrappers.NormalizeReward(env, gamma=gamma)
+            env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+
         env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
@@ -142,21 +155,21 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self, envs):
+    def __init__(self, envs, hidden_size=64):
         super().__init__()
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init(nn.Linear(hidden_size, hidden_size)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0),
+            layer_init(nn.Linear(hidden_size, 1), std=1.0),
         )
         self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init(nn.Linear(hidden_size, hidden_size)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, np.prod(envs.single_action_space.shape)), std=0.01),
+            layer_init(nn.Linear(hidden_size, np.prod(envs.single_action_space.shape)), std=0.01),
         )
         self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
 
@@ -177,7 +190,8 @@ if __name__ == "__main__":
     args = parse_args()
     # run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_{args.irm_coeff}"
+    ua = 'ua' if args.use_actions else ''
+    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}"
     if args.track:
         import wandb
 
@@ -210,9 +224,15 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    demos = load_hf_demos(args.env_id, args.demo_dir)
+    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
+    if args.enhance_demos:
+        print("Enhancing demos by computing Wasserstein barycenters")
+        demos = enhance_demos_with_barycenters(demos)
     # get env specs
     test_env = gym.make(args.env_id)
+    if args.env_id == 'Ant-v3':
+        print("Wrapping Ant-v3 test env with AntCFWrapper")
+        test_env = AntCFWrapper(test_env)
     disc = AIRLDiscriminator(test_env, args)
 
     # env setup
@@ -221,7 +241,7 @@ if __name__ == "__main__":
     )
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
-    agent = Agent(envs).to(device)
+    agent = Agent(envs, args.agent_size).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -357,28 +377,32 @@ if __name__ == "__main__":
 
         # Optimize the discriminator
         for epoch in range(args.irl_epochs):            
-            # GAIL Discriminator Update
-            update_dict = prepare_batch_update_irl(envs, args, demos['all'], obs, actions, dones, agent)
+            # GAIL Discriminator Update (exhaust demos)
+            gen_demos = demos_gen(demos['all'], args.batch_size)
+            for d in gen_demos:
+                if len(d) < args.batch_size:
+                    break
+                update_dict = prepare_batch_update_irl(envs, args, d, obs, actions, dones, agent)
 
-            loss_dict = disc.compute_loss(update_dict)
+                loss_dict = disc.compute_loss(update_dict)
 
-            loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
-            if args.irm_coeff > 1.0:
-                loss /= args.irm_coeff
-            # if args.irm_coeff == 0.0:
-                # loss /= 50
+                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
+                if args.irm_coeff > 1.0:
+                    loss /= args.irm_coeff
+                # if args.irm_coeff == 0.0:
+                    # loss /= 50
 
-            disc.update(loss)
+                disc.update(loss)
 
-            if global_step % args.logging_interval == 0:
-                writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
-                if args.irm_coeff > 0:
-                    writer.add_scalar('irl/airl_irm_loss', loss_dict['grad_penalty'], global_step)
-                writer.add_scalar('irl/airl_r_p', loss_dict['policy_reward'], global_step)
-                writer.add_scalar('irl/airl_v_p', loss_dict['policy_value'], global_step)
-                writer.add_scalar('irl/airl_r_e', loss_dict['expert_reward'], global_step)
-                writer.add_scalar('irl/airl_v_e', loss_dict['expert_value'], global_step)
-                writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
+                if global_step % args.logging_interval == 0:
+                    writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
+                    if args.irm_coeff > 0:
+                        writer.add_scalar('irl/airl_irm_loss', loss_dict['grad_penalty'], global_step)
+                    writer.add_scalar('irl/airl_r_p', loss_dict['policy_reward'], global_step)
+                    writer.add_scalar('irl/airl_v_p', loss_dict['policy_value'], global_step)
+                    writer.add_scalar('irl/airl_r_e', loss_dict['expert_reward'], global_step)
+                    writer.add_scalar('irl/airl_v_e', loss_dict['expert_value'], global_step)
+                    writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
 
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes

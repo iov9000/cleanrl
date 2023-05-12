@@ -10,12 +10,6 @@ from torch.nn.utils import spectral_norm
 from irl.utils import ResNetAIRLDisc, MiniGridCNN
 
 class WAILDiscriminator(nn.Module):
-    def __init__(self, env, opt):
-        super(WAILDiscriminator, self).__init__()
-
-
-
-class WAILDiscriminator(nn.Module):
     def __init__(self, env, opt,  use_cnn_base=False, 
                     output_nonlin=torch.nn.Tanh(), bias=False):
         super(WAILDiscriminator, self).__init__()
@@ -191,7 +185,7 @@ class WAILDiscriminator(nn.Module):
         output_dict = {}
         output_dict['d_loss'] = self.ot_loss
         output_dict['grad_penalty'] = self.grad_penalty
-        output_dict['lipschitz_penalty'] = lip_penalty
+        output_dict['lip_penalty'] = lip_penalty
 
         return output_dict
         

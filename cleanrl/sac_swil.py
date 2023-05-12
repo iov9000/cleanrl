@@ -17,7 +17,7 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.swil import SwilReward, SWILDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -78,18 +78,27 @@ def parse_args():
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
+    parser.add_argument("--n_demos", type=int, default=10,
+        help="number of demos to use")
+    parser.add_argument('--enhance_demos', default=False, required=False, 
+        action='store_true', help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
                    help='discriminator MLP layer dimensions')
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
+    parser.add_argument("--scheduler_gamma", type=float, default=1.0,
+        help="exponential decay rate of the learning rate scheduler")
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
     # SWIL specific 
     parser.add_argument("--n_proj", type=int, default=100, help="number of random projections")
+    parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
+    parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
+
 
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
@@ -186,7 +195,8 @@ if __name__ == "__main__":
     args = parse_args()
     # run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_{args.irm_coeff}"
+    # run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_{args.irm_coeff}"
+    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_np{args.n_proj}_ua{args.use_actions}"
     if args.track:
         import wandb
 
@@ -218,7 +228,10 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    demos = load_hf_demos(args.env_id, args.demo_dir)
+    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
+    if args.enhance_demos:
+        print("Enhancing demos by computing Wasserstein barycenters")
+        demos = enhance_demos_with_barycenters(demos)
     # get env specs
     test_env = gym.make(args.env_id)
     disc = SWILDiscriminator(test_env, args)
@@ -356,23 +369,27 @@ if __name__ == "__main__":
                     writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
                     
             # Optimize the discriminator
-            for epoch in range(args.irl_epochs):            
-                # GAIL Discriminator Update
-                update_dict = prepare_batch_update_irl(envs, args, demos['all'], data.observations, data.actions, data.dones, actor)
+            for epoch in range(args.irl_epochs):  
+                gen_demos = demos_gen(demos['all'], args.batch_size)
+                for d in gen_demos:
+                    if len(d) < args.batch_size:
+                        break          
+                    # GAIL Discriminator Update
+                    update_dict = prepare_batch_update_irl(envs, args, d, data.observations, data.actions, data.dones, actor)
 
-                loss_dict = disc.compute_loss(update_dict)
+                    loss_dict = disc.compute_loss(update_dict)
 
-                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
-                if args.irm_coeff > 1.0:
-                    loss /= args.irm_coeff
+                    loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
+                    if args.irm_coeff > 1.0:
+                        loss /= args.irm_coeff
 
-                disc.update(loss)
-        
-                if global_step % args.logging_interval == 0:
-                    writer.add_scalar('irl/swil_gsw_dist', loss_dict['d_loss'], global_step)
+                    disc.update(loss)
+            
+                    if global_step % args.logging_interval == 0:
+                        writer.add_scalar('irl/swil_gsw_dist', loss_dict['d_loss'], global_step)
 
-                    if args.irm_coeff > 0:
-                        writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
+                        if args.irm_coeff > 0:
+                            writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
 
 
 

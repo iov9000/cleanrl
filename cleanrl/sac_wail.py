@@ -17,7 +17,7 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.wail import WailReward, WAILDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -78,6 +78,8 @@ def parse_args():
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
+    parser.add_argument('--enhance_demos', default=False, required=False, 
+        action='store_true', help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
@@ -219,6 +221,9 @@ if __name__ == "__main__":
         torch.set_default_tensor_type(torch.FloatTensor)
 
     demos = load_hf_demos(args.env_id, args.demo_dir)
+    if args.enhance_demos:
+        print("Enhancing demos by computing Wasserstein barycenters")
+        demos = enhance_demos_with_barycenters(demos)
     # get env specs
     test_env = gym.make(args.env_id)
     disc = WAILDiscriminator(test_env, args)
@@ -358,21 +363,26 @@ if __name__ == "__main__":
             # Optimize the discriminator
             for epoch in range(args.irl_epochs):            
                 # GAIL Discriminator Update
-                update_dict = prepare_batch_update_irl(envs, args, demos['all'], data.observations, data.actions, data.dones, actor)
+                gen_demos = demos_gen(demos['all'], args.batch_size)
+                for d in gen_demos:
+                    if len(d) < args.batch_size:
+                        break
+                    update_dict = prepare_batch_update_irl(envs, args, d, 
+                                            data.observations, data.actions, data.dones, actor)
 
-                loss_dict = disc.compute_loss(update_dict)
+                    loss_dict = disc.compute_loss(update_dict)
 
-                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
-                if args.irm_coeff > 1.0:
-                    loss /= args.irm_coeff
+                    loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
+                    if args.irm_coeff > 1.0:
+                        loss /= args.irm_coeff
 
-                disc.update(loss)
-        
-                if global_step % args.logging_interval == 0:
-                    writer.add_scalar('irl/swil_gsw_dist', loss_dict['d_loss'], global_step)
+                    disc.update(loss)
+            
+                    if global_step % args.logging_interval == 0:
+                        writer.add_scalar('irl/wail_d_loss', loss_dict['d_loss'], global_step)
 
-                    if args.irm_coeff > 0:
-                        writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
+                        if args.irm_coeff > 0:
+                            writer.add_scalar('irl/wail_irm_loss', loss_dict['grad_penalty'], global_step)
 
 
 
