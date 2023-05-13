@@ -35,6 +35,8 @@ def parse_args():
         help="the name of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
+    parser.add_argument("--logging_interval", type=int, default=500,
+        help="logging interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -128,6 +130,9 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+        env = gym.wrappers.ResizeObservation(env, (84, 84))
+        env = gym.wrappers.GrayScaleObservation(env)
+        env = gym.wrappers.FrameStack(env, 4)
         env = GailReward(env, opt, disc)
         env = NoopResetEnv(env, noop_max=30)
         env = MaxAndSkipEnv(env, skip=4)
@@ -135,9 +140,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
         if "FIRE" in env.unwrapped.get_action_meanings():
             env = FireResetEnv(env)
         #env = ClipRewardEnv(env)
-        env = gym.wrappers.ResizeObservation(env, (84, 84))
-        env = gym.wrappers.GrayScaleObservation(env)
-        env = gym.wrappers.FrameStack(env, 4)
+
         env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)

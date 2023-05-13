@@ -136,7 +136,7 @@ class AIRLDiscriminator(nn.Module):
     def get_reward(self, ob, ac):
         if self.use_actions and (self.use_cnn_base or self.is_atari):
             base_out = self.base(ob, ac)
-        elif self.use_actions and not self.use_cnn_base:
+        elif self.use_actions and not (self.use_cnn_base or self.is_atari):
             if len(ob.shape) != len(ac.shape):
                 ac = torch.unsqueeze(ac, -1)
             base_out = self.base(torch.cat([ob, ac], axis=-1))

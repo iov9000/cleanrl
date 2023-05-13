@@ -40,7 +40,7 @@ class GAILDiscriminator(nn.Module):
         layer_dims = self.layer_dims
 
         if self.is_atari:
-            self.base = AtariCNNBase(opt,env)
+            self.base = AtariCNNBase(opt,env, self.use_actions)
             self.discriminator = nn.Linear(512, 1, bias=self.bias)
         else:
             if self.use_cnn_base:
@@ -94,9 +94,9 @@ class GAILDiscriminator(nn.Module):
         return d_out_
 
     def get_reward(self, ob, ac):
-        if self.use_actions and self.use_cnn_base:
+        if self.use_actions and (self.use_cnn_base or self.is_atari):
             base_out = self.base(ob, ac)
-        elif self.use_actions and not self.use_cnn_base:
+        elif self.use_actions and not (self.use_cnn_base or self.is_atari):
             if len(ob.shape) != len(ac.shape):
                 ac = torch.unsqueeze(ac, -1)
             base_out = self.base(torch.cat([ob, ac], axis=-1))
