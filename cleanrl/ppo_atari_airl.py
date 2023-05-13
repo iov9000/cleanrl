@@ -378,7 +378,6 @@ if __name__ == "__main__":
                 if len(d['obs']) < args.batch_size:
                     break
 
-                print(dones.shape)
                 update_dict = prepare_batch_update_irl(envs, args, d, obs, actions, dones, agent)
 
                 loss_dict = disc.compute_loss(update_dict)

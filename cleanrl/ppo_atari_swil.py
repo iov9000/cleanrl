@@ -4,6 +4,7 @@ import os
 import random
 import time
 from distutils.util import strtobool
+from datetime import datetime
 
 import gym
 import numpy as np
@@ -21,6 +22,10 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
     NoopResetEnv,
 )
 
+from irl.swil import SwilReward, SWILDiscriminator
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict
+
+from parse_tb import read_tb_file, create_df_from_ea
 
 def parse_args():
     # fmt: off
@@ -29,6 +34,8 @@ def parse_args():
         help="the name of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
+    parser.add_argument("--logging_interval", type=int, default=500,
+        help="logging interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -42,6 +49,11 @@ def parse_args():
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
+    parser.add_argument('--normalize_obs', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument('--clip_action', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
+
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="BreakoutNoFrameskip-v4",
         help="the id of the environment")
@@ -49,12 +61,17 @@ def parse_args():
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=2.5e-4,
         help="the learning rate of the optimizer")
+    parser.add_argument("--scheduler_gamma", type=float, default=1.0,
+        help="exponential decay rate of the learning rate scheduler")
+    parser.add_argument("--agent_size", type=int, default=64, help='actor-critic network size')
     parser.add_argument("--num-envs", type=int, default=8,
         help="the number of parallel game environments")
     parser.add_argument("--num-steps", type=int, default=128,
         help="the number of steps to run in each environment per policy rollout")
-    parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="Toggle learning rate annealing for policy and value networks")
+    #parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
+    #    help="Toggle learning rate annealing for policy and value networks")
+    parser.add_argument('--anneal_lr', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
     parser.add_argument("--gamma", type=float, default=0.99,
         help="the discount factor gamma")
     parser.add_argument("--gae-lambda", type=float, default=0.95,
@@ -77,29 +94,76 @@ def parse_args():
         help="the maximum norm for the gradient clipping")
     parser.add_argument("--target-kl", type=float, default=None,
         help="the target KL divergence threshold")
+    # SWIL specific 
+    parser.add_argument("--n_proj", type=int, default=100, help="number of projections for SWIL")
+    parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
+    parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
+    parser.add_argument("--swil_loss", default='gsw', type=str, required=False, help="loss_type:")
+    parser.add_argument("--proj_layer", default=False, required=False, action='store_true', 
+                                        help="use nn instead of mean of projections")
+
+    # Discriminator specific arguments
+    parser.add_argument("--demo_dir", type=str, default="./demos",
+        help="expert demo folder")
+    parser.add_argument("--n_demos", type=int, default=10,
+        help="number of demos to use")
+    parser.add_argument('--enhance_demos', default=False, required=False, 
+        action='store_true', help='enhance demos using W2 barycenters')
+    parser.add_argument('--use_actions', default=True, required=False, 
+        action='store_false', help='use actions in discriminator')
+    parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
+                   help='discriminator MLP layer dimensions')
+    parser.add_argument('--irm_coeff', default=0, type=float, 
+        required=False, help='use IRM penalty on discriminator')
+    parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
+    parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
+    parser.add_argument('--l2_coeff', default=1e-5, type=float, required=False, help='use l2 penalty on discriminator')
+    parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
+    parser.add_argument('--use_cnn_base', default=False, required=False, 
+        action='store_true', help='use cnn base for discriminator (only for visual obs)')
+    parser.add_argument('--use_disc_bias', default=True, required=False, 
+        action='store_false', help='use bias in disc arch')
+    parser.add_argument('--normalize_irl_rewards', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
+
+    parser.add_argument('--on_policy', default=True, required=False, 
+        action='store_false', help='use bias in disc arch')
+    parser.add_argument('--verbose', default=False, required=False, 
+        action='store_true', help='verbose output')
+
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
+    non_default = {
+        opt.dest: getattr(args, opt.dest)
+        for opt in parser._option_string_actions.values()
+        if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
+    }
+
     # fmt: on
-    return args
+    return args, non_default
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
+def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
     def thunk():
         env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+
+        env = gym.wrappers.ResizeObservation(env, (84, 84))
+        env = gym.wrappers.GrayScaleObservation(env)
+        env = gym.wrappers.FrameStack(env, 4)
+        
+        env = SwilReward(env, opt, disc)
         env = NoopResetEnv(env, noop_max=30)
         env = MaxAndSkipEnv(env, skip=4)
         env = EpisodicLifeEnv(env)
         if "FIRE" in env.unwrapped.get_action_meanings():
             env = FireResetEnv(env)
-        env = ClipRewardEnv(env)
-        env = gym.wrappers.ResizeObservation(env, (84, 84))
-        env = gym.wrappers.GrayScaleObservation(env)
-        env = gym.wrappers.FrameStack(env, 4)
+        #env = ClipRewardEnv(env)
+
         env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
@@ -144,8 +208,13 @@ class Agent(nn.Module):
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    args, non_default = parse_args()
+    ua = 'ua' if args.use_actions else ''
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+
+    # create output folder with non default arguments in the name
+    id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','')
+    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_np{args.n_proj}_{ua}_{non_default}"
     if args.track:
         import wandb
 
@@ -172,9 +241,22 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
+    if torch.cuda.is_available():
+        torch.set_default_tensor_type(torch.cuda.FloatTensor)
+    else:
+        torch.set_default_tensor_type(torch.FloatTensor)
+
+    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
+    if args.enhance_demos:
+        print("Enhancing demos by computing Wasserstein barycenters")
+        demos = enhance_demos_with_barycenters(demos)
+    # get env specs
+    test_env = gym.make(args.env_id)
+    disc = SWILDiscriminator(test_env, args)
+
     # env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
+        [make_env(args, args.env_id, args.seed + i, i, args.capture_video, run_name, disc) for i in range(args.num_envs)]
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
@@ -222,9 +304,11 @@ if __name__ == "__main__":
 
             for item in info:
                 if "episode" in item.keys():
-                    print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
-                    writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
-                    writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
+                    if args.verbose:
+                        print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
+                    if global_step % args.logging_interval == 0:
+                        writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
+                        writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
                     break
 
         # bootstrap value if not done
@@ -310,17 +394,40 @@ if __name__ == "__main__":
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
+        # Optimize the discriminator
+        for epoch in range(args.irl_epochs):            
+            # GAIL Discriminator Update
+            gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+            for d in gen_demos:
+                if len(d['obs']) < args.batch_size:
+                    break
+
+                update_dict = prepare_batch_update_irl(envs, args, d, obs, actions, dones, agent)
+                loss_dict = disc.compute_loss(update_dict)
+
+                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + args.lip_coeff * loss_dict['lip_penalty']
+                if args.irm_coeff > 1.0:
+                    loss /= args.irm_coeff
+
+                disc.update(loss)
+            
+                if global_step % args.logging_interval == 0:
+                    writer.add_scalar('irl/swil_d_loss', loss_dict['d_loss'], global_step)
+                    if args.irm_coeff > 0:
+                        writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
+
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
-        writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
-        writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
-        writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-        writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
-        writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
-        writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
-        writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        print("SPS:", int(global_step / (time.time() - start_time)))
-        writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        if global_step % args.logging_interval == 0:
+            writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
+            writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
+            writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
+            writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
+            writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
+            writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
+            writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
+            writer.add_scalar("losses/explained_variance", explained_var, global_step)
+            print("SPS:", int(global_step / (time.time() - start_time)))
+            writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     envs.close()
     writer.close()

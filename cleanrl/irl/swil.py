@@ -123,6 +123,7 @@ class SWILDiscriminator(nn.Module):
         self.n_proj = opt.n_proj
         self.l2_coeff = opt.l2_coeff
         self.reward_type = opt.swil_reward_type
+        self.is_atari = 'atari' in self.opt.exp_name
 
         ob_shapes = list(env.observation_space.shape)
         ac_shapes = list(env.action_space.shape)
@@ -139,30 +140,30 @@ class SWILDiscriminator(nn.Module):
 
         if use_cnn_base:
             self.base = MiniGridCNN(self.layer_dims, self.use_actions)
-        elif 'atari' in self.opt.exp_name:
-            self.base = AtariCNNBase()
+        elif self.is_atari:
+            self.base = AtariCNNBase(opt, env, self.use_actions)
         else:
             self.base = nn.Sequential(torch.nn.Linear(self.layer_dims[0],
                                                       self.layer_dims[1], bias),
                                       torch.nn.PReLU())
 
-
-        if self.reward_type == 'linear':
-            self.reward_layers = []
-            for i in range(2, len(self.layer_dims)):
-                self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[i - 1],
-                                                    out_features=self.layer_dims[i],
-                                                    bias=bias),
-                                    torch.nn.PReLU()]
-
-            self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[-1],
-                                                out_features=self.n_proj,
-                                                bias=bias)]
-            self.reward = nn.Sequential(*self.reward_layers)
-        elif 'atari' in self.opt.exp_name:
+        if self.is_atari:
             self.reward = nn.Linear(512,self.n_proj)
         else:
-            self.reward = nn.MultiheadAttention(embed_dim=self.layer_dims[1], num_heads = 1)
+            if self.reward_type == 'linear':
+                self.reward_layers = []
+                for i in range(2, len(self.layer_dims)):
+                    self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[i - 1],
+                                                        out_features=self.layer_dims[i],
+                                                        bias=bias),
+                                        torch.nn.PReLU()]
+
+                self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[-1],
+                                                    out_features=self.n_proj,
+                                                    bias=bias)]
+                self.reward = nn.Sequential(*self.reward_layers)
+            else:
+                self.reward = nn.MultiheadAttention(embed_dim=self.layer_dims[1], num_heads = 1)
 
         if self.opt.proj_layer:
             self.proj_layer = nn.Sequential(nn.Linear(in_features=self.n_proj,
@@ -195,9 +196,9 @@ class SWILDiscriminator(nn.Module):
         return gsw_dist
 
     def proj(self, ob, ac):
-        if self.use_actions and self.use_cnn_base:
+        if self.use_actions and (self.use_cnn_base or self.is_atari):
             base_out = self.base(ob, ac)
-        elif self.use_actions and not self.use_cnn_base:
+        elif self.use_actions and not (self.use_cnn_base or self.is_atari):
             if len(ob.shape) != len(ac.shape):
                 ac = torch.unsqueeze(ac, -1)
             base_out = self.base(torch.cat([ob, ac], axis=-1))
@@ -209,9 +210,9 @@ class SWILDiscriminator(nn.Module):
         return self.reward(base_out)
 
     def get_reward(self, ob, ac):
-        if self.use_actions and self.use_cnn_base:
+        if self.use_actions and (self.use_cnn_base or self.is_atari):
             base_out = self.base(ob, ac)
-        elif self.use_actions and not self.use_cnn_base:
+        elif self.use_actions and not (self.use_cnn_base or self.is_atari):
             if len(ob.shape) != len(ac.shape):
                 ac = torch.unsqueeze(ac, -1)
             base_out = self.base(torch.cat([ob, ac], axis=-1))
@@ -306,6 +307,8 @@ class SWILDiscriminator(nn.Module):
         output_dict['d_loss'] = d_loss
         output_dict['grad_penalty'] = 0
         output_dict['lip_penalty'] = 0
+
+        # TODO: classification or reconstruction loss for 
 
         return output_dict
 
