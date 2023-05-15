@@ -125,6 +125,13 @@ class SWILDiscriminator(nn.Module):
         self.reward_type = opt.swil_reward_type
         self.is_atari = 'atari' in self.opt.exp_name
 
+        if opt.disc_nonlin == 'relu':
+            nonlin = nn.ReLU()
+        elif opt.disc_nonlin == 'tanh':
+            nonlin = nn.Tanh()
+        else:
+            nonlin = nn.PReLU()
+
         ob_shapes = list(env.observation_space.shape)
         ac_shapes = list(env.action_space.shape)
         if not ac_shapes:
@@ -145,7 +152,7 @@ class SWILDiscriminator(nn.Module):
         else:
             self.base = nn.Sequential(torch.nn.Linear(self.layer_dims[0],
                                                       self.layer_dims[1], bias),
-                                      torch.nn.PReLU())
+                                      nonlin)
 
         if self.is_atari:
             self.reward = nn.Linear(512,self.n_proj)
@@ -155,8 +162,7 @@ class SWILDiscriminator(nn.Module):
                 for i in range(2, len(self.layer_dims)):
                     self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[i - 1],
                                                         out_features=self.layer_dims[i],
-                                                        bias=bias),
-                                        torch.nn.PReLU()]
+                                                        bias=bias), nonlin]
 
                 self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[-1],
                                                     out_features=self.n_proj,
@@ -169,6 +175,17 @@ class SWILDiscriminator(nn.Module):
             self.proj_layer = nn.Sequential(nn.Linear(in_features=self.n_proj,
                                                     out_features=1,
                                                     bias=bias), torch.nn.Tanh())
+
+        if self.opt.swil_ae:
+            self.ae_layers = []
+            for i in reversed(range(2, len(self.layer_dims))):
+                self.ae_layers += [torch.nn.Linear(in_features=self.layer_dims[i - 1],
+                                                        out_features=self.layer_dims[i],
+                                                        bias=bias), nonlin]
+            self.ae_layers += [torch.nn.Linear(in_features=self.layer_dims[-1],
+                                                    out_features=self.layer_dims[0],
+                                                    bias=bias)]
+            self.recon_net = nn.Sequential(*self.ae_layers)
 
         if torch.cuda.is_available():
             self.base.cuda()
@@ -196,20 +213,13 @@ class SWILDiscriminator(nn.Module):
         return gsw_dist
 
     def proj(self, ob, ac):
-        if self.use_actions and (self.use_cnn_base or self.is_atari):
-            base_out = self.base(ob, ac)
-        elif self.use_actions and not (self.use_cnn_base or self.is_atari):
-            if len(ob.shape) != len(ac.shape):
-                ac = torch.unsqueeze(ac, -1)
-            base_out = self.base(torch.cat([ob, ac], axis=-1))
-        else:
-            base_out = self.base(ob)
+        base_out = self.base_fwd(ob,ac)
 
         # rew, v, v_n, d_out = self.forward(ob, next_ob, ac, lprobs) TODO??
         # potentially use more sophisticated mechanism
         return self.reward(base_out)
 
-    def get_reward(self, ob, ac):
+    def base_fwd(self,ob,ac):
         if self.use_actions and (self.use_cnn_base or self.is_atari):
             base_out = self.base(ob, ac)
         elif self.use_actions and not (self.use_cnn_base or self.is_atari):
@@ -218,6 +228,11 @@ class SWILDiscriminator(nn.Module):
             base_out = self.base(torch.cat([ob, ac], axis=-1))
         else:
             base_out = self.base(ob)
+
+        return base_out
+
+    def get_reward(self, ob, ac):
+        base_out = self.base_fwd(ob,ac)
 
         if self.opt.swil_loss == 'gsw':
             if self.reward_type == 'linear':
@@ -253,8 +268,8 @@ class SWILDiscriminator(nn.Module):
             self.reward.reset()
         
         # project slices 
-        pi_slices=self.proj(obs_pi, acs_pi)
-        exp_slices=self.proj(obs_exp, acs_exp)
+        pi_slices = self.proj(obs_pi, acs_pi)
+        exp_slices = self.proj(obs_exp, acs_exp)
 
         # sort slices
         pi_slices_sorted = torch.sort(pi_slices, dim=0)[0]
@@ -303,7 +318,16 @@ class SWILDiscriminator(nn.Module):
                             exp_obs, exp_acs, random=False)
             d_loss = gsw_dist
 
+
         output_dict = {}
+        if self.opt.swil_ae:
+            # meaningful reconstruction: action prediction?
+            base_out = self.base_fwd(exp_obs,exp_acs)
+            recon = self.recon_net(base_out)
+            output_dict['recon_loss'] = F.mse_loss(recon, torch.cat([exp_obs,exp_acs],-1))
+        else:
+            output_dict['recon_loss'] = 0
+
         output_dict['d_loss'] = d_loss
         output_dict['grad_penalty'] = 0
         output_dict['lip_penalty'] = 0

@@ -26,6 +26,13 @@ class GAILDiscriminator(nn.Module):
         self.bias = opt.use_disc_bias
         self.is_atari = 'atari' in self.opt.exp_name
 
+        if opt.disc_nonlin == 'relu':
+            nonlin = nn.ReLU()
+        elif opt.disc_nonlin == 'tanh':
+            nonlin = nn.Tanh()
+        else:
+            nonlin = nn.PReLU()
+
         ob_shapes = list(env.observation_space.shape)
         ac_shapes = list(env.action_space.shape)
 
@@ -48,14 +55,14 @@ class GAILDiscriminator(nn.Module):
             else:
                 self.base = nn.Sequential(torch.nn.Linear(self.layer_dims[0],
                                                         self.layer_dims[1], self.bias),
-                                        torch.nn.PReLU())
+                                        nonlin)
 
             self.discriminator_layers = []
             for i in range(2, len(layer_dims)):
                 self.discriminator_layers += [torch.nn.Linear(in_features=layer_dims[i - 1],
                                                             out_features=layer_dims[i],
                                                             bias=self.bias),
-                                            torch.nn.PReLU()]
+                                            nonlin]
 
             self.discriminator_layers += [torch.nn.Linear(in_features=layer_dims[-1],
                                                         out_features=1,

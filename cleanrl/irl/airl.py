@@ -27,6 +27,13 @@ class AIRLDiscriminator(nn.Module):
         self.gamma = opt.airl_gamma
         self.is_atari = 'atari' in self.opt.exp_name
 
+        if opt.disc_nonlin == 'relu':
+            nonlin = nn.ReLU()
+        elif opt.disc_nonlin == 'tanh':
+            nonlin = nn.Tanh()
+        else:
+            nonlin = nn.PReLU()
+
         ob_shapes = list(env.observation_space.shape)
         ac_shapes = list(env.action_space.shape)
 
@@ -54,7 +61,7 @@ class AIRLDiscriminator(nn.Module):
         else:
             self.base = nn.Sequential(f(torch.nn.Linear(self.layer_dims[0],
                                                     self.layer_dims[1], self.bias)),
-                                    torch.nn.PReLU())
+                                    nonlin)
 
         if opt.airl_resnet:
             self.reward = ResNetAIRLDisc(layer_dims[1])
@@ -66,7 +73,7 @@ class AIRLDiscriminator(nn.Module):
                 self.reward_layers += [f(torch.nn.Linear(in_features=self.layer_dims[i - 1],
                                                     out_features=self.layer_dims[i],
                                                     bias=self.bias)),
-                                                    torch.nn.PReLU()]
+                                                    nonlin]
 
             self.reward_layers += [f(torch.nn.Linear(in_features=self.layer_dims[-1],
                                                 out_features=1,
@@ -81,7 +88,7 @@ class AIRLDiscriminator(nn.Module):
         else:
             self.base_v = nn.Sequential(f(torch.nn.Linear(ob_shapes[-1],
                                                         self.layer_dims[1], self.bias)),
-                                        torch.nn.PReLU())
+                                        nonlin)
 
         if opt.airl_resnet:
             self.value = ResNetAIRLDisc(layer_dims[1])
@@ -93,7 +100,7 @@ class AIRLDiscriminator(nn.Module):
                 self.value_layers += [f(torch.nn.Linear(in_features=self.layer_dims[i - 1],
                                                     out_features=self.layer_dims[i],
                                                     bias=self.bias)),
-                                    torch.nn.PReLU()]
+                                    nonlin]
 
             self.value_layers += [f(torch.nn.Linear(in_features=self.layer_dims[-1],
                                                 out_features=1,

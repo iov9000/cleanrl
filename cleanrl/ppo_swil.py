@@ -22,7 +22,7 @@ from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.swil import SwilReward, SWILDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -56,7 +56,7 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=5000000,
+    parser.add_argument("--total-timesteps", type=int, default=3000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=3e-4,
         help="the learning rate of the optimizer")
@@ -100,6 +100,7 @@ def parse_args():
     parser.add_argument("--swil_loss", default='gsw', type=str, required=False, help="loss_type:")
     parser.add_argument("--proj_layer", default=False, required=False, action='store_true', 
                                         help="use nn instead of mean of projections")
+    parser.add_argument("--swil_ae", default=False, required=False, action='store_true', help="use autoencoder")
 
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
@@ -116,12 +117,15 @@ def parse_args():
         required=False, help='use IRM penalty on discriminator')
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
+    parser.add_argument('--recon_coeff', default=0, type=float, required=False, help='ae loss coeff')
     parser.add_argument('--l2_coeff', default=1e-5, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
     parser.add_argument('--use_disc_bias', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
+    parser.add_argument("--disc_nonlin", type=str, default="prelu",
+        help="divergence type")
     parser.add_argument('--normalize_irl_rewards', default=True, 
         action='store_true', required=False, help='normalize irl rewards')  
 
@@ -397,15 +401,16 @@ if __name__ == "__main__":
         # Optimize the discriminator
         for epoch in range(args.irl_epochs):            
             # GAIL Discriminator Update
-            gen_demos = demos_gen(demos['all'], args.batch_size)
+            gen_demos = demos_gen_dict(demos['all'], args.batch_size)
             for d in gen_demos:
-                if len(d) < args.batch_size:
+                if len(d['obs']) < args.batch_size:
                     break
                 update_dict = prepare_batch_update_irl(envs, args, d, obs, actions, dones, agent)
 
                 loss_dict = disc.compute_loss(update_dict)
 
-                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + args.lip_coeff * loss_dict['lip_penalty']
+                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']\
+                     + args.lip_coeff * loss_dict['lip_penalty'] + loss_dict['recon_loss']
                 if args.irm_coeff > 1.0:
                     loss /= args.irm_coeff
 
@@ -413,6 +418,8 @@ if __name__ == "__main__":
             
                 if global_step % args.logging_interval == 0:
                     writer.add_scalar('irl/swil_d_loss', loss_dict['d_loss'], global_step)
+                    writer.add_scalar('irl/swil_ae_loss', loss_dict['recon_loss'], global_step)
+
                     if args.irm_coeff > 0:
                         writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
 
