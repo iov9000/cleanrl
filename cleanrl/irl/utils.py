@@ -101,6 +101,7 @@ def demos_gen_dict(data, batch_size):
 
 def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
     ac_sample = env.single_action_space.sample()
+
     if isinstance(ac_sample, int):
         ac_shape = 1
     else:
@@ -114,15 +115,17 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
         dones = np.squeeze(dones.cpu().numpy())
 
     # flatten first dimension to use samples from all env
-    if 'atari' not in opt.exp_name:
-        obs = np.reshape(obs, [-1, obs.shape[-1]])
-        acs = np.reshape(acs, [-1, ac_shape])
-    else:
-        acs = np.reshape(acs, (-1,1))
+    if 'atari' in opt.exp_name:
+        #acs = np.reshape(acs, (-1,1))
         obs = np.reshape(obs, [-1, *obs.shape[2:]])
         acs = np.reshape(acs, [-1, ac_shape]) 
-        dones = np.reshape(dones, (-1))
 
+        dones = np.reshape(dones, (-1))
+    else:
+        obs = np.reshape(obs, [-1, obs.shape[-1]])
+        acs = np.reshape(acs, [-1, ac_shape])
+        if ac_shape == 1:
+            acs = np.squeeze(acs,-1)
 
     obs_next = np.concatenate([obs[1:], np.expand_dims(obs[-1], 0)], axis=0)
 
@@ -155,6 +158,7 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
     acs_t = torch.from_numpy(acs).type(torch.get_default_dtype())   
     expert_obs_t = torch.from_numpy(expert_obs).type(torch.get_default_dtype())
     expert_acs_t = torch.from_numpy(expert_acs).type(torch.get_default_dtype())
+
 
     # policy_ob_ac = np.concatenate([obs, acs], 1)
     # eval lprobs conditioned on obs, acs

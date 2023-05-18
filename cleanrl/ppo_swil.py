@@ -12,6 +12,19 @@ if module_path not in sys.path:
     sys.path.append(module_path)
 
 import gym
+
+gym.envs.register(
+     id='MoveP-v0',
+     entry_point='envs.envs2d:MoveP',
+     max_episode_steps=1000,
+)
+
+gym.envs.register(
+     id='CMoveP-v0',
+     entry_point='envs.envs2d:CMoveP',
+     max_episode_steps=1000,
+)
+
 import numpy as np
 import pybullet_envs  # noqa
 import torch
@@ -19,6 +32,8 @@ import torch.nn as nn
 import torch.optim as optim
 
 from torch.distributions.normal import Normal
+from torch.distributions.categorical import Categorical
+
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.swil import SwilReward, SWILDiscriminator
@@ -115,10 +130,10 @@ def parse_args():
                    help='discriminator MLP layer dimensions')
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
-    parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
+    parser.add_argument('--irl_epochs', default=1, type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--recon_coeff', default=0, type=float, required=False, help='ae loss coeff')
-    parser.add_argument('--l2_coeff', default=1e-5, type=float, required=False, help='use l2 penalty on discriminator')
+    parser.add_argument('--l2_coeff', default=0.0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
@@ -155,13 +170,13 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        if opt.clip_action:
+        if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env)
-        if opt.normalize_obs:
+        if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeObservation(env)
             env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
         env = SwilReward(env, opt, disc)
-        if opt.normalize_irl_rewards:
+        if opt.normalize_irl_rewards and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeReward(env, gamma=gamma)
             env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         env.seed(seed)
@@ -179,8 +194,15 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self, envs, hidden_size=64):
+    def __init__(self, envs, hidden_size=64, discrete=False):        
         super().__init__()
+
+        self.discrete = discrete
+        if self.discrete:
+            output_dim = int(envs.single_action_space.n)
+        else:
+            output_dim = np.prod(envs.single_action_space.shape)
+
         self.critic = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
             nn.Tanh(),
@@ -193,14 +215,15 @@ class Agent(nn.Module):
             nn.Tanh(),
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nn.Tanh(),
-            layer_init(nn.Linear(hidden_size, np.prod(envs.single_action_space.shape)), std=0.01),
+            layer_init(nn.Linear(hidden_size, output_dim), std=0.01),
         )
-        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
+        if not self.discrete:
+            self.actor_logstd = nn.Parameter(torch.zeros(1,output_dim))
 
     def get_value(self, x):
         return self.critic(x)
 
-    def get_action_and_value(self, x, action=None):
+    def get_action_and_value_c(self, x, action=None):
         action_mean = self.actor_mean(x)
         action_logstd = self.actor_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
@@ -208,6 +231,19 @@ class Agent(nn.Module):
         if action is None:
             action = probs.sample()
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+
+    def get_action_and_value_d(self, x, action=None):
+        logits = self.actor_mean(x)
+        probs = Categorical(logits=logits)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.entropy(), self.critic(x)
+
+    def get_action_and_value(self, x, action=None):
+        if self.discrete:
+            return self.get_action_and_value_d(x, action)
+        else:
+            return self.get_action_and_value_c(x, action)
 
 
 if __name__ == "__main__":
@@ -256,15 +292,16 @@ if __name__ == "__main__":
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
     test_env = gym.make(args.env_id)
+    discrete = not isinstance(test_env.action_space, gym.spaces.Box)
     disc = SWILDiscriminator(test_env, args)
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
         [make_env(args, args.env_id, args.seed + i, i, args.capture_video, run_name, args.gamma, disc) for i in range(args.num_envs)]
     )
-    assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
+    #assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
-    agent = Agent(envs, args.agent_size).to(device)
+    agent = Agent(envs, args.agent_size, discrete).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -405,6 +442,7 @@ if __name__ == "__main__":
             for d in gen_demos:
                 if len(d['obs']) < args.batch_size:
                     break
+
                 update_dict = prepare_batch_update_irl(envs, args, d, obs, actions, dones, agent)
 
                 loss_dict = disc.compute_loss(update_dict)

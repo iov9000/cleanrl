@@ -132,6 +132,10 @@ class SWILDiscriminator(nn.Module):
         else:
             nonlin = nn.PReLU()
 
+        #if opt.swil_ae:
+            # constrain the dimension if using an autoencoder
+        #    self.layer_dims[1] = 10
+
         ob_shapes = list(env.observation_space.shape)
         ac_shapes = list(env.action_space.shape)
         if not ac_shapes:
@@ -324,7 +328,10 @@ class SWILDiscriminator(nn.Module):
             # meaningful reconstruction: action prediction?
             base_out = self.base_fwd(exp_obs,exp_acs)
             recon = self.recon_net(base_out)
-            output_dict['recon_loss'] = F.mse_loss(recon, torch.cat([exp_obs,exp_acs],-1))
+            if self.use_actions:
+                output_dict['recon_loss'] = F.mse_loss(recon, torch.cat([exp_obs,exp_acs],-1))
+            else:
+                output_dict['recon_loss'] = F.mse_loss(recon, exp_obs)
         else:
             output_dict['recon_loss'] = 0
 

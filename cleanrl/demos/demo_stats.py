@@ -1,24 +1,41 @@
 import sys
 import numpy as np
+import pickle
 
 if __name__ == '__main__':
     demo_name = sys.argv[1]
-    demo = np.load(demo_name)
+    if 'npy' in demo_name:
+        demo = np.load(demo_name)
+        reward = demo[:,-2]
+        dones = demo[:,-1] 
+    else:
+        demo = pickle.load(open(demo_name,'rb'))
+        reward = demo['rew']
+        dones = demo['done']
     
-    num_episodes = np.sum(demo[:,-1])
-    rew_avg = np.mean(demo[:,-2])
-    rew_std = np.std(demo[:,-2])
-    rew_min = np.min(demo[:,-2])
-    rew_max = np.max(demo[:,-2])
+    num_episodes = np.sum(dones)
+    rew_avg = np.mean(reward)
+    rew_std = np.std(reward)
+    rew_min = np.min(reward)
+    rew_max = np.max(reward)
     
     ep_rew_list = []
     ep_rew = 0
-    for sard in demo:
-        ep_rew += sard[-2]
-        if sard[-1] == 1:
-            ep_rew_list.append(ep_rew)
-            print("episode_reward", ep_rew)
-            ep_rew = 0
+    if 'npy' in demo_name:
+        for sard in demo:
+            ep_rew += sard[-2]
+            if sard[-1] == 1:
+                ep_rew_list.append(ep_rew)
+                print("episode_reward", ep_rew)
+                ep_rew = 0
+    else:
+        for i in range(len(demo['obs'])):
+            ep_rew += reward[i]
+            if dones[i] == 1:
+                ep_rew_list.append(ep_rew)
+                print("episode_reward", ep_rew)
+                ep_rew = 0
+
         
     ep_rew_avg = np.mean(ep_rew_list)
     ep_rew_std = np.std(ep_rew_list)
