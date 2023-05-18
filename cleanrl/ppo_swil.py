@@ -12,6 +12,19 @@ if module_path not in sys.path:
     sys.path.append(module_path)
 
 import gym
+
+gym.envs.register(
+     id='MoveP-v0',
+     entry_point='envs.envs2d:MoveP',
+     max_episode_steps=1000,
+)
+
+gym.envs.register(
+     id='CMoveP-v0',
+     entry_point='envs.envs2d:CMoveP',
+     max_episode_steps=1000,
+)
+
 import numpy as np
 import pybullet_envs  # noqa
 import torch
@@ -19,10 +32,12 @@ import torch.nn as nn
 import torch.optim as optim
 
 from torch.distributions.normal import Normal
+from torch.distributions.categorical import Categorical
+
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.swil import SwilReward, SWILDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -48,6 +63,11 @@ def parse_args():
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
+    parser.add_argument('--normalize_obs', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument('--clip_action', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
+
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
@@ -62,8 +82,10 @@ def parse_args():
         help="the number of parallel game environments")
     parser.add_argument("--num-steps", type=int, default=2048,
         help="the number of steps to run in each environment per policy rollout")
-    parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="Toggle learning rate annealing for policy and value networks")
+    #parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
+    #    help="Toggle learning rate annealing for policy and value networks")
+    parser.add_argument('--anneal_lr', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
     parser.add_argument("--gamma", type=float, default=0.99,
         help="the discount factor gamma")
     parser.add_argument("--gae-lambda", type=float, default=0.95,
@@ -89,10 +111,17 @@ def parse_args():
     # SWIL specific 
     parser.add_argument("--n_proj", type=int, default=100, help="number of projections for SWIL")
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
+    parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
+    parser.add_argument("--swil_loss", default='gsw', type=str, required=False, help="loss_type:")
+    parser.add_argument("--proj_layer", default=False, required=False, action='store_true', 
+                                        help="use nn instead of mean of projections")
+    parser.add_argument("--swil_ae", default=False, required=False, action='store_true', help="use autoencoder")
 
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
+    parser.add_argument("--n_demos", type=int, default=10,
+        help="number of demos to use")
     parser.add_argument('--enhance_demos', default=False, required=False, 
         action='store_true', help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
@@ -101,14 +130,17 @@ def parse_args():
                    help='discriminator MLP layer dimensions')
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
-    parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
+    parser.add_argument('--irl_epochs', default=1, type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
-    parser.add_argument('--l2_coeff', default=1e-5, type=float, required=False, help='use l2 penalty on discriminator')
+    parser.add_argument('--recon_coeff', default=0, type=float, required=False, help='ae loss coeff')
+    parser.add_argument('--l2_coeff', default=0.0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
     parser.add_argument('--use_disc_bias', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
+    parser.add_argument("--disc_nonlin", type=str, default="prelu",
+        help="divergence type")
     parser.add_argument('--normalize_irl_rewards', default=True, 
         action='store_true', required=False, help='normalize irl rewards')  
 
@@ -120,8 +152,15 @@ def parse_args():
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
+
+    non_default = {
+        opt.dest: getattr(args, opt.dest)
+        for opt in parser._option_string_actions.values()
+        if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
+    }
+
     # fmt: on
-    return args
+    return args, non_default
 
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
@@ -131,11 +170,13 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env = gym.wrappers.ClipAction(env)
-        env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
+            env = gym.wrappers.ClipAction(env)
+        if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
+            env = gym.wrappers.NormalizeObservation(env)
+            env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
         env = SwilReward(env, opt, disc)
-        if opt.normalize_irl_rewards:
+        if opt.normalize_irl_rewards and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeReward(env, gamma=gamma)
             env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         env.seed(seed)
@@ -153,8 +194,15 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self, envs, hidden_size=64):
+    def __init__(self, envs, hidden_size=64, discrete=False):        
         super().__init__()
+
+        self.discrete = discrete
+        if self.discrete:
+            output_dim = int(envs.single_action_space.n)
+        else:
+            output_dim = np.prod(envs.single_action_space.shape)
+
         self.critic = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
             nn.Tanh(),
@@ -167,14 +215,15 @@ class Agent(nn.Module):
             nn.Tanh(),
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nn.Tanh(),
-            layer_init(nn.Linear(hidden_size, np.prod(envs.single_action_space.shape)), std=0.01),
+            layer_init(nn.Linear(hidden_size, output_dim), std=0.01),
         )
-        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
+        if not self.discrete:
+            self.actor_logstd = nn.Parameter(torch.zeros(1,output_dim))
 
     def get_value(self, x):
         return self.critic(x)
 
-    def get_action_and_value(self, x, action=None):
+    def get_action_and_value_c(self, x, action=None):
         action_mean = self.actor_mean(x)
         action_logstd = self.actor_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
@@ -183,12 +232,28 @@ class Agent(nn.Module):
             action = probs.sample()
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
+    def get_action_and_value_d(self, x, action=None):
+        logits = self.actor_mean(x)
+        probs = Categorical(logits=logits)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.entropy(), self.critic(x)
+
+    def get_action_and_value(self, x, action=None):
+        if self.discrete:
+            return self.get_action_and_value_d(x, action)
+        else:
+            return self.get_action_and_value_c(x, action)
+
 
 if __name__ == "__main__":
-    args = parse_args()
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    args, non_default = parse_args()
     ua = 'ua' if args.use_actions else ''
-    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_np{args.n_proj}_{ua}"
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+
+    # create output folder with non default arguments in the name
+    id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','')
+    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_np{args.n_proj}_{ua}_{non_default}"
     if args.track:
         import wandb
 
@@ -221,21 +286,22 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    demos = load_hf_demos(args.env_id, args.demo_dir)
+    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
     test_env = gym.make(args.env_id)
+    discrete = not isinstance(test_env.action_space, gym.spaces.Box)
     disc = SWILDiscriminator(test_env, args)
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
         [make_env(args, args.env_id, args.seed + i, i, args.capture_video, run_name, args.gamma, disc) for i in range(args.num_envs)]
     )
-    assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
+    #assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
-    agent = Agent(envs, args.agent_size).to(device)
+    agent = Agent(envs, args.agent_size, discrete).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -372,15 +438,17 @@ if __name__ == "__main__":
         # Optimize the discriminator
         for epoch in range(args.irl_epochs):            
             # GAIL Discriminator Update
-            gen_demos = demos_gen(demos['all'], args.batch_size)
+            gen_demos = demos_gen_dict(demos['all'], args.batch_size)
             for d in gen_demos:
-                if len(d) < args.batch_size:
+                if len(d['obs']) < args.batch_size:
                     break
+
                 update_dict = prepare_batch_update_irl(envs, args, d, obs, actions, dones, agent)
 
                 loss_dict = disc.compute_loss(update_dict)
 
-                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + args.lip_coeff * loss_dict['lip_penalty']
+                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']\
+                     + args.lip_coeff * loss_dict['lip_penalty'] + loss_dict['recon_loss']
                 if args.irm_coeff > 1.0:
                     loss /= args.irm_coeff
 
@@ -388,6 +456,8 @@ if __name__ == "__main__":
             
                 if global_step % args.logging_interval == 0:
                     writer.add_scalar('irl/swil_d_loss', loss_dict['d_loss'], global_step)
+                    writer.add_scalar('irl/swil_ae_loss', loss_dict['recon_loss'], global_step)
+
                     if args.irm_coeff > 0:
                         writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
 

@@ -21,7 +21,7 @@ from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.gail import GailReward, GAILDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -47,10 +47,16 @@ def parse_args():
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
+    parser.add_argument('--normalize_obs', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument('--clip_action', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
+
+
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=3000000,
+    parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=3e-4,
         help="the learning rate of the optimizer")
@@ -87,6 +93,8 @@ def parse_args():
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
+    parser.add_argument("--n_demos", type=int, default=10,
+        help="number of demos to use")
     parser.add_argument('--enhance_demos', default=False, required=False, 
         action='store_true', help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
@@ -103,6 +111,12 @@ def parse_args():
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
     parser.add_argument('--use_disc_bias', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
+    parser.add_argument("--div", type=str, default="rkl",
+        help="divergence type")
+    parser.add_argument("--disc_nonlin", type=str, default="prelu",
+        help="divergence type")
+    parser.add_argument('--normalize_irl_rewards', default=True, 
+        action='store_true', required=False, help='normalize irl rewards') 
 
     parser.add_argument('--on_policy', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
@@ -123,12 +137,15 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env = gym.wrappers.ClipAction(env)
-        env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        if opt.clip_action:
+            env = gym.wrappers.ClipAction(env)
+        if opt.normalize_obs:
+            env = gym.wrappers.NormalizeObservation(env)
+            env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
         env = GailReward(env, opt, disc)
-        env = gym.wrappers.NormalizeReward(env, gamma=gamma)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+        if opt.normalize_irl_rewards:
+            env = gym.wrappers.NormalizeReward(env, gamma=gamma)
+            env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
@@ -212,7 +229,7 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    demos = load_hf_demos(args.env_id, args.demo_dir)
+    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
@@ -363,10 +380,16 @@ if __name__ == "__main__":
         # Optimize the discriminator
         for epoch in range(args.irl_epochs):            
             # GAIL Discriminator Update
-            gen_demos = demos_gen(demos['all'], args.batch_size)
+            # gen_demos = demos_gen(demos['all'], args.batch_size)
+            # for d in gen_demos:
+            #     if len(d) < args.batch_size:
+            #         break
+
+            gen_demos = demos_gen_dict(demos['all'], args.batch_size)
             for d in gen_demos:
-                if len(d) < args.batch_size:
+                if len(d['obs']) < args.batch_size:
                     break
+
                 update_dict = prepare_batch_update_irl(envs, args, d, obs, actions, dones, agent)
 
                 loss_dict = disc.compute_loss(update_dict)

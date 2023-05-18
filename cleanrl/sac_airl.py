@@ -78,6 +78,8 @@ def parse_args():
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
+    parser.add_argument("--n_demos", type=int, default=10,
+        help="number of demos to use")
     parser.add_argument('--enhance_demos', default=False, required=False, 
         action='store_true', help='enhance demos using W2 barycenters')
     parser.add_argument('--use_disc_bias', default=True, required=False, 
@@ -221,7 +223,7 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    demos = load_hf_demos(args.env_id, args.demo_dir)
+    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)

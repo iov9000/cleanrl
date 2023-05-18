@@ -94,7 +94,7 @@ def parse_args():
     parser.add_argument('--i_c', default=0.1, type=float, required=False, help='discriminator learning rate')
     parser.add_argument('--vampprior', default=False, required=False, 
         action='store_true', help='use VampPrior')
-    parser.add_argument("--vail_latent_dim", type=int, default=10,
+    parser.add_argument("--vail_latent_dim", type=int, default=100,
         help="latent dim of vail encoder")
     parser.add_argument("--n_pseudo_inputs", type=int, default=50,
         help="number of pseudo inputs")
