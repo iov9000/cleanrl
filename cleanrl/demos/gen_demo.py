@@ -3,8 +3,8 @@ import os
 import gym
 import numpy as np
 from huggingface_sb3 import load_from_hub
-from stable_baselines3 import PPO
-from stable_baselines3 import SAC
+from stable_baselines3 import PPO, SAC, TD3
+from sb3_contrib import TQC
 from stable_baselines3.common.evaluation import evaluate_policy
 from itertools import count
 
@@ -117,8 +117,12 @@ if __name__ == '__main__':
     }
     if algo == 'sac':
         model = SAC.load(checkpoint, custom_objects=custom_objects)
-    else:
+    elif algo == 'ppo':
         model = PPO.load(checkpoint, custom_objects=custom_objects)
+    elif algo == 'td3':
+        model = TD3.load(checkpoint, custom_objects=custom_objects)
+    elif algo == 'tqc':
+        model = TQC.load(checkpoint, custom_objects=custom_objects)
 
     env = gym.make(env_name)
     save_expert_traj_dict(env_name, env, model, nr_traj, min_total_rew)
