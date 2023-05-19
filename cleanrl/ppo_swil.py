@@ -319,6 +319,8 @@ if __name__ == "__main__":
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
 
+    init = True # flag for IRL discriminator pretraining
+
     for update in range(1, num_updates + 1):
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
@@ -436,6 +438,12 @@ if __name__ == "__main__":
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
         # Optimize the discriminator
+        if init:
+            n_irl_epochs = 100
+        else:
+            n_irl_epochs = args.irl_epochs
+        init = False
+
         for epoch in range(args.irl_epochs):            
             # GAIL Discriminator Update
             gen_demos = demos_gen_dict(demos['all'], args.batch_size)

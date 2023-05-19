@@ -103,7 +103,8 @@ def parse_args():
                    help='discriminator MLP layer dimensions')
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
-    parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
+    parser.add_argument('--irl_epochs', default=1, type=int, required=False, help='number of discriminator updates')
+    parser.add_argument('--irl_init_epochs', default=1, type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
@@ -260,6 +261,7 @@ if __name__ == "__main__":
     next_obs = torch.Tensor(envs.reset()).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
+    init = True
 
     for update in range(1, num_updates + 1):
         # Annealing the rate if instructed to do so.
@@ -378,7 +380,12 @@ if __name__ == "__main__":
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
         # Optimize the discriminator
-        for epoch in range(args.irl_epochs):            
+        if init:
+            n_irl_epochs = args.irl_init_epochs
+        else:
+            n_irl_epochs = args.irl_epochs
+        init = False
+        for epoch in range(n_irl_epochs):            
             # GAIL Discriminator Update
             # gen_demos = demos_gen(demos['all'], args.batch_size)
             # for d in gen_demos:
