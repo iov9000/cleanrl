@@ -102,6 +102,8 @@ def demos_gen_dict(data, batch_size):
 def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
     ac_sample = env.single_action_space.sample()
 
+    #print(obs.shape, acs.shape, dones.shape, expert_demos['obs'].shape, expert_demos['acs'].shape, expert_demos['done'].shape)
+
     if isinstance(ac_sample, int):
         ac_shape = 1
     else:
@@ -126,6 +128,10 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
         acs = np.reshape(acs, [-1, ac_shape])
         if ac_shape == 1:
             acs = np.squeeze(acs,-1)
+        
+        # DONES make a big difference?
+        #print(dones.shape)
+        dones = np.reshape(dones, (-1))
 
     obs_next = np.concatenate([obs[1:], np.expand_dims(obs[-1], 0)], axis=0)
 
@@ -135,6 +141,7 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
         expert_obs = expert_demos['obs']
         expert_acs = expert_demos['acs']
         expert_dones = np.squeeze(expert_demos['done'])
+        #expert_dones = expert_demos['done']
     else:
         expert_ob_ac_done_reward = expert_demos#[np.random.randint(0, expert_demos.shape[0], opt.batch_size), :]
         expert_dones = expert_ob_ac_done_reward[:, -1]

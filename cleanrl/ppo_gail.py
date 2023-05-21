@@ -18,6 +18,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.normal import Normal
+from torch.distributions.categorical import Categorical
+
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.gail import GailReward, GAILDiscriminator
@@ -89,6 +91,8 @@ def parse_args():
         help="the maximum norm for the gradient clipping")
     parser.add_argument("--target-kl", type=float, default=None,
         help="the target KL divergence threshold")
+    parser.add_argument("--agent_nonlin", type=str, default="tanh",
+        help="nonlinearity type")
 
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
@@ -128,7 +132,13 @@ def parse_args():
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     # fmt: on
-    return args
+    non_default = {
+        opt.dest: getattr(args, opt.dest)
+        for opt in parser._option_string_actions.values()
+        if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
+    }
+
+    return args, non_default
 
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
@@ -162,28 +172,43 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self, envs, hidden_size=64):
+    def __init__(self, envs, hidden_size=64, nonlin='tanh', discrete=False):        
         super().__init__()
+
+        if nonlin == 'relu':
+            nonlin = nn.ReLU()
+        elif nonlin == 'prelu':
+            nonlin = nn.PReLU()
+        else:
+            nonlin = nn.Tanh()
+
+        self.discrete = discrete
+        if self.discrete:
+            output_dim = int(envs.single_action_space.n)
+        else:
+            output_dim = np.prod(envs.single_action_space.shape)
+
         self.critic = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
-            nn.Tanh(),
+            nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh(),
+            nonlin,
             layer_init(nn.Linear(hidden_size, 1), std=1.0),
         )
         self.actor_mean = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
-            nn.Tanh(),
+            nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh(),
-            layer_init(nn.Linear(hidden_size, np.prod(envs.single_action_space.shape)), std=0.01),
+            nonlin,
+            layer_init(nn.Linear(hidden_size, output_dim), std=0.01),
         )
-        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
+        if not self.discrete:
+            self.actor_logstd = nn.Parameter(torch.zeros(1,output_dim))
 
     def get_value(self, x):
         return self.critic(x)
 
-    def get_action_and_value(self, x, action=None):
+    def get_action_and_value_c(self, x, action=None):
         action_mean = self.actor_mean(x)
         action_logstd = self.actor_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
@@ -192,12 +217,27 @@ class Agent(nn.Module):
             action = probs.sample()
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
+    def get_action_and_value_d(self, x, action=None):
+        logits = self.actor_mean(x)
+        probs = Categorical(logits=logits)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.entropy(), self.critic(x)
+
+    def get_action_and_value(self, x, action=None):
+        if self.discrete:
+            return self.get_action_and_value_d(x, action)
+        else:
+            return self.get_action_and_value_c(x, action)
+
 
 if __name__ == "__main__":
-    args = parse_args()
+    args, non_default = parse_args()
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     ua = 'ua' if args.use_actions else ''
-    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}"
+    # create output folder with non default arguments in the name
+    id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','')
+    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
     if args.track:
         import wandb
 
@@ -262,6 +302,9 @@ if __name__ == "__main__":
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
     init = True
+
+    # logging variables
+    irl_count = 0
 
     for update in range(1, num_updates + 1):
         # Annealing the rate if instructed to do so.
@@ -385,6 +428,8 @@ if __name__ == "__main__":
         else:
             n_irl_epochs = args.irl_epochs
         init = False
+
+        irl_count += 1
         for epoch in range(n_irl_epochs):            
             # GAIL Discriminator Update
             # gen_demos = demos_gen(demos['all'], args.batch_size)
@@ -429,6 +474,8 @@ if __name__ == "__main__":
 
     envs.close()
     writer.close()
+
+    print("Total IRL steps:", irl_count)
 
     # save df for easier parsing
     ea = read_tb_file(f"runs/{run_name}")
