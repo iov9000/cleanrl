@@ -67,11 +67,13 @@ def parse_args():
         action='store_true', required=False, help='normalize irl rewards')  
     parser.add_argument('--clip_action', default=True, 
         action='store_true', required=False, help='normalize irl rewards')  
-
+    parser.add_argument('--time_aware', default=False, 
+        action='store_true', required=False, help='normalize irl rewards')  
+        
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=3000000,
+    parser.add_argument("--total-timesteps", type=int, default=10000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=3e-4,
         help="the learning rate of the optimizer")
@@ -108,6 +110,8 @@ def parse_args():
         help="the maximum norm for the gradient clipping")
     parser.add_argument("--target-kl", type=float, default=None,
         help="the target KL divergence threshold")
+    parser.add_argument("--agent_nonlin", type=str, default="tanh",
+        help="nonlinearity type")
     # SWIL specific 
     parser.add_argument("--n_proj", type=int, default=100, help="number of projections for SWIL")
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
@@ -167,6 +171,8 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
     def thunk():
         env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        if opt.time_aware:
+            env = gym.wrappers.TimeAwareObservation(env)
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
@@ -194,8 +200,15 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self, envs, hidden_size=64, discrete=False):        
+    def __init__(self, envs, hidden_size=64, nonlin='tanh', discrete=False):        
         super().__init__()
+
+        if nonlin == 'relu':
+            nonlin = nn.ReLU()
+        elif nonlin == 'prelu':
+            nonlin = nn.PReLU()
+        else:
+            nonlin = nn.Tanh()
 
         self.discrete = discrete
         if self.discrete:
@@ -205,16 +218,16 @@ class Agent(nn.Module):
 
         self.critic = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
-            nn.Tanh(),
+            nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh(),
+            nonlin,
             layer_init(nn.Linear(hidden_size, 1), std=1.0),
         )
         self.actor_mean = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
-            nn.Tanh(),
+            nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh(),
+            nonlin,
             layer_init(nn.Linear(hidden_size, output_dim), std=0.01),
         )
         if not self.discrete:
@@ -253,7 +266,7 @@ if __name__ == "__main__":
 
     # create output folder with non default arguments in the name
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','')
-    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_np{args.n_proj}_{ua}_{non_default}"
+    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_np{args.n_proj}_{ua}_{id_string}"
     if args.track:
         import wandb
 
@@ -301,7 +314,7 @@ if __name__ == "__main__":
     )
     #assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
-    agent = Agent(envs, args.agent_size, discrete).to(device)
+    agent = Agent(envs, args.agent_size, args.agent_nonlin, discrete).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup

@@ -76,9 +76,9 @@ class MEIRLDiscriminator(nn.Module):
             base_out = self.base(ob)
 
         phi = self.phi(base_out)
-        d_out = self.discriminator(base_out)
-        output = torch.clamp(d_out, min=-1.0*self.clamp_magnitude, max=self.clamp_magnitude)
-        return output, phi
+        d_out = self.discriminator(phi)
+        #output = torch.clamp(d_out, min=-1.0*self.clamp_magnitude, max=self.clamp_magnitude)
+        return d_out, phi
 
     def get_reward(self, ob, ac):
         if self.use_actions and (self.use_cnn_base or self.is_atari):
@@ -90,8 +90,9 @@ class MEIRLDiscriminator(nn.Module):
         else:
             base_out = self.base(ob)
 
-        d_out = self.discriminator(base_out)
-        self.reward = torch.clamp(d_out, min=-1.0*self.clamp_magnitude, max=self.clamp_magnitude)
+        phi = self.phi(base_out)
+        d_out = self.discriminator(phi)
+        self.reward = d_out #torch.clamp(d_out, min=-1.0*self.clamp_magnitude, max=self.clamp_magnitude)
         return self.reward
 
     # lipschitz penalty
@@ -162,7 +163,7 @@ class MEIRLDiscriminator(nn.Module):
         r_policy, self.phi_policy = self.forward(update_dict['policy_obs'], update_dict['policy_acs'])
         r_expert, self.phi_expert = self.forward(update_dict['expert_obs'], update_dict['expert_acs'])
 
-        self.diff_loss = r_policy.mean() - r_expert.mean()
+        self.diff_loss = r_expert.mean() - r_policy.mean()
         self.grad_penalty = torch.norm(self.phi_expert-self.phi_policy)
         self.loss = self.diff_loss + self.irm_coeff * self.grad_penalty
 
