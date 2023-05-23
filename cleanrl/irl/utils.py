@@ -7,6 +7,7 @@ from tqdm import tqdm
 import ot
 import gym
 import pickle
+from datetime import datetime
 
 def load_hf_demos(env_name, folder=None, n_demos=10, bary_enhance=False):
     if folder is None:
@@ -394,3 +395,80 @@ class AntCFWrapper(gym.Wrapper):
     def step(self, action):
         o, r, d, i = self.env.step(action)
         return o[:27], r, d, i
+
+class MujocoTestWrapper(gym.Wrapper):
+    def __init__(self, env, eps=0.1):
+        self.env = env
+        self.eps = eps
+
+        self.perturb(eps)     
+        super().__init__(env=self.env)
+
+    def perturb(self, eps):
+        self.init_qpos = np.array(self.init_qpos)
+        self.init_qvel = np.array(self.init_qvel)
+        self.init_qpos = self.init_qpos * eps*np.random.randn(*self.init_qpos.shape)
+        self.init_qvel = self.init_qvel * eps*np.random.randn(*self.init_qvel.shape)
+        self.init_qpos = tuple(self.init_qpos)
+        self.init_qvel = tuple(self.init_qvel)     
+
+    def reset(self):
+        o = self.env.reset()
+        self.perturb(self.eps)     
+
+        return o
+
+    def step(self, action):
+        o, r, d, i = self.env.step(action)
+        o = o + self.eps*np.random.randn(*o.shape)
+        return o, r, d, i
+
+def save_traj_dict(env_name, env, model, device, nr_trajectories=10, min_total_rew=100):
+    num_steps = 0
+    expert_obs = []
+    expert_acs = []
+    expert_rew = []
+    expert_done = []
+
+    if isinstance(nr_trajectories, list):
+        nr_trajectories = nr_trajectories[0]
+
+    cnt = 0
+    while cnt < nr_trajectories:
+        ob = env.reset()
+        done = False
+        total_reward = 0
+        episode_obs = []
+        episode_acs = []
+        episode_rew = []
+        episode_done = []
+
+        while not done:
+            action, logprob, _, value = model.get_action_and_value(torch.Tensor(ob).to(device).unsqueeze(0))
+            next_ob, reward, done, _ = env.step(action.squeeze().detach().cpu().numpy())
+            ob = next_ob
+            total_reward += reward
+            episode_obs.append(ob)
+            episode_acs.append(action)
+            episode_rew.append(reward)
+            episode_done.append(done)
+
+            num_steps += 1
+
+        print("episode:", cnt, "reward:", total_reward)
+        if total_reward > min_total_rew:
+            cnt += 1
+            expert_obs.extend(episode_obs)
+            expert_acs.extend(episode_acs)
+            expert_rew.extend(episode_rew)
+            expert_done.extend(episode_done)
+
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"{ts}_model_{env_name}_{nr_trajectories}.pkl" 
+    expert_obs = np.stack(expert_obs)
+    expert_acs = np.stack(expert_acs)
+    expert_rew = np.stack(expert_rew)
+    expert_done = np.stack(expert_done)
+
+    d = {'obs': expert_obs, 'acs': expert_acs, 'rew': expert_rew, 'done': expert_done}
+    #pickle.dump(d, open(filename, 'wb'))

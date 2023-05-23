@@ -408,6 +408,9 @@ if __name__ == "__main__":
     envs.close()
     writer.close()
 
+    torch.save(agent.state_dict(), f"runs/{run_name}/agent.pt")
+    torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
+
     # save df for easier parsing
     ea = read_tb_file(f"runs/{run_name}")
     df = create_df_from_ea(ea, "charts/episodic_return")
