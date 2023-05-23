@@ -204,7 +204,7 @@ class SWILDiscriminator(nn.Module):
         # self.module_list = nn.ModuleList([self.base, self.base_v, self.reward, self.value])
         #self.d_optimizer = Adam(list(self.base.parameters()) + list(self.reward.parameters()), 
         #                lr=self.lr, weight_decay=self.l2_coeff)
-        self.d_optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.l2_coeff)
+        self.d_optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.l2_coeff, eps=1e-5)
         self.d_scheduler = ExponentialLR(self.d_optimizer, gamma=opt.scheduler_gamma)
         #self.d_optimizer = Adam([self.policy_obs, self.policy_acs], lr=self.lr)
 

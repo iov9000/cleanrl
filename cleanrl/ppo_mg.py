@@ -266,7 +266,7 @@ if __name__ == "__main__":
                 mb_inds = b_inds[start:end]
 
                 ### TODO: calculate policy loss separately for discrete and continuous action spaces
-                _, newlogprob_d, entropy_d, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
+                _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 

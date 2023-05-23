@@ -64,8 +64,8 @@ def parse_args():
         help="the number of parallel game environments")
     parser.add_argument("--num-steps", type=int, default=2048,
         help="the number of steps to run in each environment per policy rollout")
-    parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="Toggle learning rate annealing for policy and value networks")
+    parser.add_argument('--anneal_lr', default=True, required=False, 
+        action='store_false', help='anneal policy lr')
     parser.add_argument("--gamma", type=float, default=0.99,
         help="the discount factor gamma")
     parser.add_argument("--gae-lambda", type=float, default=0.95,
@@ -115,6 +115,8 @@ def parse_args():
         action='store_false', help='use bias in disc arch')
     parser.add_argument('--on_policy', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
+    parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
+    parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
     parser.add_argument("--disc_nonlin", type=str, default="prelu",
@@ -251,6 +253,9 @@ if __name__ == "__main__":
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     agent = Agent(envs, args.agent_size).to(device)
+    if args.resume:
+        agent.load_state_dict(torch.load(os.path.join(args.resume, "agent.pt") , map_location=device))
+
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -431,7 +436,21 @@ if __name__ == "__main__":
     envs.close()
     writer.close()
 
+    ## save model
+    torch.save(agent.state_dict(), f"runs/{run_name}/agent.pt")
+    torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
+
+    ## test model and save trajectories
+    test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
+    if args.clip_action:
+        test_env = gym.wrappers.ClipAction(test_env)
+    if args.normalize_obs:
+        test_env = gym.wrappers.NormalizeObservation(test_env)
+        test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
+    save_traj_dict(args.env_id, test_env, agent, device)
+
     # save df for easier parsing
-    ea = read_tb_file(f"runs/{run_name}")
-    df = create_df_from_ea(ea, "charts/episodic_return")
-    df.to_pickle(f"results_{run_name}_df.pkl")
+    if args.total_timesteps > 0:    
+        ea = read_tb_file(f"runs/{run_name}")
+        df = create_df_from_ea(ea, "charts/episodic_return")
+        df.to_pickle(f"results_{run_name}_df.pkl")
