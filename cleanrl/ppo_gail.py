@@ -237,7 +237,7 @@ if __name__ == "__main__":
     ua = 'ua' if args.use_actions else ''
     # create output folder with non default arguments in the name
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','')
-    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_nd{args.n_demos}_{ua}_{id_string}"
     if args.track:
         import wandb
 
