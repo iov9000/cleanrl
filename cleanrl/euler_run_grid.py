@@ -22,12 +22,12 @@ if __name__ == '__main__':
     algos = ['ppo']
     disc_types = ['gail', 'airl']
     # disc_types = ['airl']
-    irm_coeffs = [0.0, 1.0, 10.0, 50.0]
-    # irm_coeffs = [0.0]
+    # irm_coeffs = [0.0, 1.0, 10.0, 50.0]
+    irm_coeffs = [0.0]
     # irm_coeffs = [0.1, 1.0, 10.0, 50.0, 100.0]
     # irm_coeffs = [0.0, 1.0, 100.0]
     # irm_coeffs = [50.0, 100.0]
-    envs = ['Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3', 'LunarLanderContinuous-v2', 'BipedalWalker-v3']
+    envs = ['Ant-v3', 'Humanoid-v3', 'Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3'] # 'LunarLanderContinuous-v2', 'BipedalWalker-v3']
     # envs = ['HalfCheetah-v3', 'Walker2d-v3', 'Hopper-v3']
     # envs = ['Humanoid-v3']
     # use_acs = ['', '--use_actions']
@@ -36,7 +36,8 @@ if __name__ == '__main__':
     # lip_coeffs = [0.0, 1.0]
     ent_coeffs = [0.01]
     disc_nonlins = ['tanh', 'relu', 'prelu']
-    n_demos = [4,10,25]
+    # n_demos = [4,10,25]
+    n_demos = [10]
     # lip_coeff = ['--use_actions']
     MEM_PER_CPU = 8000
     GPU_PER_CPU = 1
@@ -58,7 +59,7 @@ if __name__ == '__main__':
                                                     f"--time={args.time}:00:00 --wrap ")
                                         euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
                                         # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
-                                        exp_cmd = (f"python {algo}_{disc_type}.py --total-timesteps 3000000 --disc_nonlin={d_nl} --n_demos={n_demo} --seed={seed} --irm_coeff={irm_coeff} {ua} --ent-coef={ent_coeff} --env-id {env_name}")
+                                        exp_cmd = (f"python {algo}_{disc_type}.py --num-envs 8 --total-timesteps 10000000 --disc_nonlin={d_nl} --n_demos={n_demo} --seed={seed} --irm_coeff={irm_coeff} {ua} --ent-coef={ent_coeff} --env-id {env_name}")
                                         cluster_cmd = euler_slurm + exp_cmd 
                                         print("Running command: ", cluster_cmd)
                                         # subprocess.run(cluster_cmd, shell=True)
