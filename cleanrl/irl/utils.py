@@ -434,6 +434,7 @@ def save_traj_dict(env_name, env, model, device, nr_trajectories=10, min_total_r
         nr_trajectories = nr_trajectories[0]
 
     cnt = 0
+    ep_rew = []
     while cnt < nr_trajectories:
         ob = env.reset()
         done = False
@@ -455,6 +456,7 @@ def save_traj_dict(env_name, env, model, device, nr_trajectories=10, min_total_r
 
             num_steps += 1
 
+        ep_rew.append(total_reward)
         print("episode:", cnt, "reward:", total_reward)
         if total_reward > min_total_rew:
             cnt += 1
@@ -470,5 +472,11 @@ def save_traj_dict(env_name, env, model, device, nr_trajectories=10, min_total_r
     expert_rew = np.stack(expert_rew)
     expert_done = np.stack(expert_done)
 
+    ep_rew = np.array(ep_rew)
+
+    print("Mean / std over {nr_trajectories} episodes: ", np.mean(ep_rew), np.std(ep_rew))
+
     d = {'obs': expert_obs, 'acs': expert_acs, 'rew': expert_rew, 'done': expert_done}
     #pickle.dump(d, open(filename, 'wb'))
+
+    return np.mean(ep_rew), np.std(ep_rew)
