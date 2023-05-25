@@ -197,8 +197,8 @@ class SWILDiscriminator(nn.Module):
             if self.opt.proj_layer:
                 self.proj_layer.cuda()
 
-        self.policy_obs = torch.randn([opt.batch_size, *ob_shapes], requires_grad=True)
-        self.policy_acs = torch.randn([opt.batch_size, *ac_shapes], requires_grad=True)
+        self.policy_obs = torch.randn([opt.batch_size, *ob_shapes])#, requires_grad=True)
+        self.policy_acs = torch.randn([opt.batch_size, *ac_shapes])#, requires_grad=True)
         self.expert_obs = torch.randn([opt.batch_size, *ob_shapes])
         self.expert_acs = torch.randn([opt.batch_size, *ac_shapes])
         # self.module_list = nn.ModuleList([self.base, self.base_v, self.reward, self.value])
@@ -234,6 +234,11 @@ class SWILDiscriminator(nn.Module):
             base_out = self.base(ob)
 
         return base_out
+
+    def weight_reset(self):
+        reset_parameters = getattr(self.reward, "reset_parameters", None)
+        if callable(reset_parameters):
+            self.reward.reset_parameters()
 
     def get_reward(self, ob, ac):
         base_out = self.base_fwd(ob,ac)
@@ -281,13 +286,13 @@ class SWILDiscriminator(nn.Module):
         
         return torch.sqrt(torch.sum((pi_slices_sorted-exp_slices_sorted)**2))
 
-    def max_gsw(self, obs_pi, acs_pi, obs_exp, acs_exp, iterations=50,lr=1e-4):
+    def max_gsw(self, obs_pi, acs_pi, obs_exp, acs_exp, iterations=10,lr=1e-4):
         # N,dn = X.shape
         # M,dm = Y.shape
         # assert dn==dm and M==N
 
-        # self.reward.reset()
-        
+        self.weight_reset()
+
         optimizer = torch.optim.Adam(list(self.base.parameters()) + list(self.reward.parameters()),lr=lr)
         total_loss=np.zeros((iterations,))
         for i in tqdm(range(iterations)):

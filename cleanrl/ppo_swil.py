@@ -48,7 +48,7 @@ def parse_args():
         help="the name of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
-    parser.add_argument("--logging_interval", type=int, default=500,
+    parser.add_argument("--logging_interval", type=int, default=128,
         help="logging interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
@@ -73,7 +73,7 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=10000000,
+    parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=3e-4,
         help="the learning rate of the optimizer")
@@ -134,6 +134,7 @@ def parse_args():
                    help='discriminator MLP layer dimensions')
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
+    parser.add_argument('--irl_batch_size', default=64, type=int, required=False, help='batch size for discriminator updates')
     parser.add_argument('--irl_epochs', default=1, type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--recon_coeff', default=0, type=float, required=False, help='ae loss coeff')
@@ -267,7 +268,7 @@ if __name__ == "__main__":
     ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
 
     # create output folder with non default arguments in the name
-    id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','')
+    id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
     run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_np{args.n_proj}_{ua}_{id_string}"
     if args.track:
         import wandb
@@ -367,7 +368,7 @@ if __name__ == "__main__":
                 if "episode" in item.keys():
                     if args.verbose:
                         print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
-                    if global_step % args.logging_interval == 0:
+                    if global_step % 10 == 0:
                         writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
                         writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
                     break
@@ -463,13 +464,19 @@ if __name__ == "__main__":
         init = False
 
         for epoch in range(args.irl_epochs):            
-            # GAIL Discriminator Update
+            # GAIL Discriminator Update 
             gen_demos = demos_gen_dict(demos['all'], args.batch_size)
             for d in gen_demos:
                 if len(d['obs']) < args.batch_size:
-                    break
+                    obs_ = obs[:len(d['obs'])]
+                    actions_ = actions[:len(d['obs'])]
+                    dones_ = dones[:len(d['obs'])]
+                else:
+                    obs_ = obs
+                    actions_ = actions
+                    dones_ = dones
 
-                update_dict = prepare_batch_update_irl(envs, args, d, obs, actions, dones, agent)
+                update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
 
                 loss_dict = disc.compute_loss(update_dict)
 
@@ -516,11 +523,12 @@ if __name__ == "__main__":
     if args.normalize_obs:
         test_env = gym.wrappers.NormalizeObservation(test_env)
         test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
-    save_traj_dict(args.env_id, test_env, agent, device)
+    mu, std = save_traj_dict(args.env_id, test_env, agent, device)
 
     # save df for easier parsing
     if args.total_timesteps > 0:    
         ea = read_tb_file(f"runs/{run_name}")
         df = create_df_from_ea(ea, "charts/episodic_return")
+        df["mu"] = mu
         df.to_pickle(f"results_{run_name}_df.pkl")
 

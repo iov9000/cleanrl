@@ -240,12 +240,26 @@ class AIRLDiscriminator(nn.Module):
         # -> Jensen Shannon? Mixture of experts?
         # grad_penalty = self.irm_penalty(d_out, labels)
         lip_penalty = self.lip_penalty(update_dict)
-        grad_penalty_ = self.irm_penalty(policy_estimate, torch.zeros(expert_estimate.size()))
-        grad_penalty__ = self.irm_penalty(expert_estimate, torch.ones(expert_estimate.size()))
-        grad_penalty = self.irm_penalty(d_out, labels)
-
+        expert_out = expert_estimate
+        policy_out = policy_estimate
+        if self.opt.irm_loss_type == 'e1':
+            self.grad_penalty = self.irm_penalty(
+                expert_out, torch.ones(expert_out.size()))
+        elif self.opt.irm_loss_type == 'e0':
+            self.grad_penalty = self.irm_penalty(
+                expert_out, torch.zeros(expert_out.size()))
+        if self.opt.irm_loss_type == 'p1':
+            self.grad_penalty = self.irm_penalty(
+                policy_out, torch.zeros(policy_out.size()))
+        elif self.opt.irm_loss_type == 'p0':
+            self.grad_penalty = self.irm_penalty(
+                policy_out, torch.zeros(policy_out.size()))
+        else:
+            self.grad_penalty = self.irm_penalty(expert_out, policy_out)
+        
+        grad_penalty = self.grad_penalty
         # lip_penalty = self.lip_penalty(update_dict)
-        loss = discriminator_loss + self.irm_coeff * grad_penalty + self.lip_coeff * lip_penalty
+        loss = discriminator_loss + self.irm_coeff * self.grad_penalty + self.lip_coeff * lip_penalty
         if self.irm_coeff > 1.0:
             loss /= self.irm_coeff
 

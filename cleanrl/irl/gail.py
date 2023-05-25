@@ -191,10 +191,21 @@ class GAILDiscriminator(nn.Module):
         # self.grad_penalty = self.irm_penalty(d_out, labels)
         lip_penalty = self.lip_penalty(update_dict)
         ## TODO: check IRM penalty form! -> ones not zeros!
-        self.grad_penalty = self.irm_penalty(
-            expert_out, torch.ones(expert_out.size()))
-        #self.grad_penalty = self.irm_penalty(
-        #    expert_out, policy_out)
+        if self.opt.irm_loss_type == 'e1':
+            self.grad_penalty = self.irm_penalty(
+                expert_out, torch.ones(expert_out.size()))
+        elif self.opt.irm_loss_type == 'e0':
+            self.grad_penalty = self.irm_penalty(
+                expert_out, torch.zeros(expert_out.size()))
+        if self.opt.irm_loss_type == 'p1':
+            self.grad_penalty = self.irm_penalty(
+                policy_out, torch.zeros(policy_out.size()))
+        elif self.opt.irm_loss_type == 'p0':
+            self.grad_penalty = self.irm_penalty(
+                policy_out, torch.zeros(policy_out.size()))
+        else:
+            self.grad_penalty = self.irm_penalty(expert_out, policy_out)
+
         self.loss = self.bce_loss + self.irm_coeff * self.grad_penalty + self.lip_coeff * lip_penalty
 
         output_dict = {}

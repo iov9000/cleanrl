@@ -21,7 +21,7 @@ from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.airl import AirlReward, AIRLDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict, AntCFWrapper
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict, AntCFWrapper, MujocoTestWrapper, save_traj_dict
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -32,7 +32,7 @@ def parse_args():
         help="the name of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
-    parser.add_argument("--logging_interval", type=int, default=500,
+    parser.add_argument("--logging_interval", type=int, default=128,
         help="logging interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
@@ -105,6 +105,11 @@ def parse_args():
     parser.add_argument('--airl_resnet', default=False, action='store_true', help='use resnet for discriminator')
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
+    parser.add_argument("--irm_loss_type", type=str, default="sym", help="e1,e0,p0,p1,sym")
+
+    parser.add_argument('--drop_batch', default=False, required=False, 
+        action='store_true', help='drop batch in irl epochs')   
+
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
@@ -133,9 +138,13 @@ def parse_args():
         for opt in parser._option_string_actions.values()
         if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
     }
+<<<<<<< HEAD
 
     return args, non_default
+=======
+>>>>>>> 4be31f0721f63fcba3677d7a69eb5cefe4ef4a33
 
+    return args, non_default
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
     def thunk():
@@ -205,11 +214,11 @@ class Agent(nn.Module):
 
 if __name__ == "__main__":
     args, non_default = parse_args()
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     ua = 'ua' if args.use_actions else ''
     # create output folder with non default arguments in the name
-    id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','')
-    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_nd{args.n_demos}_{ua}_{id_string}"
+    id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
+    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
     if args.track:
         import wandb
 
@@ -308,7 +317,7 @@ if __name__ == "__main__":
                 if "episode" in item.keys():
                     if args.verbose:
                         print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
-                    if global_step % args.logging_interval == 0:
+                    if global_step % 10  == 0:
                         writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
                         writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
                     break
@@ -402,8 +411,19 @@ if __name__ == "__main__":
             gen_demos = demos_gen_dict(demos['all'], args.batch_size)
             for d in gen_demos:
                 if len(d['obs']) < args.batch_size:
-                    break
-                update_dict = prepare_batch_update_irl(envs, args, d, obs, actions, dones, agent)
+                    if args.drop_batch:
+                        break
+                    else:
+                        obs_ = obs[:len(d['obs'])]
+                        actions_ = actions[:len(d['obs'])]
+                        dones_ = dones[:len(d['obs'])]
+                else:
+                    obs_ = obs
+                    actions_ = actions
+                    dones_ = dones
+
+                update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
+
 
                 loss_dict = disc.compute_loss(update_dict)
 
@@ -427,7 +447,7 @@ if __name__ == "__main__":
 
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        if global_step % args.logging_interval == 0:
+        if global_step % args.logging_interval  == 0:
             writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
             writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
             writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
@@ -454,10 +474,12 @@ if __name__ == "__main__":
     if args.normalize_obs:
         test_env = gym.wrappers.NormalizeObservation(test_env)
         test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
-    save_traj_dict(args.env_id, test_env, agent, device)
+    mu, std = save_traj_dict(args.env_id, test_env, agent, device)
 
     # save df for easier parsing
     if args.total_timesteps > 0:    
         ea = read_tb_file(f"runs/{run_name}")
         df = create_df_from_ea(ea, "charts/episodic_return")
+        df["mu"] = mu
         df.to_pickle(f"results_{run_name}_df.pkl")
+
