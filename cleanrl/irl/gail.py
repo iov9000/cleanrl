@@ -187,6 +187,9 @@ class GAILDiscriminator(nn.Module):
         labels = torch.cat([torch.zeros(expert_out.size()),
                             torch.ones(policy_out.size())])
 
+        labels_flipped = torch.cat([torch.ones(expert_out.size()),
+                            torch.zeros(policy_out.size())])
+
         self.bce_loss = F.binary_cross_entropy_with_logits(d_out, labels)
         # self.grad_penalty = self.irm_penalty(d_out, labels)
         lip_penalty = self.lip_penalty(update_dict)
@@ -203,8 +206,14 @@ class GAILDiscriminator(nn.Module):
         elif self.opt.irm_loss_type == 'p0':
             self.grad_penalty = self.irm_penalty(
                 policy_out, torch.zeros(policy_out.size()))
+        elif self.opt.irm_loss_type == 'e1p0_sep':
+            self.grad_penalty = self.irm_penalty(policy_out, torch.zeros(policy_out.size())) +\
+                self.irm_penalty(expert_out, torch.ones(expert_out.size()))    
+        elif self.opt.irm_loss_type == 'e1p0':
+            self.grad_penalty = self.irm_penalty(d_out, labels_flipped)
         else:
-            self.grad_penalty = self.irm_penalty(expert_out, policy_out)
+            self.grad_penalty = self.irm_penalty(d_out, labels)
+
 
         self.loss = self.bce_loss + self.irm_coeff * self.grad_penalty + self.lip_coeff * lip_penalty
 

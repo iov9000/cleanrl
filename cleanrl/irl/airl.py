@@ -222,6 +222,9 @@ class AIRLDiscriminator(nn.Module):
         # label convention: experts 0, policy 1
         labels = torch.cat([torch.zeros(expert_estimate.size()),
                             torch.ones(policy_estimate.size())])
+        labels_flipped = torch.cat([torch.ones(expert_estimate.size()),
+                            torch.zeros(policy_estimate.size())])
+
         d_out = torch.cat([expert_estimate, policy_estimate], dim=0)
         if torch.cuda.is_available():
             labels = labels.cuda()
@@ -254,8 +257,13 @@ class AIRLDiscriminator(nn.Module):
         elif self.opt.irm_loss_type == 'p0':
             self.grad_penalty = self.irm_penalty(
                 policy_out, torch.zeros(policy_out.size()))
+        elif self.opt.irm_loss_type == 'e1p0_sep':
+            self.grad_penalty = self.irm_penalty(policy_out, torch.zeros(policy_out.size())) +\
+                self.irm_penalty(expert_out, torch.ones(expert_out.size()))    
+        elif self.opt.irm_loss_type == 'e1p0':
+            self.grad_penalty = self.irm_penalty(d_out, labels_flipped)
         else:
-            self.grad_penalty = self.irm_penalty(expert_out, policy_out)
+            self.grad_penalty = self.irm_penalty(d_out, labels)
         
         grad_penalty = self.grad_penalty
         # lip_penalty = self.lip_penalty(update_dict)
