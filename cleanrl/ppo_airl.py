@@ -138,11 +138,6 @@ def parse_args():
         for opt in parser._option_string_actions.values()
         if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
     }
-<<<<<<< HEAD
-
-    return args, non_default
-=======
->>>>>>> 4be31f0721f63fcba3677d7a69eb5cefe4ef4a33
 
     return args, non_default
 
