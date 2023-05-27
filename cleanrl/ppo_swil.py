@@ -144,7 +144,7 @@ def parse_args():
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
     parser.add_argument('--use_disc_bias', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
-    parser.add_argument("--disc_nonlin", type=str, default="prelu",
+    parser.add_argument("--disc_nonlin", type=str, default="tanh",
         help="divergence type")
     parser.add_argument('--normalize_irl_rewards', default=True, 
         action='store_true', required=False, help='normalize irl rewards')  

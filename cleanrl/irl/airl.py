@@ -260,6 +260,8 @@ class AIRLDiscriminator(nn.Module):
         elif self.opt.irm_loss_type == 'e1p0_sep':
             self.grad_penalty = self.irm_penalty(policy_out, torch.zeros(policy_out.size())) +\
                 self.irm_penalty(expert_out, torch.ones(expert_out.size()))    
+        elif self.opt.irm_loss_type == 'e1p0sym':
+            self.grad_penalty = self.irm_penalty(d_out, labels_flipped) + self.irm_penalty(d_out, labels)
         elif self.opt.irm_loss_type == 'e1p0':
             self.grad_penalty = self.irm_penalty(d_out, labels_flipped)
         else:

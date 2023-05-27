@@ -211,6 +211,8 @@ class GAILDiscriminator(nn.Module):
                 self.irm_penalty(expert_out, torch.ones(expert_out.size()))    
         elif self.opt.irm_loss_type == 'e1p0':
             self.grad_penalty = self.irm_penalty(d_out, labels_flipped)
+        elif self.opt.irm_loss_type == 'e1p0sym':
+            self.grad_penalty = self.irm_penalty(d_out, labels_flipped) + self.irm_penalty(d_out, labels)
         else:
             self.grad_penalty = self.irm_penalty(d_out, labels)
 
