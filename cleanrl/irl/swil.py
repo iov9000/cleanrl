@@ -105,9 +105,17 @@ def compute_swd(z_expert: torch.Tensor,
     w_dist = w_dist.pow(p)
     return reg_weight * w_dist.mean()
 
+def layer_init(layer, std=1, bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    #torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
+
+def linlayer(in_dim, out_dim, bias=True):
+    #return layer_init(nn.Linear(in_dim, out_dim, bias=bias))
+    return nn.Linear(in_dim, out_dim, bias=bias)
 
 class SWILDiscriminator(nn.Module):
-    def __init__(self, env, opt, use_cnn_base=False, bias=False):
+    def __init__(self, env, opt):
         super(SWILDiscriminator, self).__init__()
 
         self.env = env
@@ -119,7 +127,9 @@ class SWILDiscriminator(nn.Module):
         self.l2_coeff = opt.l2_coeff
         self.lip_coeff = opt.lip_coeff
         self.use_cnn_base = opt.use_cnn_base
+        use_cnn_base = self.use_cnn_base
         self.bias = opt.use_disc_bias
+        bias = self.bias
         self.n_proj = opt.n_proj
         self.l2_coeff = opt.l2_coeff
         self.reward_type = opt.swil_reward_type
@@ -127,6 +137,8 @@ class SWILDiscriminator(nn.Module):
 
         if opt.disc_nonlin == 'relu':
             nonlin = nn.ReLU()
+        elif opt.disc_nonlin == 'leakyrelu':
+            nonlin = nn.LeakyReLU()
         elif opt.disc_nonlin == 'tanh':
             nonlin = nn.Tanh()
         else:
@@ -147,16 +159,14 @@ class SWILDiscriminator(nn.Module):
 
         ac_len = ac_shapes[0]
 
-        self.use_cnn_base = use_cnn_base
-
         if use_cnn_base:
             self.base = MiniGridCNN(self.layer_dims, self.use_actions)
         elif self.is_atari:
             self.base = AtariCNNBase(opt, env, self.use_actions)
         else:
-            self.base = nn.Sequential(torch.nn.Linear(self.layer_dims[0],
-                                                      self.layer_dims[1], bias),
-                                      nonlin)
+            #self.base = nn.Sequential(torch.nn.Linear(self.layer_dims[0],
+            #                                          self.layer_dims[1], bias), nonlin)
+            self.base = nn.Sequential(linlayer(self.layer_dims[0], self.layer_dims[1], bias), nonlin)
 
         if self.is_atari:
             self.reward = nn.Linear(512,self.n_proj)
@@ -164,21 +174,24 @@ class SWILDiscriminator(nn.Module):
             if self.reward_type == 'linear':
                 self.reward_layers = []
                 for i in range(2, len(self.layer_dims)):
-                    self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[i - 1],
-                                                        out_features=self.layer_dims[i],
-                                                        bias=bias), nonlin]
+                    # self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[i - 1],
+                    #                                     out_features=self.layer_dims[i],
+                    #                                     bias=bias), nonlin]
+                    self.reward_layers += [linlayer(self.layer_dims[i - 1], self.layer_dims[i], bias), nonlin]
 
-                self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[-1],
-                                                    out_features=self.n_proj,
-                                                    bias=bias)]
+                # self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[-1],
+                #                                     out_features=self.n_proj,
+                #                                     bias=bias)]
+                self.reward_layers += [linlayer(self.layer_dims[-1], self.n_proj, bias)]
                 self.reward = nn.Sequential(*self.reward_layers)
             else:
                 self.reward = nn.MultiheadAttention(embed_dim=self.layer_dims[1], num_heads = 1)
 
         if self.opt.proj_layer:
-            self.proj_layer = nn.Sequential(nn.Linear(in_features=self.n_proj,
-                                                    out_features=1,
-                                                    bias=bias), torch.nn.Tanh())
+            # self.proj_layer = nn.Sequential(nn.Linear(in_features=self.n_proj,
+            #                                         out_features=1,
+            #                                         bias=bias), torch.nn.Tanh())
+            self.proj_layer = nn.Sequential(linlayer(self.n_proj, 1, bias), torch.nn.Tanh())
 
         if self.opt.swil_ae:
             self.ae_layers = []
@@ -221,7 +234,10 @@ class SWILDiscriminator(nn.Module):
 
         # rew, v, v_n, d_out = self.forward(ob, next_ob, ac, lprobs) TODO??
         # potentially use more sophisticated mechanism
-        return self.reward(base_out)
+        if self.opt.proj_layer:
+            return self.proj_layer(self.reward(base_out))
+        else:
+            return self.reward(base_out) + torch.randn_like(self.reward(base_out))
 
     def base_fwd(self,ob,ac):
         if self.use_actions and (self.use_cnn_base or self.is_atari):
@@ -291,9 +307,9 @@ class SWILDiscriminator(nn.Module):
         # M,dm = Y.shape
         # assert dn==dm and M==N
 
-        self.weight_reset()
+        #self.weight_reset()
 
-        optimizer = torch.optim.Adam(list(self.base.parameters()) + list(self.reward.parameters()),lr=lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         total_loss=np.zeros((iterations,))
         for i in tqdm(range(iterations)):
             optimizer.zero_grad()

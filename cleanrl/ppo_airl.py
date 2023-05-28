@@ -12,12 +12,27 @@ if module_path not in sys.path:
     sys.path.append(module_path)
 
 import gym
+
+gym.envs.register(
+     id='MoveP-v0',
+     entry_point='envs.envs2d:MoveP',
+     max_episode_steps=1000,
+)
+
+gym.envs.register(
+     id='CMoveP-v0',
+     entry_point='envs.envs2d:CMoveP',
+     max_episode_steps=1000,
+)
+
 import numpy as np
 import pybullet_envs  # noqa
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.normal import Normal
+from torch.distributions.categorical import Categorical
+
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.airl import AirlReward, AIRLDiscriminator
@@ -47,9 +62,12 @@ def parse_args():
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
+    # environment specific arguments
     parser.add_argument('--normalize_obs', default=True, 
         action='store_true', required=False, help='normalize irl rewards')  
     parser.add_argument('--clip_action', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument('--time_aware', default=False, 
         action='store_true', required=False, help='normalize irl rewards')  
 
     # Algorithm specific arguments
@@ -141,26 +159,25 @@ def parse_args():
 
     return args, non_default
 
+
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
     def thunk():
         env = gym.make(env_id)
-        #if opt.env_id == 'Ant-v3':
-        #    print("Wrapping Ant-v3 env with AntCFWrapper")
-        #    env = AntCFWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        if opt.time_aware:
+            env = gym.wrappers.TimeAwareObservation(env)
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        if opt.clip_action:
+        if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env)
-        if opt.normalize_obs:
+        if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeObservation(env)
             env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
         env = AirlReward(env, opt, disc)
-        if opt.normalize_irl_rewards:
+        if opt.normalize_irl_rewards and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeReward(env, gamma=gamma)
             env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-
         env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
@@ -176,28 +193,43 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self, envs, hidden_size=64):
+    def __init__(self, envs, hidden_size=64, nonlin='tanh', discrete=False):        
         super().__init__()
+
+        if nonlin == 'relu':
+            nonlin = nn.ReLU()
+        elif nonlin == 'prelu':
+            nonlin = nn.PReLU()
+        else:
+            nonlin = nn.Tanh()
+
+        self.discrete = discrete
+        if self.discrete:
+            output_dim = int(envs.single_action_space.n)
+        else:
+            output_dim = np.prod(envs.single_action_space.shape)
+
         self.critic = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
-            nn.Tanh(),
+            nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh(),
+            nonlin,
             layer_init(nn.Linear(hidden_size, 1), std=1.0),
         )
         self.actor_mean = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
-            nn.Tanh(),
+            nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh(),
-            layer_init(nn.Linear(hidden_size, np.prod(envs.single_action_space.shape)), std=0.01),
+            nonlin,
+            layer_init(nn.Linear(hidden_size, output_dim), std=0.01),
         )
-        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
+        if not self.discrete:
+            self.actor_logstd = nn.Parameter(torch.zeros(1,output_dim))
 
     def get_value(self, x):
         return self.critic(x)
 
-    def get_action_and_value(self, x, action=None):
+    def get_action_and_value_c(self, x, action=None):
         action_mean = self.actor_mean(x)
         action_logstd = self.actor_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
@@ -205,6 +237,20 @@ class Agent(nn.Module):
         if action is None:
             action = probs.sample()
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+
+    def get_action_and_value_d(self, x, action=None):
+        logits = self.actor_mean(x)
+        probs = Categorical(logits=logits)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.entropy(), self.critic(x)
+
+    def get_action_and_value(self, x, action=None):
+        if self.discrete:
+            return self.get_action_and_value_d(x, action)
+        else:
+            return self.get_action_and_value_c(x, action)
+
 
 
 if __name__ == "__main__":
@@ -256,14 +302,15 @@ if __name__ == "__main__":
     #    print("Wrapping Ant-v3 test env with AntCFWrapper")
     #    test_env = AntCFWrapper(test_env)
     disc = AIRLDiscriminator(test_env, args)
+    discrete = not isinstance(test_env.action_space, gym.spaces.Box)
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
         [make_env(args, args.env_id, args.seed + i, i, args.capture_video, run_name, args.gamma, disc) for i in range(args.num_envs)]
     )
-    assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
+    #assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
-    agent = Agent(envs, args.agent_size).to(device)
+    agent = Agent(envs, args.agent_size, discrete=discrete).to(device)
     if args.resume:
         agent.load_state_dict(torch.load(os.path.join(args.resume, "agent.pt") , map_location=device))
 

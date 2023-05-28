@@ -81,13 +81,20 @@ class GAILDiscriminator(nn.Module):
         #self.d_optimizer = Adam(base_params, lr=self.lr, weight_decay=self.l2_coeff)
         self.d_optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.l2_coeff)
 
-    def forward(self, ob, ac):
+    def base_forward(self,ob, ac):
         if self.use_actions and (self.use_cnn_base or self.is_atari):
             base_out = self.base(ob, ac)
         elif self.use_actions and not (self.use_cnn_base or self.is_atari):
+            if len(ob.shape) != len(ac.shape):
+                ac = torch.unsqueeze(ac, -1)
             base_out = self.base(torch.cat([ob, ac], axis=-1))
         else:
             base_out = self.base(ob)
+        
+        return base_out
+
+    def forward(self, ob, ac):
+        base_out = self.base_forward(ob, ac)
 
         d_out = self.discriminator(base_out)
 
@@ -101,14 +108,7 @@ class GAILDiscriminator(nn.Module):
         return d_out_
 
     def get_reward(self, ob, ac):
-        if self.use_actions and (self.use_cnn_base or self.is_atari):
-            base_out = self.base(ob, ac)
-        elif self.use_actions and not (self.use_cnn_base or self.is_atari):
-            if len(ob.shape) != len(ac.shape):
-                ac = torch.unsqueeze(ac, -1)
-            base_out = self.base(torch.cat([ob, ac], axis=-1))
-        else:
-            base_out = self.base(ob)
+        base_out = self.base_forward(ob, ac)
 
         d_out = self.discriminator(base_out)
         self.reward = - torch.squeeze(torch.log(torch.sigmoid(d_out) + 1e-8))

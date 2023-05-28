@@ -117,7 +117,7 @@ if __name__ == '__main__':
     min_total_rew = int(sys.argv[4])
 
     env = gym.make(env_name, waypoints=[(175, 175)])
-    train_expert(env, n_timesteps=1000000, fname='cmp')
+    train_expert(env, n_timesteps=1000000, fname='mp')
 
 
     

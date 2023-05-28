@@ -12,6 +12,18 @@ if module_path not in sys.path:
     sys.path.append(module_path)
 
 import gym
+
+gym.envs.register(
+     id='MoveP-v0',
+     entry_point='envs.envs2d:MoveP',
+     max_episode_steps=1000,
+)
+
+gym.envs.register(
+     id='CMoveP-v0',
+     entry_point='envs.envs2d:CMoveP',
+     max_episode_steps=1000,
+)
 import numpy as np
 import pybullet_envs  # noqa
 import torch
@@ -50,11 +62,13 @@ def parse_args():
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
+    # environment specific arguments
     parser.add_argument('--normalize_obs', default=True, 
         action='store_true', required=False, help='normalize irl rewards')  
     parser.add_argument('--clip_action', default=True, 
         action='store_true', required=False, help='normalize irl rewards')  
-
+    parser.add_argument('--time_aware', default=False, 
+        action='store_true', required=False, help='normalize irl rewards')  
 
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
@@ -148,21 +162,22 @@ def parse_args():
 
     return args, non_default
 
-
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
     def thunk():
         env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        if opt.time_aware:
+            env = gym.wrappers.TimeAwareObservation(env)
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        if opt.clip_action:
+        if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env)
-        if opt.normalize_obs:
+        if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeObservation(env)
             env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
         env = GailReward(env, opt, disc)
-        if opt.normalize_irl_rewards:
+        if opt.normalize_irl_rewards and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeReward(env, gamma=gamma)
             env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         env.seed(seed)
@@ -285,15 +300,16 @@ if __name__ == "__main__":
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
     test_env = gym.make(args.env_id)
+    discrete = not isinstance(test_env.action_space, gym.spaces.Box)
     disc = GAILDiscriminator(test_env, args)
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
         [make_env(args, args.env_id, args.seed + i, i, args.capture_video, run_name, args.gamma, disc) for i in range(args.num_envs)]
     )
-    assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
+    #assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
-    agent = Agent(envs, args.agent_size).to(device)
+    agent = Agent(envs, args.agent_size, discrete=discrete).to(device)
     if args.resume:
         agent.load_state_dict(torch.load(os.path.join(args.resume, "agent.pt") , map_location=device))
 

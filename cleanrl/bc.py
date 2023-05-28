@@ -304,6 +304,7 @@ if __name__ == "__main__":
 
     # Behavioural cloning loop:
     global_step = 0
+    #args.batch_size = 128
 
     for epoch in tqdm(range(args.update_epochs)):            
         # GAIL Discriminator Update (exhaust demos)

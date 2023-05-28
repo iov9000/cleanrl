@@ -135,6 +135,7 @@ def parse_args():
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
     parser.add_argument('--irl_batch_size', default=64, type=int, required=False, help='batch size for discriminator updates')
+    parser.add_argument('--irl_init_epochs', default=1, type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--irl_epochs', default=1, type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--recon_coeff', default=0, type=float, required=False, help='ae loss coeff')
@@ -142,8 +143,8 @@ def parse_args():
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
-    parser.add_argument('--use_disc_bias', default=True, required=False, 
-        action='store_false', help='use bias in disc arch')
+    parser.add_argument('--use_disc_bias', default=False, required=False, 
+        action='store_true', help='use bias in disc arch')
     parser.add_argument("--disc_nonlin", type=str, default="tanh",
         help="divergence type")
     parser.add_argument('--normalize_irl_rewards', default=True, 
@@ -197,6 +198,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+#def layer_init(layer, std=0.1, bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
@@ -458,12 +460,12 @@ if __name__ == "__main__":
 
         # Optimize the discriminator
         if init:
-            n_irl_epochs = 100
+            n_irl_epochs = args.irl_init_epochs
         else:
             n_irl_epochs = args.irl_epochs
         init = False
 
-        for epoch in range(args.irl_epochs):            
+        for epoch in range(n_irl_epochs):            
             # GAIL Discriminator Update 
             gen_demos = demos_gen_dict(demos['all'], args.batch_size)
             for d in gen_demos:
@@ -490,6 +492,10 @@ if __name__ == "__main__":
                 if global_step % args.logging_interval == 0:
                     writer.add_scalar('irl/swil_d_loss', loss_dict['d_loss'], global_step)
                     writer.add_scalar('irl/swil_ae_loss', loss_dict['recon_loss'], global_step)
+
+                    for i,p in enumerate(disc.parameters()):
+                        writer.add_scalar(f"irl/{i}_norm", torch.norm(p.data), global_step)
+                        writer.add_scalar(f"irl/{i}_gradnorm", torch.norm(p.grad), global_step)
 
                     if args.irm_coeff > 0:
                         writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
