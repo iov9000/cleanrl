@@ -6,6 +6,7 @@ import random
 import time
 from datetime import datetime
 from distutils.util import strtobool
+import matplotlib.pyplot as plt
 
 module_path = os.path.abspath(os.path.join('../ccl'))
 if module_path not in sys.path:
@@ -40,6 +41,8 @@ from irl.swil import SwilReward, SWILDiscriminator
 from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict, MujocoTestWrapper, save_traj_dict
 
 from parse_tb import read_tb_file, create_df_from_ea
+
+
 
 def parse_args():
     # fmt: off
@@ -153,6 +156,8 @@ def parse_args():
     parser.add_argument('--on_policy', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
+    parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
+
     parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
@@ -312,6 +317,8 @@ if __name__ == "__main__":
     test_env = gym.make(args.env_id)
     discrete = not isinstance(test_env.action_space, gym.spaces.Box)
     disc = SWILDiscriminator(test_env, args)
+    if args.load_disc:
+        disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
@@ -343,177 +350,193 @@ if __name__ == "__main__":
     init = True # flag for IRL discriminator pretraining
 
     for update in range(1, num_updates + 1):
-        # Annealing the rate if instructed to do so.
-        if args.anneal_lr:
-            frac = 1.0 - (update - 1.0) / num_updates
-            lrnow = frac * args.learning_rate
-            optimizer.param_groups[0]["lr"] = lrnow
+        try:
+            # Annealing the rate if instructed to do so.
+            if args.anneal_lr:
+                frac = 1.0 - (update - 1.0) / num_updates
+                lrnow = frac * args.learning_rate
+                optimizer.param_groups[0]["lr"] = lrnow
 
-        for step in range(0, args.num_steps):
-            global_step += 1 * args.num_envs
-            obs[step] = next_obs
-            dones[step] = next_done
+            for step in range(0, args.num_steps):
+                global_step += 1 * args.num_envs
+                obs[step] = next_obs
+                dones[step] = next_done
 
-            # ALGO LOGIC: action logic
-            with torch.no_grad():
-                action, logprob, _, value = agent.get_action_and_value(next_obs)
-                values[step] = value.flatten()
-            actions[step] = action
-            logprobs[step] = logprob
-
-            # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, reward, done, info = envs.step(action.cpu().numpy())
-            rewards[step] = torch.tensor(reward).to(device).view(-1)
-            next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
-
-            for item in info:
-                if "episode" in item.keys():
-                    if args.verbose:
-                        print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
-                    if global_step % 10 == 0:
-                        writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
-                        writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
-                    break
-
-        # bootstrap value if not done
-        with torch.no_grad():
-            next_value = agent.get_value(next_obs).reshape(1, -1)
-            advantages = torch.zeros_like(rewards).to(device)
-            lastgaelam = 0
-            for t in reversed(range(args.num_steps)):
-                if t == args.num_steps - 1:
-                    nextnonterminal = 1.0 - next_done
-                    nextvalues = next_value
-                else:
-                    nextnonterminal = 1.0 - dones[t + 1]
-                    nextvalues = values[t + 1]
-                delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
-                advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
-            returns = advantages + values
-
-        # flatten the batch
-        b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
-        b_logprobs = logprobs.reshape(-1)
-        b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
-        b_advantages = advantages.reshape(-1)
-        b_returns = returns.reshape(-1)
-        b_values = values.reshape(-1)
-
-        # Optimizing the policy and value network
-        b_inds = np.arange(args.batch_size)
-        clipfracs = []
-        for epoch in range(args.update_epochs):
-            np.random.shuffle(b_inds)
-            for start in range(0, args.batch_size, args.minibatch_size):
-                end = start + args.minibatch_size
-                mb_inds = b_inds[start:end]
-
-                _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
-                logratio = newlogprob - b_logprobs[mb_inds]
-                ratio = logratio.exp()
-
+                # ALGO LOGIC: action logic
                 with torch.no_grad():
-                    # calculate approx_kl http://joschu.net/blog/kl-approx.html
-                    old_approx_kl = (-logratio).mean()
-                    approx_kl = ((ratio - 1) - logratio).mean()
-                    clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
+                    action, logprob, _, value = agent.get_action_and_value(next_obs)
+                    values[step] = value.flatten()
+                actions[step] = action
+                logprobs[step] = logprob
 
-                mb_advantages = b_advantages[mb_inds]
-                if args.norm_adv:
-                    mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+                # TRY NOT TO MODIFY: execute the game and log data.
+                next_obs, reward, done, info = envs.step(action.cpu().numpy())
+                rewards[step] = torch.tensor(reward).to(device).view(-1)
+                next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 
-                # Policy loss
-                pg_loss1 = -mb_advantages * ratio
-                pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
-                pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+                for item in info:
+                    if "episode" in item.keys():
+                        if args.verbose:
+                            print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
+                        if global_step % 10 == 0:
+                            writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
+                            writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
+                        break
 
-                # Value loss
-                newvalue = newvalue.view(-1)
-                if args.clip_vloss:
-                    v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
-                    v_clipped = b_values[mb_inds] + torch.clamp(
-                        newvalue - b_values[mb_inds],
-                        -args.clip_coef,
-                        args.clip_coef,
-                    )
-                    v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
-                    v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
-                    v_loss = 0.5 * v_loss_max.mean()
-                else:
-                    v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+            # bootstrap value if not done
+            with torch.no_grad():
+                next_value = agent.get_value(next_obs).reshape(1, -1)
+                advantages = torch.zeros_like(rewards).to(device)
+                lastgaelam = 0
+                for t in reversed(range(args.num_steps)):
+                    if t == args.num_steps - 1:
+                        nextnonterminal = 1.0 - next_done
+                        nextvalues = next_value
+                    else:
+                        nextnonterminal = 1.0 - dones[t + 1]
+                        nextvalues = values[t + 1]
+                    delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
+                    advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
+                returns = advantages + values
 
-                entropy_loss = entropy.mean()
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+            # flatten the batch
+            b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
+            b_logprobs = logprobs.reshape(-1)
+            b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
+            b_advantages = advantages.reshape(-1)
+            b_returns = returns.reshape(-1)
+            b_values = values.reshape(-1)
 
-                optimizer.zero_grad()
-                loss.backward()
-                nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
-                optimizer.step()
+            # Optimizing the policy and value network
+            b_inds = np.arange(args.batch_size)
+            clipfracs = []
+            for epoch in range(args.update_epochs):
+                np.random.shuffle(b_inds)
+                for start in range(0, args.batch_size, args.minibatch_size):
+                    end = start + args.minibatch_size
+                    mb_inds = b_inds[start:end]
 
-            if args.target_kl is not None:
-                if approx_kl > args.target_kl:
-                    break
+                    _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
+                    logratio = newlogprob - b_logprobs[mb_inds]
+                    ratio = logratio.exp()
 
-        y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
-        var_y = np.var(y_true)
-        explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
+                    with torch.no_grad():
+                        # calculate approx_kl http://joschu.net/blog/kl-approx.html
+                        old_approx_kl = (-logratio).mean()
+                        approx_kl = ((ratio - 1) - logratio).mean()
+                        clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
 
-        # Optimize the discriminator
-        if init:
-            n_irl_epochs = args.irl_init_epochs
-        else:
-            n_irl_epochs = args.irl_epochs
-        init = False
+                    mb_advantages = b_advantages[mb_inds]
+                    if args.norm_adv:
+                        mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
 
-        for epoch in range(n_irl_epochs):            
-            # GAIL Discriminator Update 
-            gen_demos = demos_gen_dict(demos['all'], args.batch_size)
-            for d in gen_demos:
-                if len(d['obs']) < args.batch_size:
-                    obs_ = obs[:len(d['obs'])]
-                    actions_ = actions[:len(d['obs'])]
-                    dones_ = dones[:len(d['obs'])]
-                else:
-                    obs_ = obs
-                    actions_ = actions
-                    dones_ = dones
+                    # Policy loss
+                    pg_loss1 = -mb_advantages * ratio
+                    pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
+                    pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
-                update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
+                    # Value loss
+                    newvalue = newvalue.view(-1)
+                    if args.clip_vloss:
+                        v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
+                        v_clipped = b_values[mb_inds] + torch.clamp(
+                            newvalue - b_values[mb_inds],
+                            -args.clip_coef,
+                            args.clip_coef,
+                        )
+                        v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
+                        v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+                        v_loss = 0.5 * v_loss_max.mean()
+                    else:
+                        v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
-                loss_dict = disc.compute_loss(update_dict)
+                    entropy_loss = entropy.mean()
+                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
 
-                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']\
-                     + args.lip_coeff * loss_dict['lip_penalty'] + loss_dict['recon_loss']
-                if args.irm_coeff > 1.0:
-                    loss /= args.irm_coeff
+                    optimizer.zero_grad()
+                    loss.backward()
+                    nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+                    optimizer.step()
 
-                disc.update(loss)
-            
-                if global_step % args.logging_interval == 0:
-                    writer.add_scalar('irl/swil_d_loss', loss_dict['d_loss'], global_step)
-                    writer.add_scalar('irl/swil_ae_loss', loss_dict['recon_loss'], global_step)
+                if args.target_kl is not None:
+                    if approx_kl > args.target_kl:
+                        break
 
-                    for i,p in enumerate(disc.parameters()):
-                        writer.add_scalar(f"irl/{i}_norm", torch.norm(p.data), global_step)
-                        writer.add_scalar(f"irl/{i}_gradnorm", torch.norm(p.grad), global_step)
+            y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
+            var_y = np.var(y_true)
+            explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
-                    if args.irm_coeff > 0:
-                        writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
+            # Optimize the discriminator
+            if init:
+                n_irl_epochs = args.irl_init_epochs
+            else:
+                n_irl_epochs = args.irl_epochs
+            init = False
+
+            for epoch in range(n_irl_epochs):            
+                # GAIL Discriminator Update 
+                gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+                if args.env_id == "MoveP-v0":
+                    fig = plt.figure(figsize=(10,10))
+                for d in gen_demos:
+                    if len(d['obs']) < args.batch_size:
+                        obs_ = obs[:len(d['obs'])]
+                        actions_ = actions[:len(d['obs'])]
+                        dones_ = dones[:len(d['obs'])]
+                    else:
+                        obs_ = obs
+                        actions_ = actions
+                        dones_ = dones
+                    if args.env_id == "MoveP-v0":
+                        plt.scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
+                        plt.scatter(obs_[:,:,0], obs_[:,:,1], s=20, c='m', alpha=0.3, label='agent')
+                        plt.axis('equal')
+                        plt.tight_layout()
+                        f = plt.gca()
+                        f.axes.get_xaxis().set_ticks([])
+                        f.axes.get_yaxis().set_ticks([])
+                        f.axes.xaxis.set_ticklabels([])
+                        f.axes.yaxis.set_ticklabels([])
+                        plt.savefig(f"runs/{run_name}/swil_scatter_{global_step}.png")
+
+                    update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
+
+                    loss_dict = disc.compute_loss(update_dict)
+
+                    loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']\
+                        + args.lip_coeff * loss_dict['lip_penalty'] + loss_dict['recon_loss']
+                    if args.irm_coeff > 1.0:
+                        loss /= args.irm_coeff
+
+                    disc.update(loss)
+                
+                    if global_step % args.logging_interval == 0:
+                        writer.add_scalar('irl/swil_d_loss', loss_dict['d_loss'], global_step)
+                        writer.add_scalar('irl/swil_ae_loss', loss_dict['recon_loss'], global_step)
+
+                        for i,p in enumerate(disc.parameters()):
+                            writer.add_scalar(f"irl/{i}_norm", torch.norm(p.data), global_step)
+                            writer.add_scalar(f"irl/{i}_gradnorm", torch.norm(p.grad), global_step)
+
+                        if args.irm_coeff > 0:
+                            writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
 
 
-        # TRY NOT TO MODIFY: record rewards for plotting purposes
-        if global_step % args.logging_interval == 0:
-            writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
-            writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
-            writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
-            writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-            writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
-            writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
-            writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
-            writer.add_scalar("losses/explained_variance", explained_var, global_step)
-            if args.verbose:
-                print("SPS:", int(global_step / (time.time() - start_time)))
-            writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+            # TRY NOT TO MODIFY: record rewards for plotting purposes
+            if global_step % args.logging_interval == 0:
+                writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
+                writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
+                writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
+                writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
+                writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
+                writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
+                writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
+                writer.add_scalar("losses/explained_variance", explained_var, global_step)
+                if args.verbose:
+                    print("SPS:", int(global_step / (time.time() - start_time)))
+                writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        except KeyboardInterrupt:
+            break
 
     envs.close()
     writer.close()
@@ -522,14 +545,26 @@ if __name__ == "__main__":
     torch.save(agent.state_dict(), f"runs/{run_name}/agent.pt")
     torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
 
-    ## test model and save trajectories
-    test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
-    if args.clip_action:
+    ## if movep, save scatter plot
+    if args.env_id == "MoveP-v0":
+        test_env = gym.make(args.env_id)
+    else:
+        ## test model and save trajectories
+        test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
+
+    if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
         test_env = gym.wrappers.ClipAction(test_env)
     if args.normalize_obs:
         test_env = gym.wrappers.NormalizeObservation(test_env)
         test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
-    mu, std = save_traj_dict(args.env_id, test_env, agent, device)
+    mu, std, d_policy = save_traj_dict(args.env_id, test_env, agent, device)
+
+    if args.env_id == "MoveP-v0":
+        gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+        for d in gen_demos:
+            plt.scatter(d['obs'][:,0], d['obs'][:,1], s=5, c='g', alpha=0.3)
+        plt.scatter(d_policy['obs'][:,0], d_policy['obs'][:,1], s=5, c='m', alpha=0.3)
+        plt.savefig(f"runs/{run_name}/swil_scatter_final.png")
 
     # save df for easier parsing
     if args.total_timesteps > 0:    

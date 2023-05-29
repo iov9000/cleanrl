@@ -12,6 +12,7 @@ if module_path not in sys.path:
     sys.path.append(module_path)
 
 import gym
+import matplotlib.pyplot as plt
 
 gym.envs.register(
      id='MoveP-v0',
@@ -466,6 +467,8 @@ if __name__ == "__main__":
             #         break
 
             gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+            if args.env_id == "MoveP-v0":
+                fig = plt.figure(figsize=(10,10))
             for d in gen_demos:
                 if len(d['obs']) < args.batch_size:
                     if args.drop_batch:
@@ -479,8 +482,19 @@ if __name__ == "__main__":
                     actions_ = actions
                     dones_ = dones
 
-                update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
+                if args.env_id == "MoveP-v0":
+                    plt.scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
+                    plt.scatter(obs_[:,:,0], obs_[:,:,1], s=20, c='m', alpha=0.3, label='agent')
+                    plt.axis('equal')
+                    plt.tight_layout()
+                    f = plt.gca()
+                    f.axes.get_xaxis().set_ticks([])
+                    f.axes.get_yaxis().set_ticks([])
+                    f.axes.xaxis.set_ticklabels([])
+                    f.axes.yaxis.set_ticklabels([])
+                    plt.savefig(f"runs/{run_name}/gail_scatter_{global_step}.png")
 
+                update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
 
                 loss_dict = disc.compute_loss(update_dict)
 
@@ -520,13 +534,26 @@ if __name__ == "__main__":
     torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
 
     ## test model and save trajectories
-    test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
-    if args.clip_action:
+    ## if movep, save scatter plot
+    if args.env_id == "MoveP-v0":
+        test_env = gym.make(args.env_id)
+    else:
+        ## test model and save trajectories
+        test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
+
+    if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
         test_env = gym.wrappers.ClipAction(test_env)
     if args.normalize_obs:
         test_env = gym.wrappers.NormalizeObservation(test_env)
         test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
-    mu, std = save_traj_dict(args.env_id, test_env, agent, device)
+    mu, std, d_policy = save_traj_dict(args.env_id, test_env, agent, device)
+
+    if args.env_id == "MoveP-v0":
+        gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+        for d in gen_demos:
+            plt.scatter(d['obs'][:,0], d['obs'][:,1], s=5, c='g', alpha=0.3)
+        plt.scatter(d_policy['obs'][:,0], d_policy['obs'][:,1], s=5, c='m', alpha=0.3)
+        plt.savefig(f"runs/{run_name}/gail_scatter.png")
 
     # save df for easier parsing
     if args.total_timesteps > 0:    

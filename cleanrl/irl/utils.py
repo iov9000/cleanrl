@@ -423,7 +423,7 @@ class MujocoTestWrapper(gym.Wrapper):
         o = o + self.eps*np.random.randn(*o.shape)
         return o, r, d, i
 
-def save_traj_dict(env_name, env, model, device, nr_trajectories=10, min_total_rew=100):
+def save_traj_dict(env_name, env, model, device, nr_trajectories=10, min_total_rew=-1e6):
     num_steps = 0
     expert_obs = []
     expert_acs = []
@@ -479,4 +479,4 @@ def save_traj_dict(env_name, env, model, device, nr_trajectories=10, min_total_r
     d = {'obs': expert_obs, 'acs': expert_acs, 'rew': expert_rew, 'done': expert_done}
     #pickle.dump(d, open(filename, 'wb'))
 
-    return np.mean(ep_rew), np.std(ep_rew)
+    return np.mean(ep_rew), np.std(ep_rew), d

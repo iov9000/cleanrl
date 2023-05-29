@@ -105,7 +105,7 @@ def compute_swd(z_expert: torch.Tensor,
     w_dist = w_dist.pow(p)
     return reg_weight * w_dist.mean()
 
-def layer_init(layer, std=1, bias_const=0.0):
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     #torch.nn.init.constant_(layer.bias, bias_const)
     return layer
