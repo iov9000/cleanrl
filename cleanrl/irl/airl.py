@@ -47,11 +47,10 @@ class AIRLDiscriminator(nn.Module):
 
         layer_dims = self.layer_dims
 
-        if self.lip_coeff > 0:
-            f = lambda x: spectral_norm(x)
-        else:
-            f = lambda x: x
-
+        #if self.lip_coeff > 0:
+        #    f = lambda x: spectral_norm(x)
+        #else:
+        f = lambda x: x
 
         # reward function g_\psi
         if self.use_cnn_base:

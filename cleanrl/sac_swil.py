@@ -7,6 +7,20 @@ from datetime import datetime
 from distutils.util import strtobool
 
 import gym
+
+gym.envs.register(
+     id='MoveP-v0',
+     entry_point='envs.envs2d:MoveP',
+     max_episode_steps=1000,
+)
+
+gym.envs.register(
+     id='CMoveP-v0',
+     entry_point='envs.envs2d:CMoveP',
+     max_episode_steps=1000,
+)
+
+
 import numpy as np
 import pybullet_envs  # noqa
 import torch

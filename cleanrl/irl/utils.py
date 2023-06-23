@@ -8,6 +8,7 @@ import ot
 import gym
 import pickle
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 def load_hf_demos(env_name, folder=None, n_demos=10, bary_enhance=False):
     if folder is None:
@@ -22,13 +23,23 @@ def load_hf_demos(env_name, folder=None, n_demos=10, bary_enhance=False):
 
     return expert_demos
 
-def get_trajectory_list(demos):
+def get_trajectory_list(demos,oa_cat=False):
     done_cnt = 0
     trajs = []
     ep = []
-    for i, t in enumerate(demos):
-        ep.append(t)
-        if t[-1] == 1:
+    obs = demos['obs']
+    acs = demos['acs']
+    dones = demos['done']
+    if len(acs.shape) == 1:
+        acs = np.expand_dims(acs,-1)
+
+    for o,a,d in zip(obs,acs,dones):
+        if oa_cat:
+            oa = np.concatenate([o,a])
+        else:
+            oa = o
+        ep.append(oa.astype(np.float32))
+        if int(d) == 1:
             done_cnt += 1
             trajs.append(np.array(ep))
             ep = []
@@ -36,9 +47,9 @@ def get_trajectory_list(demos):
     return trajs
 
 def compute_sw_barycenter(a,b,lr=1e3,nb_iter_max=1000,bary_size=1000,n_proj=100):
-    x1_torch = torch.tensor(a)
-    x2_torch = torch.tensor(b)
-    xbinit = np.random.randn(bary_size, a.shape[-1])
+    x1_torch = torch.from_numpy(a)
+    x2_torch = torch.from_numpy(b)
+    xbinit = np.random.randn(bary_size, a.shape[-1]).astype(np.float32)
     xbary_torch = torch.tensor(xbinit).requires_grad_(True)
 
     #x_all = np.zeros((nb_iter_max, xbary_torch.shape[0], 2))
@@ -70,28 +81,56 @@ def compute_sw_barycenter(a,b,lr=1e3,nb_iter_max=1000,bary_size=1000,n_proj=100)
     
     return xb
 
-def enhance_demos_with_barycenters(demos,lr=1e3,nb_iter_max=1000,bary_size=1000,n_proj=100,n_barys=20):
-    demo_list = get_trajectory_list(demos['all'])
+def enhance_demos_with_barycenters(args, demos, test_env, lr=1e3,nb_iter_max=1000,bary_size=1000,n_proj=100):
+    demo_list = get_trajectory_list(demos['all'], args.use_actions)
     pairs = [(a, b) for idx, a in enumerate(demo_list) for b in demo_list[idx + 1:]]
     barys = []
     for i,(a,b) in enumerate(pairs):
-        barys.append(compute_sw_barycenter(a,b,lr,nb_iter_max,bary_size,n_proj))
-        if i > n_barys:
+        if i == args.enhance_barys:
             break
+        else:
+            barys.append(compute_sw_barycenter(a,b,lr,nb_iter_max,bary_size,n_proj))
+
+    f = plt.figure(figsize=(10,10))
+    for b in barys:
+        ob_shape = test_env.observation_space.shape[-1]
+        if len(test_env.action_space.shape) == 0:
+            ac_shape = 1
+        else:
+            ac_shape = test_env.action_space.shape[-1]
+        o = b[:,:ob_shape]
+        a = b[:,ob_shape:ob_shape+ac_shape]
+        d = b[:,-1]
+        plt.scatter(o[:,0],o[:,1])
+        if hasattr(test_env, 'get_reward'):
+            r = test_env.get_reward(o) 
+        else:
+            r = np.zeros(d.shape)
+
+        # truncate actions 
+        a_ = np.squeeze(a).astype(np.int32)
+        a_ = np.minimum(np.maximum(0,a_),4,a_)
+
+        demos['all']['obs'] = np.concatenate([demos['all']['obs'], o],0)
+        demos['all']['acs'] = np.concatenate([demos['all']['acs'], a_],0)
+        demos['all']['done'] = np.concatenate([demos['all']['done'], d],0)
+        demos['all']['rew'] = np.concatenate([demos['all']['rew'], r],0)
+
+    plt.show()
+
+    #demo_list.extend(barys)
     
-    demo_list.extend(barys)
-    
-    return {'all': np.concatenate(demo_list,0)}
+    return demos
     
 def demos_gen(data, batch_size):
-    """  Yields bacth of specified size """
+    """  Yields batch of specified size """
     if batch_size<=0:
        return
     for i in range(0, len(data), batch_size):
         yield data[i : i + batch_size]
 
 def demos_gen_dict(data, batch_size):
-    """  Yields bacth of specified size """
+    """  Yields batch of specified size """
     if batch_size<=0:
        return
     for i in range(0, len(data['obs']), batch_size):

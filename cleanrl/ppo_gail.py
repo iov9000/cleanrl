@@ -115,8 +115,8 @@ def parse_args():
         help="expert demo folder")
     parser.add_argument("--n_demos", type=int, default=10,
         help="number of demos to use")
-    parser.add_argument('--enhance_demos', default=False, required=False, 
-        action='store_true', help='enhance demos using W2 barycenters')
+    parser.add_argument('--enhance_barys', default=0, required=False, 
+        type=int, help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
@@ -147,6 +147,8 @@ def parse_args():
     parser.add_argument('--on_policy', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
+    parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
+
     parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
@@ -295,14 +297,16 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
-    if args.enhance_demos:
-        print("Enhancing demos by computing Wasserstein barycenters")
-        demos = enhance_demos_with_barycenters(demos)
-    # get env specs
     test_env = gym.make(args.env_id)
+    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
+    if args.enhance_barys > 0:
+        print("Enhancing demos by computing Wasserstein barycenters")
+        demos = enhance_demos_with_barycenters(args, demos, test_env)
+    # get env specs
     discrete = not isinstance(test_env.action_space, gym.spaces.Box)
     disc = GAILDiscriminator(test_env, args)
+    if args.load_disc:
+        disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
@@ -483,6 +487,9 @@ if __name__ == "__main__":
                     dones_ = dones
 
                 if args.env_id == "MoveP-v0":
+                    # TODO: add second plot with W2-distance / KL-div / JS-div
+                    plt.scatter(10, 10, s=200, c='b', marker='o',alpha=1.0)
+                    plt.scatter(190, 190, s=200, c='r', marker='*', alpha=1.0)
                     plt.scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
                     plt.scatter(obs_[:,:,0], obs_[:,:,1], s=20, c='m', alpha=0.3, label='agent')
                     plt.axis('equal')
@@ -492,6 +499,7 @@ if __name__ == "__main__":
                     f.axes.get_yaxis().set_ticks([])
                     f.axes.xaxis.set_ticklabels([])
                     f.axes.yaxis.set_ticklabels([])
+                    #plt.legend()
                     plt.savefig(f"runs/{run_name}/gail_scatter_{global_step}.png")
 
                 update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
@@ -549,6 +557,14 @@ if __name__ == "__main__":
     mu, std, d_policy = save_traj_dict(args.env_id, test_env, agent, device)
 
     if args.env_id == "MoveP-v0":
+        # convert all pngs to gif
+        import imageio
+        images = []
+        for filename in os.listdir(f"runs/{run_name}"):
+            if '.png' in filename:
+                images.append(imageio.imread(f"runs/{run_name}/{filename}"))
+        imageio.mimsave(f"runs/{run_name}/gail_training.gif", images)
+
         gen_demos = demos_gen_dict(demos['all'], args.batch_size)
         for d in gen_demos:
             plt.scatter(d['obs'][:,0], d['obs'][:,1], s=5, c='g', alpha=0.3)

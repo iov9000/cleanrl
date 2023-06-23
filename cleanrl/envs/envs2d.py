@@ -336,6 +336,13 @@ class MoveP(Env):
     def clamp(self, n, minn, maxn):
         return max(min(maxn, n), minn)
 
+    def get_reward(self, state, tgt = (175,175)):
+        curr_tgt = np.array(tgt)
+        # l2 distance as reward
+        reward = -(np.sqrt((state[0] - curr_tgt[0])**2 + (state[1]-curr_tgt[1])**2))
+        
+        return reward
+
     def step(self, action):
         # Assert that it is a valid action 
         assert self.action_space.contains(action), "Invalid Action"
