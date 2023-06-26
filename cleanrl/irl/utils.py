@@ -23,7 +23,23 @@ def load_hf_demos(env_name, folder=None, n_demos=10, bary_enhance=False):
 
     return expert_demos
 
-def get_trajectory_list(demos,oa_cat=False):
+
+def load_lap_demos(folder='demos/davos_data', n_demos=10, bary_enhance=False, offset=100, obs_shape=3):
+    expert_demos = []
+    cnt = 0
+    print(folder)
+
+    for f in os.listdir(folder):
+        cnt += 1
+        if 'npy' in f:
+            expert_demos.append(np.load(os.path.join(folder, f))[offset:, :obs_shape])
+        if cnt > n_demos:
+            break
+
+    return {'all': expert_demos}
+
+
+def get_trajectory_list(demos, oa_cat=False):
     done_cnt = 0
     trajs = []
     ep = []

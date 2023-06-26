@@ -30,7 +30,6 @@ gym.envs.register(
      max_episode_steps=1000,
 )
 
-
 import numpy as np
 import pybullet_envs  # noqa
 import torch

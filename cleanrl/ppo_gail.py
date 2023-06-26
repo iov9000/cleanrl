@@ -1,18 +1,29 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_continuous_actionpy
+import sys
 import argparse
 import os
-import sys
 import random
 import time
 from datetime import datetime
 from distutils.util import strtobool
 
-module_path = os.path.abspath(os.path.join('../ccl'))
-if module_path not in sys.path:
-    sys.path.append(module_path)
+#import faulthandler; faulthandler.enable()
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pybullet_envs  # noqa
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.distributions.normal import Normal
+from torch.distributions.categorical import Categorical
+
+from torch.utils.tensorboard import SummaryWriter
+# module_path = os.path.abspath(os.path.join('..'))
+# if module_path not in sys.path:
+#     sys.path.append(module_path)
 
 import gym
-import matplotlib.pyplot as plt
 
 gym.envs.register(
      id='MoveP-v0',
@@ -25,19 +36,16 @@ gym.envs.register(
      entry_point='envs.envs2d:CMoveP',
      max_episode_steps=1000,
 )
-import numpy as np
-import pybullet_envs  # noqa
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.distributions.normal import Normal
-from torch.distributions.categorical import Categorical
 
-from torch.utils.tensorboard import SummaryWriter
+gym.envs.register(
+     id='Lap-v0',
+     entry_point='envs.env_lap:Laparos',
+     max_episode_steps=1000,
+)
 
 from irl.gail import GailReward, GAILDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
-                    demos_gen_dict, MujocoTestWrapper, save_traj_dict
+from irl.utils import load_hf_demos, load_lap_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
+                   demos_gen_dict, MujocoTestWrapper, save_traj_dict
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -297,8 +305,14 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
+
+    if args.env_id == 'Lap-v0':
+        demos = load_lap_demos('demos/davos_data', args.n_demos)
+    else:
+        demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
+
     test_env = gym.make(args.env_id)
-    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
+
     if args.enhance_barys > 0:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(args, demos, test_env)

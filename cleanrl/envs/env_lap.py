@@ -1,18 +1,21 @@
 import os
 import sys
+
 from gym import Env, spaces
+#import open3d as o3d
+import trimesh
+
 import numpy as np
 import cv2  
 import matplotlib
 import matplotlib.pyplot as plt
 import random
-import open3d as o3d
 
 module_path = os.path.abspath(os.path.join('..'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 
-def load_meshes(folder, simplify_mesh=False):
+def load_meshes_o3d(folder, simplify_mesh=False):
     meshes = {}
     vertices = []
     for f in os.listdir(folder):
@@ -41,18 +44,60 @@ def load_meshes(folder, simplify_mesh=False):
     
     return meshes, vertices, targets
 
-# discrete movepoint
+def as_mesh(scene_or_mesh):
+    """
+    Convert a possible scene to a mesh.
+
+    If conversion occurs, the returned mesh has only vertex and face data.
+    """
+    if isinstance(scene_or_mesh, trimesh.Scene):
+        if len(scene_or_mesh.geometry) == 0:
+            mesh = None  # empty scene
+        else:
+            # we lose texture information here
+            mesh = trimesh.util.concatenate(
+                tuple(trimesh.Trimesh(vertices=g.vertices, faces=g.faces)
+                    for g in scene_or_mesh.geometry.values()))
+    else:
+        assert(isinstance(scene_or_mesh, trimesh.Trimesh))
+        mesh = scene_or_mesh
+    return mesh
+
+def load_meshes_tri(folder, simplify_mesh=False):
+    meshes = {}
+    vertices = []
+
+    for f in os.listdir(folder):
+        if 'obj' in f:
+            mesh = as_mesh(trimesh.load_mesh(os.path.join(folder,f)))
+            meshes[f] = mesh
+            vertices.append(np.array(mesh.vertices))
+
+    vertices = np.concatenate(vertices,0)
+
+    belly_center = np.array(meshes['Belly.obj'].centroid)
+    targets = []
+    for k,v in meshes.items():
+        bb_c = np.array(v.centroid)
+        tgt = bb_c + (belly_center-bb_c)*0.5
+        targets.append(tgt)
+    
+    return meshes, vertices, targets
+
+
+
 class Laparos(Env):
-    def __init__(self, step_size=0.001, mesh_folder='envs/obj', 
-                    state_spec='r3', gc=True, random_init=False):
+    def __init__(self, step_size=0.0005, mesh_folder='envs/obj', state_spec='r3', gc=True, random_init=False):
         super(Laparos, self).__init__()
 
         # load meshes        
-        self.meshes, self.vertices, self.waypoints = load_meshes(mesh_folder)
+        self.meshes, self.vertices, self.waypoints = load_meshes_tri(mesh_folder)
         self.n_tgt = len(self.waypoints)
-        self.initial_position = np.array(self.meshes['DomeOfBladder.obj'].get_center()) + np.array([0.05,0.05,0.05]) 
-        self.radius = 0.0002
-        belly_bbox = np.array(self.meshes['Belly.obj'].get_oriented_bounding_box().get_box_points())
+        #self.initial_position = np.array(self.meshes['DomeOfBladder.obj'].get_center()) + np.array([0.05,0.05,0.05]) 
+        self.initial_position = np.array(self.meshes['DomeOfBladder.obj'].centroid) + np.array([0.05,0.05,0.05]) 
+        self.radius = step_size
+        #belly_bbox = np.array(self.meshes['Belly.obj'].get_oriented_bounding_box().get_box_points())
+        belly_bbox = np.array(self.meshes['Belly.obj'].bounding_box_oriented.vertices)
         self.space_min = np.min(belly_bbox)
         self.space_max = np.max(belly_bbox)
         self.goal_conditioning = gc
@@ -162,20 +207,21 @@ class Laparos(Env):
         # REMOVE NOOP
         #elif action == 4:
         #    self.agent.move(0,0)
-        
+        reward = 0
         # compute distance to meshes and check for collisions
         #dist = (self.agent-self.vertices)**2 < self.radius**2
         for k,v in self.meshes.items():
-            dist = np.sum((self.agent-v.vertices)**2) < self.radius**2
+            dist = np.sum((self.agent-v.vertices)**2,-1) < self.radius
             if np.any(dist):
                 print(f"Collision with {k}")
-                self.reward = -1000
+                reward += -1000
                 self.done = True
+                self.needs_reset = True
             
         curr_tgt = np.array(self.waypoints[self.curr_tgt])
         # l2 distance as reward
-        reward = -np.linalg.norm(self.agent - curr_tgt)
-        
+        reward += -np.linalg.norm(self.agent - curr_tgt)
+
         if np.linalg.norm(self.agent - curr_tgt) < 2*self.step_size:
             #reward += 5
             print(f"Task solved")
@@ -210,6 +256,7 @@ class Laparos(Env):
         ax = fig.add_subplot(111, projection='3d')
         #ax = Axes3D(fig)
         idx = np.arange(500,560)
+        scale = 1
 
         plot_mesh=True
         #ax.view_init(-10, 90)
@@ -218,8 +265,10 @@ class Laparos(Env):
             total_points += len(v.vertices)
             vtx = np.array(v.vertices)
             idx = np.arange(int(len(v.vertices)/2)-30, int(len(v.vertices)/2)+30)
-            bb = np.array(v.get_oriented_bounding_box().get_box_points())
-            bb_c = np.array(v.get_oriented_bounding_box().get_center())
+            #bb = np.array(v.get_oriented_bounding_box().get_box_points())
+            #bb_c = np.array(v.get_oriented_bounding_box().get_center())
+            bb = np.array(v.bounding_box_oriented.vertices)*scale
+            bb_c = np.array(v.centroid)*scale
             if plot_mesh:
                 if 'LiverRight' in k:
                     ax.scatter(-vtx[:,0],vtx[:,1],-vtx[:,2], s=0.2)
