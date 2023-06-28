@@ -83,10 +83,14 @@ def load_meshes_tri(folder, anatomy_list, simplify_mesh=False, scale=1000):
     targets = []
     for k in anatomy_list:
         bb_c = np.array(meshes[k].centroid)
-        tgt = bb_c + (belly_center-bb_c)*0.7
+        tgt = bb_c + (belly_center-bb_c)*0.6
         # (sanity) check if target is inside mesh 
-        #print(k)
-        #print(meshes[k].contains(np.expand_dims(tgt,0)))
+        check_contains = []
+        for j in anatomy_list:
+            check_contains.extend(meshes[j].contains(np.expand_dims(tgt,0)))
+            #print(k, j, np.min(np.array(meshes[j].vertices)-tgt))
+
+        assert not np.any(np.array(check_contains))
         targets.append(tgt)
     
     return meshes, vertices, targets
@@ -96,7 +100,7 @@ def load_meshes_tri(folder, anatomy_list, simplify_mesh=False, scale=1000):
 class Laparos(Env):
     metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
 
-    def __init__(self, step_size=1, mesh_folder='envs/obj', state_spec='r3', gc=False, random_init=False):
+    def __init__(self, step_size=0.2, mesh_folder='envs/obj', state_spec='r3', gc=True, random_init=False):
         super(Laparos, self).__init__()
 
         self.anatomy_list = ['DomeOfBladder.obj', 'Uterus.obj', 'CecumAppendix.obj', 'ColonRight.obj', 
@@ -106,7 +110,7 @@ class Laparos(Env):
         self.meshes, self.vertices, self.waypoints = load_meshes_tri(mesh_folder, self.anatomy_list)
         self.n_tgt = len(self.waypoints)
         #self.initial_position = np.array(self.meshes['DomeOfBladder.obj'].get_center()) + np.array([0.05,0.05,0.05]) 
-        self.initial_position = np.array(self.meshes['Belly.obj'].centroid)
+        self.initial_position = np.array(self.meshes['Belly.obj'].centroid) + + np.array([0.0,10.0,0.0]) 
         self.radius = step_size
         #belly_bbox = np.array(self.meshes['Belly.obj'].get_oriented_bounding_box().get_box_points())
         belly_bbox = np.array(self.meshes['Belly.obj'].bounding_box_oriented.vertices)
@@ -114,6 +118,7 @@ class Laparos(Env):
         self.space_max = np.max(belly_bbox)
         self.goal_conditioning = gc
         self.plot_meshes = True
+        self.done_on_collision = True
 
         # Define a 3-D or 7-D observation space 
         if state_spec == 'r3so3':
@@ -132,7 +137,7 @@ class Laparos(Env):
         if state_spec == 'r3so3':
             self.action_space = spaces.Discrete(11,)
         else:
-            self.action_space = spaces.Discrete(7,)
+            self.action_space = spaces.Discrete(6,)
         
         # Define target points based on geometry
         
@@ -184,7 +189,7 @@ class Laparos(Env):
     def get_reward(self, state, tgt = (175,175)):
         curr_tgt = np.array(tgt)
         # l2 distance as reward
-        reward = -(np.sqrt((state[0] - curr_tgt[0])**2 + (state[1]-curr_tgt[1])**2))
+        reward = -(np.sqrt((state[0] - curr_tgt[0])**2 + (state[1]-curr_tgt[1])**2))/1000
     
         return reward
 
@@ -227,15 +232,16 @@ class Laparos(Env):
             dist = np.sum((self.agent-v.vertices)**2,-1) < self.radius
             if np.any(dist):
                 print(f"Collision with {k}")
-                reward += -100000
-                self.done = True
-                self.needs_reset = True
+                reward += -10000
+                if self.done_on_collision:
+                    self.done = True
+                    self.needs_reset = True
             
         curr_tgt = np.array(self.waypoints[self.curr_tgt])
         # l2 distance as reward
-        reward += -np.linalg.norm(self.agent - curr_tgt)
+        reward += -np.linalg.norm(self.agent - curr_tgt)/1000
 
-        if np.linalg.norm(self.agent - curr_tgt) < 2*self.step_size:
+        if np.linalg.norm(self.agent - curr_tgt) < 5*self.step_size:
             #reward += 5
             print(f"Task solved: {self.anatomy_list[self.curr_tgt]} reached ")
 
@@ -246,6 +252,7 @@ class Laparos(Env):
             else:
                 # update target
                 reward += 500
+                self.time += 500
                 self.curr_tgt+=1
 
         if self.goal_conditioning:

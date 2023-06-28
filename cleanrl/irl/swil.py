@@ -448,7 +448,7 @@ class SWILDiscriminator(nn.Module):
 
         if self.opt.swil_loss == 'surr_loss':
             # surrogate loss from maxSWGAN paper
-            surr_loss = torch.sum(self.proj(self.policy_obs,self.policy_acs)) - torch.sum(self.proj(exp_obs,exp_acs)) 
+            surr_loss = torch.sum(self.proj(self.policy_obs, self.policy_acs)) - torch.sum(self.proj(exp_obs,exp_acs)) 
             d_loss = surr_loss
         elif self.opt.swil_loss == 'approx_sw':
             obs = self.policy_obs

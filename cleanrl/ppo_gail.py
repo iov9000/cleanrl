@@ -181,7 +181,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
             env = gym.wrappers.TimeAwareObservation(env)
         if capture_video:
             if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % 200 == 0)
         if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env)
         if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):

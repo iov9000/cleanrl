@@ -27,7 +27,7 @@ gym.envs.register(
 gym.envs.register(
      id='Lap-v0',
      entry_point='envs.env_lap:Laparos',
-     max_episode_steps=1000,
+     max_episode_steps=10000,
 )
 
 import numpy as np
@@ -79,7 +79,7 @@ def parse_args():
         help="the number of parallel game environments")
     parser.add_argument("--num-steps", type=int, default=512, # 2048
         help="the number of steps to run in each environment per policy rollout")
-    parser.add_argument("--agent_size", type=int, default=256, help='actor-critic network size')
+    parser.add_argument("--agent_size", type=int, default=64, help='actor-critic network size')
     parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="Toggle learning rate annealing for policy and value networks")
     parser.add_argument("--gamma", type=float, default=0.95, # 0.99
@@ -117,7 +117,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma):
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % 200 == 0)
         
         if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env)
