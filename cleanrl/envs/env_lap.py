@@ -8,6 +8,7 @@ import trimesh
 import numpy as np
 import cv2  
 import matplotlib
+matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import random
 
@@ -63,13 +64,16 @@ def as_mesh(scene_or_mesh):
         mesh = scene_or_mesh
     return mesh
 
-def load_meshes_tri(folder, simplify_mesh=False):
+def load_meshes_tri(folder, anatomy_list, simplify_mesh=False, scale=1000):
     meshes = {}
     vertices = []
 
     for f in os.listdir(folder):
         if 'obj' in f:
             mesh = as_mesh(trimesh.load_mesh(os.path.join(folder,f)))
+            mesh.apply_scale(scale)
+            if simplify_mesh and 'Belly' not in f:
+                mesh = mesh.simplify_quadratic_decimation(2000)
             meshes[f] = mesh
             vertices.append(np.array(mesh.vertices))
 
@@ -77,9 +81,12 @@ def load_meshes_tri(folder, simplify_mesh=False):
 
     belly_center = np.array(meshes['Belly.obj'].centroid)
     targets = []
-    for k,v in meshes.items():
-        bb_c = np.array(v.centroid)
-        tgt = bb_c + (belly_center-bb_c)*0.5
+    for k in anatomy_list:
+        bb_c = np.array(meshes[k].centroid)
+        tgt = bb_c + (belly_center-bb_c)*0.7
+        # (sanity) check if target is inside mesh 
+        #print(k)
+        #print(meshes[k].contains(np.expand_dims(tgt,0)))
         targets.append(tgt)
     
     return meshes, vertices, targets
@@ -87,20 +94,26 @@ def load_meshes_tri(folder, simplify_mesh=False):
 
 
 class Laparos(Env):
-    def __init__(self, step_size=0.0005, mesh_folder='envs/obj', state_spec='r3', gc=True, random_init=False):
+    metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
+
+    def __init__(self, step_size=1, mesh_folder='envs/obj', state_spec='r3', gc=False, random_init=False):
         super(Laparos, self).__init__()
 
+        self.anatomy_list = ['DomeOfBladder.obj', 'Uterus.obj', 'CecumAppendix.obj', 'ColonRight.obj', 
+                    'LiverRight.obj', 'Falciform.obj', 'LiverLeft.obj', 'GallBladder.obj', 
+                    'HepatoDuodenalLigament.obj', 'Spleen.obj', 'Stomach.obj']
         # load meshes        
-        self.meshes, self.vertices, self.waypoints = load_meshes_tri(mesh_folder)
+        self.meshes, self.vertices, self.waypoints = load_meshes_tri(mesh_folder, self.anatomy_list)
         self.n_tgt = len(self.waypoints)
         #self.initial_position = np.array(self.meshes['DomeOfBladder.obj'].get_center()) + np.array([0.05,0.05,0.05]) 
-        self.initial_position = np.array(self.meshes['DomeOfBladder.obj'].centroid) + np.array([0.05,0.05,0.05]) 
+        self.initial_position = np.array(self.meshes['Belly.obj'].centroid)
         self.radius = step_size
         #belly_bbox = np.array(self.meshes['Belly.obj'].get_oriented_bounding_box().get_box_points())
         belly_bbox = np.array(self.meshes['Belly.obj'].bounding_box_oriented.vertices)
         self.space_min = np.min(belly_bbox)
         self.space_max = np.max(belly_bbox)
         self.goal_conditioning = gc
+        self.plot_meshes = True
 
         # Define a 3-D or 7-D observation space 
         if state_spec == 'r3so3':
@@ -214,7 +227,7 @@ class Laparos(Env):
             dist = np.sum((self.agent-v.vertices)**2,-1) < self.radius
             if np.any(dist):
                 print(f"Collision with {k}")
-                reward += -1000
+                reward += -100000
                 self.done = True
                 self.needs_reset = True
             
@@ -224,7 +237,7 @@ class Laparos(Env):
 
         if np.linalg.norm(self.agent - curr_tgt) < 2*self.step_size:
             #reward += 5
-            print(f"Task solved")
+            print(f"Task solved: {self.anatomy_list[self.curr_tgt]} reached ")
 
             if self.curr_tgt == len(self.waypoints)-1:
                 # task solved
@@ -247,18 +260,21 @@ class Laparos(Env):
 
         return state, reward, self.done, {}
 
-    def render(self, mode = "human"):
+    def render(self, mode = "rgb_array"):
         # do 3d plot with meshes
         assert mode in ["human", "rgb_array"], "Invalid mode, must be either \"human\" or \"rgb_array\""
         matplotlib.style.use('seaborn')
 
+        #fig = plt.gcf()
         fig = plt.figure(figsize=[10,10])
         ax = fig.add_subplot(111, projection='3d')
         #ax = Axes3D(fig)
+        ax.view_init(-50, 90)
+        ax.dist = 5
+
         idx = np.arange(500,560)
         scale = 1
 
-        plot_mesh=True
         #ax.view_init(-10, 90)
         total_points = 0
         for k,v in self.meshes.items():
@@ -269,22 +285,38 @@ class Laparos(Env):
             #bb_c = np.array(v.get_oriented_bounding_box().get_center())
             bb = np.array(v.bounding_box_oriented.vertices)*scale
             bb_c = np.array(v.centroid)*scale
-            if plot_mesh:
+            if self.plot_meshes:
                 if 'LiverRight' in k:
-                    ax.scatter(-vtx[:,0],vtx[:,1],-vtx[:,2], s=0.2)
+                    ax.scatter(-vtx[:,0],vtx[:,1],-vtx[:,2], s=0.3)
                     ax.scatter(-vtx[idx,0],vtx[idx,1],-vtx[idx,2], s=3, c='cyan')
                 else:
-                    ax.scatter(vtx[:,0],vtx[:,1],vtx[:,2], s=0.2)
+                    ax.scatter(vtx[:,0],vtx[:,1],vtx[:,2], s=0.3)
                     ax.scatter(vtx[idx,0],vtx[idx,1],vtx[idx,2], s=3, c='cyan')
 
             #ax.scatter(bb[:,0],bb[:,1],bb[:,2], s=10, c='red')
-            ax.scatter(bb_c[0],bb_c[1],bb_c[2], s=20, c='green')
+            ax.scatter(bb_c[0],bb_c[1],bb_c[2], s=10, c='yellow')
+
             ax.set_xlabel('X')
             ax.set_ylabel('Y')
             ax.set_zlabel('Z')
+
+        # plot agent
+        ax.scatter(self.agent[0],self.agent[1],self.agent[2], s=50, c='red')
+
+        wp = np.array(self.waypoints)
+        ax.scatter(wp[:,0], wp[:,1],wp[:,2], s=30, c='green')
+        wp_curr = wp[self.curr_tgt]
+
+        ax.scatter(wp_curr[0],wp_curr[1],wp_curr[2], s=40, c='m')
+
+        # plot demos?
 
         if mode == "human":
             plt.show()
 
         elif mode == "rgb_array":
-            return fig
+            #return fig
+            fig.canvas.draw()
+            data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            return data

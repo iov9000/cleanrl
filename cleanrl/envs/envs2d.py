@@ -266,6 +266,8 @@ class MovePoint(Env):
 
 # discrete movepoint
 class MoveP(Env):
+    metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
+
     def __init__(self, waypoints=[(175,175)], size=200, random_init=False):
         super(MoveP, self).__init__()
         
@@ -405,11 +407,16 @@ class MoveP(Env):
             plt.show()
 
         elif mode == "rgb_array":
-            return fig
-
+            #return fig
+            fig.canvas.draw()
+            data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            return data
     
 # continuous movepoint
 class CMoveP(Env):
+    metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
+
     def __init__(self, waypoints=[(175,175)], size=200, random_init=False):
         super(CMoveP, self).__init__()
         

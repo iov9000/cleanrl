@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 from distutils.util import strtobool
 
-#import faulthandler; faulthandler.enable()
+import faulthandler; faulthandler.enable()
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -307,7 +307,7 @@ if __name__ == "__main__":
 
 
     if args.env_id == 'Lap-v0':
-        demos = load_lap_demos('demos/davos_data', args.n_demos)
+        demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
     else:
         demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
 

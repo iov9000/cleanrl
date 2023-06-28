@@ -24,17 +24,35 @@ def load_hf_demos(env_name, folder=None, n_demos=10, bary_enhance=False):
     return expert_demos
 
 
-def load_lap_demos(folder='demos/davos_data', n_demos=10, bary_enhance=False, offset=100, obs_shape=3):
-    expert_demos = []
+def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, offset=100, obs_shape=3):
+    expert_demos = {}
+    obs = []
+    acs = []
+    rew = []
+    dones = []
     cnt = 0
-    print(folder)
 
     for f in os.listdir(folder):
         cnt += 1
         if 'npy' in f:
-            expert_demos.append(np.load(os.path.join(folder, f))[offset:, :obs_shape])
+            demo = {}
+            o = np.load(os.path.join(folder, f))[offset:, :obs_shape]
+            a = np.zeros([len(o)])
+            r = np.zeros([len(o)])
+            d = np.zeros([len(o)]) 
+            d[-1] = 1
+
+            obs.append(o)
+            acs.append(a)
+            rew.append(r)
+            dones.append(d)
         if cnt > n_demos:
             break
+
+    expert_demos['obs'] = np.concatenate(obs,0)
+    expert_demos['acs'] = np.concatenate(acs,0)
+    expert_demos['rew'] = np.concatenate(rew,0)
+    expert_demos['done'] = np.concatenate(dones,0)
 
     return {'all': expert_demos}
 
@@ -147,7 +165,7 @@ def demos_gen(data, batch_size):
 
 def demos_gen_dict(data, batch_size):
     """  Yields batch of specified size """
-    if batch_size<=0:
+    if batch_size <= 0:
        return
     for i in range(0, len(data['obs']), batch_size):
         yield {'obs': data['obs'][i : i + batch_size], 
