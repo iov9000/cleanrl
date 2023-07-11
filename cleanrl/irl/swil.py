@@ -10,6 +10,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 
 from torch.nn.utils import spectral_norm
 from irl.utils import ResNetAIRLDisc, MiniGridCNN, AtariCNNBase
+from irl.gsw_utils import gsw, get_slice
 from tqdm import tqdm
 
 def get_random_projections(latent_dim: int, num_samples: int, proj_dist='normal') -> torch.Tensor:
@@ -523,7 +524,6 @@ class SwilReward(gym.Wrapper):
         if done:
             self.traj=[]
             
-
         with torch.no_grad():
             # get discriminator reward and train on that
             #print([p.norm(2) for p in self.discriminator.parameters()])
@@ -534,6 +534,138 @@ class SwilReward(gym.Wrapper):
 
         return next_obs, irl_reward, done, info
 
+
+class SwilFlowReward(gym.Wrapper):
+    def __init__(self, env, opt, disc):
+        super().__init__(env=env)
+        # self.reward_fn = make_network(**reward_fn_spec)
+        self.use_actions = opt.use_actions
+        self.discriminator = disc
+        self.obs = None
+        self.n_proj = opt.n_proj
+        self.sw_poly_deg = opt.sw_poly_deg
+        self.radon_df_type = opt.radon_df_type
+        # calculate reward at the end of trajecotiry
+        self.traj = []
+
+    def compute_sw_grad(self, rho_pi, rho_e):
+        #loss = ot.sliced_wasserstein_distance(x1_torch, x2_torch, n_projections=100, seed=gen)
+        rho_pi.requires_grad_(True)
+        loss = gsw(rho_pi, rho_e, ftype=self.radon_df_type,
+                   n_proj=self.n_proj, degree=self.sw_poly_deg)
+        loss.backward()
+
+        return rho_pi.grad
+
+    def step(self, action):
+        next_obs, gt_reward, done, info = self.env.step(action)
+        info['gt_reward'] = gt_reward
+        if self.obs is not None:
+            obs_t = torch.tensor(self.obs, dtype=torch.get_default_dtype())
+        else:
+            obs_t = torch.tensor(next_obs, dtype=torch.get_default_dtype())
+
+        acs_t = torch.tensor(action, dtype=torch.get_default_dtype())
+        next_obs_t = torch.tensor(next_obs, dtype=torch.get_default_dtype())
+        done_t = torch.tensor(done, dtype=torch.get_default_dtype())
+
+        if done:
+            self.traj = []
+
+        with torch.no_grad():
+            # get discriminator reward and train on that
+            #print([p.norm(2) for p in self.discriminator.parameters()])
+            d_obs = next_obs_t-obs_t
+            #sw_grad_obs = 
+            irl_reward = self.discriminator.get_reward(
+                obs_t, acs_t, next_obs_t, done_t).cpu().numpy()
+            #irl_reward = self.discriminator.get_reward(obs_t, acs_t, next_obs_t).cpu().numpy()
+        self.obs = next_obs
+
+        return next_obs, irl_reward, done, info
+
+"""
+SWIL reward class based on difference of increasing arrangement maps
+"""
+class SwilIRDiffReward(gym.Wrapper):
+    def __init__(self, env, opt):
+        super().__init__(env=env)
+        # self.reward_fn = make_network(**reward_fn_spec)
+        self.use_actions = opt.use_actions
+        self.obs = None
+        self.n_proj = opt.n_proj
+        self.sw_poly_deg = opt.sw_poly_deg
+        self.radon_df_type = opt.radon_df_type
+        # TODO: makes GSW module shared across vec envs?
+        self.gsw = GSW(ftype=self.radon_df_type, nofprojections=self.n_proj, degree=self.sw_poly_deg)
+        # calculate reward at the end of trajecotiry
+        self.traj = []
+
+    def compute_gsw(self, policy_atoms, expert_atoms):
+        dist, theta, sorted_proj_pi, sorted_proj_exp = self.gsw.gsw(policy_atoms, expert_atoms, ftype=self.radon_df_type,
+                                          n_proj=self.n_proj, degree=self.sw_poly_deg)
+        self.sorted_proj_pi = sorted_proj_pi
+        self.sorted_proj_exp = sorted_proj_exp
+        self.theta = theta
+
+        return dist
+
+    def step(self, action):
+        next_obs, gt_reward, done, info = self.env.step(action)
+        info['gt_reward'] = gt_reward
+        if self.obs is not None:
+            obs_t = torch.tensor(self.obs, dtype=torch.get_default_dtype())
+        else:
+            obs_t = torch.tensor(next_obs, dtype=torch.get_default_dtype())
+
+        acs_t = torch.tensor(action, dtype=torch.get_default_dtype())
+        next_obs_t = torch.tensor(next_obs, dtype=torch.get_default_dtype())
+        done_t = torch.tensor(done, dtype=torch.get_default_dtype())
+
+        if done:
+            self.traj = []
+
+        rew = torch.tensor([0.])
+        if self.gsw.theta is not None:
+            with torch.no_grad():
+                # get discriminator reward and train on that
+                #print([p.norm(2) for p in self.discriminator.parameters()])
+                d_obs = next_obs_t-obs_t
+                obs_t_slice = get_slice(
+                    next_obs_t, self.gsw.theta, self.radon_df_type, self.sw_poly_deg)
+
+                for i in range(self.n_proj):
+                    sorted_proj = self.gsw.Xslices_sorted[:, i]
+                    sorted_proj_tgt = self.gsw.Yslices_sorted[:, i]
+
+                    slice = obs_t_slice[i]
+
+                    idx = torch.searchsorted(sorted_proj, slice)
+                    n = len(sorted_proj)
+
+                    # shift extreme indices
+                    if idx == 0:
+                        idx+=1 
+                    if idx == n:
+                        idx-=1
+
+                    diff = sorted_proj[1:]-sorted_proj[:-1]
+                    w = 1/(n*(n+1))
+                    #w = 1
+
+                    # new atom contribution
+                    rew += w*(sorted_proj[idx]-slice - sorted_proj[idx-1]-slice)
+                    # reweighting of integrals
+                    rew -= torch.sum(w*diff[:idx-1])
+                    rew += torch.sum(w*diff[idx:])
+
+                    #rew += torch.sum((sorted_proj[idx]-sorted_proj_tgt[idx])**2)
+
+                #rew = -rew
+            #irl_reward = self.discriminator.get_reward(obs_t, acs_t, next_obs_t).cpu().numpy()
+        self.obs = next_obs
+
+        return next_obs, rew.detach().numpy(), done, info
 
 class GSW():
     def __init__(self, ftype='poly', nofprojections=10, 
@@ -547,9 +679,13 @@ class GSW():
             self.device=torch.device('cuda')
         else:
             self.device=torch.device('cpu')
-        self.theta=None # This is for max-GSW
+        self.theta = None # Thi is for max-GSW
+        self.Y = None
 
-    def gsw(self, X, Y, theta=None):
+    def update_theta(self):            
+        self.theta = self.random_slice(self.theta_shape)
+
+    def gsw(self, X, Y, new_theta=False):
         '''
         Calculates GSW between two empirical distributions.
         Note that the number of samples is assumed to be equal
@@ -560,15 +696,18 @@ class GSW():
         #N,dn = X.shape
         #M,dm = Y.shape
         #assert dn==dm and M==N
-        if theta is None:
-            theta=self.random_slice(X.shape[-1])
+        self.Y = Y
+        self.theta_shape = X.shape[-1]
+        if self.theta is None or new_theta:
+            self.theta = self.random_slice(X.shape[-1])
 
-        Xslices=self.get_slice(X,theta)
-        Yslices=self.get_slice(Y,theta)
+        Xslices=self.get_slice(X,self.theta)
+        Yslices=self.get_slice(Y,self.theta)
 
-        Xslices_sorted=torch.sort(Xslices,dim=0)[0]
-        Yslices_sorted=torch.sort(Yslices,dim=0)[0]
-        return torch.sqrt(torch.sum((Xslices_sorted-Yslices_sorted)**2))
+        self.Xslices_sorted=torch.sort(Xslices,dim=0)[0]
+        self.Yslices_sorted=torch.sort(Yslices,dim=0)[0]
+
+        return torch.sqrt(torch.sum((self.Xslices_sorted-self.Yslices_sorted)**2))
 
     def max_gsw(self,X,Y,iterations=50,lr=1e-4):
         N, dn = X.shape
@@ -592,13 +731,13 @@ class GSW():
         total_loss=np.zeros((iterations,))
         for i in range(iterations):
             optimizer.zero_grad()
-            loss=-self.gsw(X.to(self.device),Y.to(self.device),self.theta.to(self.device))
+            loss=-self.gsw(X.to(self.device),Y.to(self.device))
             total_loss[i]=loss.item()
             loss.backward(retain_graph=True)
             optimizer.step()
             self.theta.data/=torch.sqrt(torch.sum(self.theta.data**2))
 
-        return self.gsw(X.to(self.device),Y.to(self.device),self.theta.to(self.device))
+        return self.gsw(X.to(self.device),Y.to(self.device))
 
     def gsl2(self,X,Y,theta=None):
         '''

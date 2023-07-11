@@ -163,15 +163,22 @@ def demos_gen(data, batch_size):
     for i in range(0, len(data), batch_size):
         yield data[i : i + batch_size]
 
-def demos_gen_dict(data, batch_size):
+def demos_gen_dict(data, batch_size, shuffle=False):
     """  Yields batch of specified size """
     if batch_size <= 0:
        return
+    
+    b_inds = np.arange(len(data['obs']))
+    if shuffle:
+        np.random.shuffle(b_inds)
+
     for i in range(0, len(data['obs']), batch_size):
-        yield {'obs': data['obs'][i : i + batch_size], 
-               'acs': data['acs'][i : i + batch_size],
-               'rew': data['rew'][i : i + batch_size],
-               'done': data['done'][i : i + batch_size]}
+        end = i + batch_size
+        mb_inds = b_inds[i:end]
+        yield {'obs': data['obs'][mb_inds], 
+               'acs': data['acs'][mb_inds],
+               'rew': data['rew'][mb_inds],
+               'done': data['done'][mb_inds]}
 
 def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
     ac_sample = env.single_action_space.sample()

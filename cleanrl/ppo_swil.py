@@ -483,6 +483,7 @@ if __name__ == "__main__":
                 n_irl_epochs = args.irl_epochs
             init = False
 
+
             for epoch in range(n_irl_epochs):            
                 # GAIL Discriminator Update 
                 gen_demos = demos_gen_dict(demos['all'], args.batch_size)

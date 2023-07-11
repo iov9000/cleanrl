@@ -98,14 +98,18 @@ def load_meshes_tri(folder, anatomy_list, simplify_mesh=False, scale=1000):
 
 
 class Laparos(Env):
-    metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
+    metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 5}
 
-    def __init__(self, step_size=0.2, mesh_folder='envs/obj', state_spec='r3', gc=True, random_init=False):
+    def __init__(self, step_size=0.2, mesh_folder='envs/obj', 
+                    state_spec='r3', gc=True, random_init=False,
+                    done_on_collision=True, continuous_actions=False,
+                    plot_meshes=True, collision_loss=False):
         super(Laparos, self).__init__()
 
         self.anatomy_list = ['DomeOfBladder.obj', 'Uterus.obj', 'CecumAppendix.obj', 'ColonRight.obj', 
                     'LiverRight.obj', 'Falciform.obj', 'LiverLeft.obj', 'GallBladder.obj', 
                     'HepatoDuodenalLigament.obj', 'Spleen.obj', 'Stomach.obj']
+
         # load meshes        
         self.meshes, self.vertices, self.waypoints = load_meshes_tri(mesh_folder, self.anatomy_list)
         self.n_tgt = len(self.waypoints)
@@ -116,10 +120,13 @@ class Laparos(Env):
         belly_bbox = np.array(self.meshes['Belly.obj'].bounding_box_oriented.vertices)
         self.space_min = np.min(belly_bbox)
         self.space_max = np.max(belly_bbox)
-        self.goal_conditioning = gc
-        self.plot_meshes = True
-        self.done_on_collision = True
 
+        self.goal_conditioning = gc
+        self.plot_meshes = plot_meshes
+        self.done_on_collision = done_on_collision
+        self.collision_loss = collision_loss
+
+        self.render_cnt = 0
         # Define a 3-D or 7-D observation space 
         if state_spec == 'r3so3':
             obs_dim = 7
@@ -138,6 +145,12 @@ class Laparos(Env):
             self.action_space = spaces.Discrete(11,)
         else:
             self.action_space = spaces.Discrete(6,)
+
+        self.continuous_actions = continuous_actions
+        if self.continuous_actions:
+            self.action_space = spaces.Box(low = np.ones([3])*-5, 
+                                            high = np.ones([3])*5,
+                                            dtype = np.float32)
         
         # Define target points based on geometry
         
@@ -203,20 +216,23 @@ class Laparos(Env):
         # apply the action to the agent
         mag = self.step_size
 
-        if action == 0:
-            move = (mag,0,0)
-        elif action == 1:
-            move = (-mag,0,0)
-        elif action == 2:
-            move = (0,mag,0)
-        elif action == 3:
-            move = (0,-mag,0)
-        elif action == 4:
-            move = (0,0,mag)
-        elif action == 5:
-            move = (0,0,-mag)
+        if self.continuous_actions:
+            move = action
         else:
-            move = (0,0,0)
+            if action == 0:
+                move = (mag,0,0)
+            elif action == 1:
+                move = (-mag,0,0)
+            elif action == 2:
+                move = (0,mag,0)
+            elif action == 3:
+                move = (0,-mag,0)
+            elif action == 4:
+                move = (0,0,mag)
+            elif action == 5:
+                move = (0,0,-mag)
+            else:
+                move = (0,0,0)
 
         move_ = np.array(move)
 
@@ -228,14 +244,15 @@ class Laparos(Env):
         reward = 0
         # compute distance to meshes and check for collisions
         #dist = (self.agent-self.vertices)**2 < self.radius**2
-        for k,v in self.meshes.items():
-            dist = np.sum((self.agent-v.vertices)**2,-1) < self.radius
-            if np.any(dist):
-                print(f"Collision with {k}")
-                reward += -10000
-                if self.done_on_collision:
-                    self.done = True
-                    self.needs_reset = True
+        if self.collision_loss:
+            for k,v in self.meshes.items():
+                dist = np.sum((self.agent-v.vertices)**2,-1) < self.radius
+                if np.any(dist):
+                    print(f"Collision with {k}")
+                    reward += -10000
+                    if self.done_on_collision:
+                        self.done = True
+                        self.needs_reset = True
             
         curr_tgt = np.array(self.waypoints[self.curr_tgt])
         # l2 distance as reward
@@ -281,7 +298,8 @@ class Laparos(Env):
 
         idx = np.arange(500,560)
         scale = 1
-
+        self.render_cnt+=1
+        print("Render count: ", self.render_cnt, flush=True)
         #ax.view_init(-10, 90)
         total_points = 0
         for k,v in self.meshes.items():

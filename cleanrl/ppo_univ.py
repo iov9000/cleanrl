@@ -62,11 +62,11 @@ def parse_args():
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     parser.add_argument('--normalize_obs', default=True, 
-        action='store_true', required=False, help='normalize observations')  
+        action='store_false', required=False, help='normalize observations')  
     parser.add_argument('--normalize_rewards', default=True, 
-        action='store_true', required=False, help='normalize irl rewards')  
+        action='store_false', required=False, help='normalize irl rewards')  
     parser.add_argument('--clip_action', default=True, 
-        action='store_true', required=False, help='clip actions')
+        action='store_false', required=False, help='clip actions')
 
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="Humanoid-v3",
@@ -90,8 +90,8 @@ def parse_args():
         help="the number of mini-batches")
     parser.add_argument("--update-epochs", type=int, default=5, #10
         help="the K epochs to update the policy")
-    parser.add_argument("--norm-adv", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="Toggles advantages normalization")
+    parser.add_argument('--norm-adv', default=True, 
+        action='store_false', required=False, help='normalize advantage')  
     parser.add_argument("--clip-coef", type=float, default=0.3,
         help="the surrogate clipping coefficient")
     parser.add_argument("--clip-vloss", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -117,7 +117,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma):
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % 200 == 0)
+                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % 200 == 10)
         
         if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env)
@@ -159,11 +159,11 @@ class Agent(nn.Module):
             output_dim = np.prod(envs.single_action_space.shape)
 
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size*4)),
             nonlin,
-            layer_init(nn.Linear(hidden_size, hidden_size)),
+            layer_init(nn.Linear(hidden_size*4, hidden_size*4)),
             nonlin,
-            layer_init(nn.Linear(hidden_size, 1), std=1.0),
+            layer_init(nn.Linear(hidden_size*4, 1), std=1.0),
         )
         self.actor_mean = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
