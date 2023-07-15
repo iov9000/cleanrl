@@ -100,8 +100,9 @@ def load_meshes_tri(folder, anatomy_list, simplify_mesh=False, scale=1000):
 class Laparos(Env):
     metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 5}
 
-    def __init__(self, step_size=0.2, mesh_folder='envs/obj', 
-                    state_spec='r3', gc=True, random_init=False,
+    def __init__(self, step_size=0.3, mesh_folder='envs/obj', 
+                 state_spec='r3', gc=True, condition_on_n_tasks_completed=True, 
+                 condition_on_anatomy_distance=False, random_init=False,
                     done_on_collision=True, continuous_actions=False,
                     plot_meshes=True, collision_loss=False):
         super(Laparos, self).__init__()
@@ -122,9 +123,11 @@ class Laparos(Env):
         self.space_max = np.max(belly_bbox)
 
         self.goal_conditioning = gc
+        self.condition_on_n_tasks_completed = condition_on_n_tasks_completed
         self.plot_meshes = plot_meshes
         self.done_on_collision = done_on_collision
         self.collision_loss = collision_loss
+        self.condition_on_anatomy_distance = condition_on_anatomy_distance
 
         self.render_cnt = 0
         # Define a 3-D or 7-D observation space 
@@ -135,6 +138,13 @@ class Laparos(Env):
 
         if self.goal_conditioning:
             obs_dim = obs_dim*2
+
+        if condition_on_n_tasks_completed:
+            obs_dim +=1
+
+        if condition_on_anatomy_distance:
+            obs_dim += len(self.anatomy_list)
+
         self.observation_shape = (obs_dim,)
 
         self.observation_space = spaces.Box(low = np.ones(self.observation_shape)*self.space_min, 
@@ -192,6 +202,19 @@ class Laparos(Env):
         else:
             state = self.agent
         
+        if self.condition_on_n_tasks_completed:
+            state = np.concatenate([self.agent, curr_tgt, [self.curr_tgt]], -1)        
+
+        if self.condition_on_anatomy_distance:
+            # compute proximity
+            dists = []
+            for k in self.anatomy_list:
+                mesh = self.meshes[k]
+                _, dist, _ = trimesh.proximity.closest_point(mesh, [self.agent])
+                dists.append(dist)
+            dists = np.squeeze(np.array(dists))
+            state = np.concatenate([state, dists],-1)
+
         self.needs_reset = False
         # return the observation
         return state
@@ -277,12 +300,26 @@ class Laparos(Env):
         else:
             state = self.agent
         
+        if self.condition_on_n_tasks_completed:
+            state = np.concatenate([self.agent, curr_tgt, [self.curr_tgt]], -1)
+
+        if self.condition_on_anatomy_distance:
+            # compute proximity
+            dists = []
+            for k in self.anatomy_list:
+                mesh = self.meshes[k]
+                _, dist, _ = trimesh.proximity.closest_point(
+                    mesh, [self.agent])
+                dists.append(dist)
+            dists = np.squeeze(np.array(dists))
+            state = np.concatenate([state, dists],-1)
+
         # If out of fuel, end the episode.
         if self.time == 0:
             self.done = True
             self.needs_reset = True
 
-        return state, reward, self.done, {}
+        return state, reward, self.done, {"terminal_observation": state}
 
     def render(self, mode = "rgb_array"):
         # do 3d plot with meshes

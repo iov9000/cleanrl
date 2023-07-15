@@ -132,11 +132,13 @@ class GAILDiscriminator(nn.Module):
         interp_obs = obs_epsilon * update_dict['policy_obs'] + (1 - obs_epsilon) * update_dict['expert_obs']
         interp_obs.requires_grad = True  # For gradient calculation
 
+
         if self.use_actions:
             action_epsilon = torch.rand(update_dict['policy_acs'].shape)
             interp_acs = action_epsilon * update_dict['policy_acs'] + (1 - action_epsilon) * update_dict['expert_acs']
             interp_acs.requires_grad = True
             encoder_input = [interp_obs, interp_acs]
+
             estimate = self.forward(interp_obs, interp_acs)
         else:            
             encoder_input = [interp_obs]

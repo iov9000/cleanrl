@@ -66,7 +66,7 @@ def parse_args():
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
-    parser.add_argument('--normalize_obs', default=True, 
+    parser.add_argument('--normalize_obs', default=False, 
         action='store_true', required=False, help='normalize irl rewards')  
     parser.add_argument('--clip_action', default=True, 
         action='store_true', required=False, help='normalize irl rewards')  
@@ -85,7 +85,7 @@ def parse_args():
     parser.add_argument("--agent_size", type=int, default=64, help='actor-critic network size')
     parser.add_argument("--num-envs", type=int, default=1,
         help="the number of parallel game environments")
-    parser.add_argument("--num-steps", type=int, default=2048,
+    parser.add_argument("--num-steps", type=int, default=512,
         help="the number of steps to run in each environment per policy rollout")
     #parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
     #    help="Toggle learning rate annealing for policy and value networks")
@@ -97,7 +97,7 @@ def parse_args():
         help="the lambda for the general advantage estimation")
     parser.add_argument("--num-minibatches", type=int, default=32,
         help="the number of mini-batches")
-    parser.add_argument("--update-epochs", type=int, default=10,
+    parser.add_argument("--update-epochs", type=int, default=3,
         help="the K epochs to update the policy")
     parser.add_argument('--norm-adv', default=True, 
         action='store_false', required=False, help='normalize irl rewards')  
@@ -160,12 +160,21 @@ def parse_args():
         action='store_true', help='use bias in disc arch')
     parser.add_argument("--disc_nonlin", type=str, default="tanh",
         help="divergence type")
-    parser.add_argument('--normalize_irl_rewards', default=True, 
+    parser.add_argument('--normalize_irl_rewards', default=False, 
         action='store_false', required=False, help='normalize irl rewards')  
+
+    # SWIL specific arguments
     parser.add_argument('--sw_poly_deg', default=2, type=int, 
         required=False, help='GSW polynomial degree')
     parser.add_argument('--radon_df_type', default='linear', type=str, 
         required=False, help='GRT defining function')
+    parser.add_argument('--swil_rew', default='insertion_loss', type=str, 
+        required=False, help='SWIL loss type (atom insertion vs. atom replacement)')
+    parser.add_argument('--sw_eval_freq', default=10, type=int, 
+        required=False, help='GSW evaluation frequency')
+    parser.add_argument('--new_theta', default=False, 
+        action='store_true', required=False, help='sample new direction of keep one during training')  
+
 
     parser.add_argument('--on_policy', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
@@ -294,6 +303,7 @@ if __name__ == "__main__":
     # create output folder with non default arguments in the name
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
     run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_np{args.n_proj}_{ua}_{id_string}"
+    
     if args.track:
         import wandb
 
@@ -536,7 +546,7 @@ if __name__ == "__main__":
                         sw_dist = envs.envs[0].gsw.max_gsw(update_dict['policy_obs'], update_dict['expert_obs'])
                     else:
                         sw_dist = envs.envs[0].gsw.gsw(update_dict['policy_obs'], update_dict['expert_obs'], new_theta)
-                    new_theta = False
+                    #new_theta = False
 
                     if global_step % args.logging_interval == 0:
                         writer.add_scalar('irl/swil_sw_dist', sw_dist, global_step)

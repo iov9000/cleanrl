@@ -593,6 +593,7 @@ class SwilIRDiffReward(gym.Wrapper):
         # self.reward_fn = make_network(**reward_fn_spec)
         self.use_actions = opt.use_actions
         self.obs = None
+        self.opt = opt
         self.n_proj = opt.n_proj
         self.sw_poly_deg = opt.sw_poly_deg
         self.radon_df_type = opt.radon_df_type
@@ -632,40 +633,42 @@ class SwilIRDiffReward(gym.Wrapper):
                 #print([p.norm(2) for p in self.discriminator.parameters()])
                 d_obs = next_obs_t-obs_t
                 obs_t_slice = get_slice(
-                    next_obs_t, self.gsw.theta, self.radon_df_type, self.sw_poly_deg)
+                    torch.unsqueeze(next_obs_t,0), self.gsw.theta, self.radon_df_type, self.sw_poly_deg)
 
-                for i in range(self.n_proj):
-                    sorted_proj = self.gsw.Xslices_sorted[:, i]
-                    sorted_proj_tgt = self.gsw.Yslices_sorted[:, i]
+                sorted_proj = torch.squeeze(self.gsw.Xslices_sorted)
+                sorted_proj_tgt = torch.squeeze(self.gsw.Yslices_sorted)
+                n = len(sorted_proj)
 
-                    slice = obs_t_slice[i]
+                idx = torch.searchsorted(sorted_proj.T, obs_t_slice.T)
+                # shift extreme indices
+                idx[idx==0] +=1
+                idx[idx==n] -=1
+                w = 1/(n*(n+1))
 
-                    idx = torch.searchsorted(sorted_proj, slice)
-                    n = len(sorted_proj)
+                for j,i in enumerate(idx):
+                    if self.opt.swil_rew == 'insertion_loss':
+                        diff = sorted_proj[1:,j]-sorted_proj[:-1,j]
+                        #w = 1
+                        # new atom contribution
+                        rew += w*torch.sum(sorted_proj[i,j]-obs_t_slice[0,j] +
+                                        sorted_proj[i-1,j]-obs_t_slice[0,j])
+                        # reweighting of integrals
+                        rew -= torch.sum(w*diff[:i-1])
+                        rew += torch.sum(w*diff[i:])
+                    else:
+                        # calculate diff when replacing atom
+                        a_prev = (sorted_proj_tgt[idx] - sorted_proj[idx])**2
+                        a_new = (sorted_proj_tgt[idx] - slice)**2
 
-                    # shift extreme indices
-                    if idx == 0:
-                        idx+=1 
-                    if idx == n:
-                        idx-=1
-
-                    diff = sorted_proj[1:]-sorted_proj[:-1]
-                    w = 1/(n*(n+1))
-                    #w = 1
-
-                    # new atom contribution
-                    rew += w*(sorted_proj[idx]-slice - sorted_proj[idx-1]-slice)
-                    # reweighting of integrals
-                    rew -= torch.sum(w*diff[:idx-1])
-                    rew += torch.sum(w*diff[idx:])
+                        rew += w*(a_new - a_prev)
 
                     #rew += torch.sum((sorted_proj[idx]-sorted_proj_tgt[idx])**2)
 
-                #rew = -rew
+                rew = -rew
             #irl_reward = self.discriminator.get_reward(obs_t, acs_t, next_obs_t).cpu().numpy()
         self.obs = next_obs
 
-        return next_obs, rew.detach().numpy(), done, info
+        return next_obs, float(rew.detach().numpy()), done, info
 
 class GSW():
     def __init__(self, ftype='poly', nofprojections=10, 
