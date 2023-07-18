@@ -377,7 +377,7 @@ if __name__ == "__main__":
         #'buffer_size': 1000000,
     }
     demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)['all']
-    fig = plt.figure(figsize=(10,10))
+    #fig = plt.figure(figsize=(10,10))
 
     model = PPOSB('MlpPolicy', env, verbose=0, **kwargs, tensorboard_log=output_dir)
     #model = DQNSB('MlpPolicy', env, verbose=1, **kwargs, tensorboard_log=output_dir)

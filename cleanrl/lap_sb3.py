@@ -98,6 +98,8 @@ def parse_args():
     # environment specific arguments
     parser.add_argument('--goal_conditioning', default=True, 
         action='store_false', required=False, help='normalize irl rewards')  
+    parser.add_argument('--condition_on_n_tasks_completed', default=True, 
+        action='store_false', required=False, help='normalize irl rewards')  
     parser.add_argument('--done_on_collision', default=True, 
         action='store_false', required=False, help='normalize irl rewards') 
     parser.add_argument('--collision_loss', default=False, 

@@ -40,7 +40,7 @@ from stable_baselines3 import SAC as SACSB
 from stable_baselines3 import DQN as DQNSB
 
 from irl.gail import GailReward, GAILDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict, MujocoTestWrapper, save_traj_dict
+from irl.utils import load_hf_demos, load_lap_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict, MujocoTestWrapper, save_traj_dict
 
 gym.envs.register(
      id='MoveP-v0',
@@ -51,7 +51,7 @@ gym.envs.register(
 gym.envs.register(
      id='Lap-v0',
      entry_point='envs.env_lap:Laparos',
-     max_episode_steps=10000,
+     max_episode_steps=5000,
 )
 
 def parse_args():
@@ -70,7 +70,7 @@ def parse_args():
         action='store_true', required=False, help='clip actions')
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="MoveP-v0",
+    parser.add_argument("--env-id", type=str, default="Lap-v0",
         help="the id of the environment")
     parser.add_argument("--n_timesteps", type=int, default=10000000, #1e6
         help="total timesteps of the experiments")
@@ -103,6 +103,8 @@ def parse_args():
     # environment specific arguments (Lap-v0)
     parser.add_argument('--goal_conditioning', default=True, 
         action='store_false', required=False, help='normalize irl rewards')  
+    parser.add_argument('--condition_on_n_tasks_completed', default=True, 
+        action='store_false', required=False, help='normalize irl rewards')  
     parser.add_argument('--done_on_collision', default=True, 
         action='store_false', required=False, help='normalize irl rewards') 
     parser.add_argument('--collision_loss', default=False, 
@@ -133,7 +135,7 @@ def parse_args():
    # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
-    parser.add_argument("--n_demos", type=int, default=10,
+    parser.add_argument("--n_demos", type=int, default=1,
         help="number of demos to use")
     parser.add_argument('--enhance_barys', default=0, required=False, 
         type=int, help='enhance demos using W2 barycenters')
@@ -212,43 +214,44 @@ class GAILUpdateCallback(BaseCallback):
     def _on_rollout_end(self) -> None:
         rb = self.locals['replay_buffer']
         env = self.locals['env']
-        gen_demos = demos_gen_dict(self.demos, self.opt.batch_size)
-        for d in gen_demos:
-            len_obs = args.batch_size
-            if len(d['obs']) < args.batch_size:
-                if args.drop_batch:
-                    break
-                else:
-                    len_obs = len(d['obs'])
+        # account for training starts! TODO: fix this.. since it's off-policy, need to figure out timing
+        if self.cnt % 1000 == 0:
+            gen_demos = demos_gen_dict(self.demos, self.opt.batch_size)
+            for d in gen_demos:
+                len_obs = args.batch_size
+                if len(d['obs']) < args.batch_size:
+                    if args.drop_batch:
+                        break
+                    else:
+                        len_obs = len(d['obs'])
 
-            obs = rb.sample(len_obs).observations
-            actions = torch.squeeze(rb.sample(len_obs).actions)
-            dones = rb.sample(len_obs).dones
-            
-            expert_obs = d['obs']
-            expert_acs = d['acs']
+                obs = rb.sample(len_obs).observations
+                actions = torch.squeeze(rb.sample(len_obs).actions)
+                dones = rb.sample(len_obs).dones
+                
+                expert_obs = d['obs']
+                expert_acs = d['acs']
 
-            expert_obs_t = torch.from_numpy(expert_obs).type(torch.get_default_dtype())
-            expert_acs_t = torch.from_numpy(expert_acs).type(torch.get_default_dtype())
+                expert_obs_t = torch.from_numpy(expert_obs).type(torch.get_default_dtype())
+                expert_acs_t = torch.from_numpy(expert_acs).type(torch.get_default_dtype())
 
+                all_obs = torch.cat([expert_obs_t, obs], 0)
+                all_acs = torch.cat([expert_acs_t, actions], 0)
 
-            all_obs = torch.cat([expert_obs_t, obs], 0)
-            all_acs = torch.cat([expert_acs_t, actions], 0)
+                loss_dict = self.disc.compute_loss({'expert_obs': expert_obs_t, 'expert_acs': expert_acs_t,
+                                                'policy_obs': obs, 'policy_acs': actions,
+                                                'all_obs': all_obs, 'all_acs': all_acs})
 
-            loss_dict = self.disc.compute_loss({'expert_obs': expert_obs_t, 'expert_acs': expert_acs_t,
-                                            'policy_obs': obs, 'policy_acs': actions,
-                                            'all_obs': all_obs, 'all_acs': all_acs})
+                loss = loss_dict['d_loss'] + args.irm_coeff * \
+                    loss_dict['grad_penalty'] + args.lip_coeff * loss_dict['lip_penalty']
+                if args.irm_coeff > 1.0:
+                    loss /= args.irm_coeff
 
-            loss = loss_dict['d_loss'] + args.irm_coeff * \
-                loss_dict['grad_penalty'] + args.lip_coeff * loss_dict['lip_penalty']
-            if args.irm_coeff > 1.0:
-                loss /= args.irm_coeff
+                self.disc.update(loss)
 
-            self.disc.update(loss)
-
-            self.logger.record('irl/gail_bce_loss', loss_dict['d_loss'])
-            if self.opt.irm_coeff > 0:
-                self.logger.record('irl/gail_irm_loss', loss_dict['grad_penalty'])
+                self.logger.record('irl/gail_bce_loss', loss_dict['d_loss'])
+                if self.opt.irm_coeff > 0:
+                    self.logger.record('irl/gail_irm_loss', loss_dict['grad_penalty'])
 
         self.cnt +=1
 
@@ -276,10 +279,22 @@ if __name__ == "__main__":
     torch.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
 
-    test_env = gym.make('MoveP-v0')
+    test_env = gym.make('Lap-v0', gc=args.goal_conditioning,
+                             condition_on_n_tasks_completed=args.condition_on_n_tasks_completed,
+                             state_spec=args.state_spec, 
+                             step_size=args.step_size,
+                             done_on_collision=args.done_on_collision,
+                             plot_meshes=args.render_meshes,
+                             collision_loss=args.collision_loss)
     disc = GAILDiscriminator(test_env, args)
 
-    env = gym.make('MoveP-v0')
+    env = gym.make('Lap-v0', gc=args.goal_conditioning,
+                   condition_on_n_tasks_completed=args.condition_on_n_tasks_completed,
+                   state_spec=args.state_spec,
+                   step_size=args.step_size,
+                   done_on_collision=args.done_on_collision,
+                   plot_meshes=args.render_meshes,
+                   collision_loss=args.collision_loss)
     env = GailReward(env, args, disc)
     env.seed(seed)
     env.action_space.seed(seed)
@@ -303,15 +318,20 @@ if __name__ == "__main__":
         #'target_update_interval': 1
         # 'max_grad_norm': args.max_graxd_norm
     }
-    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)['all']
+    if args.env_id == 'Lap-v0':
+        demos = load_lap_demos(
+            'demos/davos_data', args.n_demos, obs_shape=3)['all']
+    else:
+        demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)['all']
+
     #model = PPOSB('MlpPolicy', env, verbose=1, **kwargs, tensorboard_log=f"runs/{id_string}_sb3")
     model = DQNSB('MlpPolicy', env, **kwargs, verbose=1, tensorboard_log=output_dir)
     # define callbacks
-    swil_cb = GAILUpdateCallback(args, disc, demos)
+    gail_cb = GAILUpdateCallback(args, disc, demos)
     eval_cb = EvalCallback(
         test_env, best_model_save_path=output_dir, log_path=output_dir, 
         eval_freq=10000, deterministic=False)
-    cb_list = CallbackList([eval_cb, swil_cb])
+    cb_list = CallbackList([eval_cb, gail_cb])
     model.learn(total_timesteps=args.n_timesteps, callback=cb_list)
 
     model.save(os.path.join(output_dir, 'model.sb3'))

@@ -667,7 +667,8 @@ class SwilIRDiffReward(gym.Wrapper):
                         rew += w*(a_new - a_prev)
 
                         # replace atom in original array with new slice
-                        self.gsw.Xslices_sorted[i, j] = obs_t_slice[0, j]
+                        #if (a_new - a_prev) < 0:
+                        #    self.gsw.Xslices_sorted[i, j] = obs_t_slice[0, j]
                     #else:
                         # replace atom with obs_t_slice and calculate integral difference
                         

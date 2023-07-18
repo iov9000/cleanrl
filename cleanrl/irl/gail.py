@@ -257,7 +257,9 @@ class GailReward(gym.Wrapper):
             #print([p.norm(2) for p in self.discriminator.parameters()])
             irl_reward = self.discriminator.get_reward(
                 obs_t, acs_t).cpu().numpy()
+            
             #irl_reward = self.discriminator.get_reward(obs_t, acs_t, next_obs_t).cpu().numpy()
+
         self.obs = next_obs
 
         return next_obs, irl_reward, done, info
