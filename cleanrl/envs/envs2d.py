@@ -268,12 +268,18 @@ class MovePoint(Env):
 class MoveP(Env):
     metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
 
-    def __init__(self, waypoints=[(175,175)], size=200, random_init=False):
+    def __init__(self, waypoints=[(175,175)], size=200, random_init=False, goal_conditioning=True):
         super(MoveP, self).__init__()
         
+        self.goal_conditioning = goal_conditioning
+        if goal_conditioning:
+            dim = 4
+        else:
+            dim = 2
+
         # Define a 2-D observation space (R^4)
         self.size = size
-        self.observation_shape = (4)
+        self.observation_shape = (dim)
         self.observation_space = spaces.Box(low = np.zeros(self.observation_shape), 
                                             high = np.ones(self.observation_shape)*self.size,
                                             dtype = np.float32)
@@ -386,8 +392,12 @@ class MoveP(Env):
                 # update target
                 reward += 500
                 self.curr_tgt+=1
+        
+        if self.goal_conditioning:
+            state = np.stack([self.agent[0], self.agent[1], curr_tgt[0], curr_tgt[1]])
+        else:
+            state = self.agent
 
-        state = np.stack([self.agent[0], self.agent[1], curr_tgt[0], curr_tgt[1]])
         
         # If out of fuel, end the episode.
         if self.time == 0:

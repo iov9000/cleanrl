@@ -629,14 +629,17 @@ class SwilIRDiffReward(gym.Wrapper):
         rew = torch.tensor([0.])
         if self.gsw.theta is not None:
             with torch.no_grad():
-                # get discriminator reward and train on that
-                #print([p.norm(2) for p in self.discriminator.parameters()])
-                d_obs = next_obs_t-obs_t
-                obs_t_slice = get_slice(
-                    torch.unsqueeze(next_obs_t,0), self.gsw.theta, self.radon_df_type, self.sw_poly_deg)
+                # project next state and rank it as part of previous evaluation
+                if self.opt.measurable_space == 'sxs':
+                    obs_nextobs = torch.cat([obs_t, next_obs_t],-1)
+                    obs_t_slice = self.gsw.get_slice(
+                        torch.unsqueeze(obs_nextobs,0), self.gsw.theta)
+                else:
+                    obs_t_slice = self.gsw.get_slice(
+                        torch.unsqueeze(next_obs_t,0), self.gsw.theta)
 
-                sorted_proj = torch.squeeze(self.gsw.Xslices_sorted)
-                sorted_proj_tgt = torch.squeeze(self.gsw.Yslices_sorted)
+                sorted_proj = self.gsw.Xslices_sorted
+                sorted_proj_tgt = self.gsw.Yslices_sorted
                 n = len(sorted_proj)
 
                 idx = torch.searchsorted(sorted_proj.T, obs_t_slice.T)
@@ -644,24 +647,31 @@ class SwilIRDiffReward(gym.Wrapper):
                 idx[idx==0] +=1
                 idx[idx==n] -=1
                 w = 1/(n*(n+1))
+                diff = sorted_proj[1:]-sorted_proj[:-1]
 
+                # TODO: what if target CDF is left or mixed?
                 for j,i in enumerate(idx):
                     if self.opt.swil_rew == 'insertion_loss':
-                        diff = sorted_proj[1:,j]-sorted_proj[:-1,j]
                         #w = 1
                         # new atom contribution
                         rew += w*torch.sum(sorted_proj[i,j]-obs_t_slice[0,j] +
                                         sorted_proj[i-1,j]-obs_t_slice[0,j])
                         # reweighting of integrals
-                        rew -= torch.sum(w*diff[:i-1])
-                        rew += torch.sum(w*diff[i:])
+                        rew -= torch.sum(w*diff[:i-1,j])
+                        rew += torch.sum(w*diff[i:,j])
                     else:
                         # calculate diff when replacing atom
-                        a_prev = (sorted_proj_tgt[idx] - sorted_proj[idx])**2
-                        a_new = (sorted_proj_tgt[idx] - slice)**2
+                        a_prev = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
+                        a_new = (sorted_proj_tgt[i,j] - obs_t_slice[0, j])**2
 
                         rew += w*(a_new - a_prev)
 
+                        # replace atom in original array with new slice
+                        self.gsw.Xslices_sorted[i, j] = obs_t_slice[0, j]
+                    #else:
+                        # replace atom with obs_t_slice and calculate integral difference
+                        
+                
                     #rew += torch.sum((sorted_proj[idx]-sorted_proj_tgt[idx])**2)
 
                 rew = -rew
@@ -701,8 +711,11 @@ class GSW():
         #assert dn==dm and M==N
         self.Y = Y
         self.theta_shape = X.shape[-1]
-        if self.theta is None or new_theta:
-            self.theta = self.random_slice(X.shape[-1])
+        if self.ftype=='index':
+            self.theta = torch.randint(0, X.shape[-1], (self.nofprojections,))
+        else:
+            if self.theta is None or new_theta:
+                self.theta = self.random_slice(X.shape[-1])
 
         Xslices=self.get_slice(X,self.theta)
         Yslices=self.get_slice(Y,self.theta)
@@ -713,10 +726,11 @@ class GSW():
         return torch.sqrt(torch.sum((self.Xslices_sorted-self.Yslices_sorted)**2))
 
     def max_gsw(self,X,Y,iterations=50,lr=1e-4):
-        N, dn = X.shape
-        M, dm = Y.shape
+        #N, dn = X.shape
+        #M, dm = Y.shape
+        dn = X.shape[-1]
         device = self.device
-        assert dn==dm and M==N
+        #assert dn==dm and M==N
         if self.ftype == 'linear':
             theta=torch.randn((1,dn),device=device,requires_grad=True)
             theta.data/=torch.sqrt(torch.sum((theta.data)**2))
@@ -768,12 +782,18 @@ class GSW():
                 X:  Nxd matrix of N data samples
                 theta: parameters of g (e.g., a d vector in the linear case)
         '''
+        if theta is None:
+            theta=self.random_slice(X.shape[-1])
+            self.theta = theta
+
         if self.ftype=='linear':
             return self.linear(X,theta)
         elif self.ftype=='poly':
             return self.poly(X,theta)
         elif self.ftype=='circular':
             return self.circular(X,theta)
+        elif self.ftype=='index':
+            return self.random_data_index(X,theta)
         else:
             raise Exception('Defining function not implemented')
 
@@ -789,6 +809,9 @@ class GSW():
             theta=torch.randn((self.nofprojections,dim))
             theta=torch.stack([self.radius*th/torch.sqrt((th**2).sum()) for th in theta])
         return theta.to(self.device)
+
+    def random_data_index(self,X,theta):
+        return X[...,theta]
 
     def linear(self,X,theta):
         if len(theta.shape)==1:
