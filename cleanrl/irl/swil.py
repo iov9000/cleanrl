@@ -145,6 +145,8 @@ class SWILDiscriminator(nn.Module):
             nonlin = nn.LeakyReLU()
         elif opt.disc_nonlin == 'tanh':
             nonlin = nn.Tanh()
+        elif opt.disc_nonlin == 'id':
+            nonlin = nn.Identity()
         else:
             nonlin = nn.PReLU()
 
@@ -465,7 +467,7 @@ class SWILDiscriminator(nn.Module):
                 gsw_dist = self.max_gsw(self.policy_obs, self.policy_acs,
                             exp_obs, exp_acs)
             else:
-                gsw_dist = self.gsw(self.policy_obs, self.policy_acs, policy_obs_next, policy_dones,
+                gsw_dist = self.gsw_dist_nn(self.policy_obs, self.policy_acs, policy_obs_next, policy_dones,
                             exp_obs, exp_acs, exp_obs_next, exp_dones, random=False)
             d_loss = gsw_dist
 
@@ -508,10 +510,13 @@ class SwilReward(gym.Wrapper):
         self.obs = None
         # calculate reward at the end of trajecotiry
         self.traj = [] 
+        self.traj_ = [] 
+
 
     def step(self, action):
         next_obs, gt_reward, done, info = self.env.step(action)
         info['gt_reward'] = gt_reward
+        self.traj.append(gt_reward)
         if self.obs is not None:
             obs_t = torch.tensor(self.obs, dtype=torch.get_default_dtype())
         else:
@@ -520,10 +525,7 @@ class SwilReward(gym.Wrapper):
         acs_t = torch.tensor(action, dtype=torch.get_default_dtype())
         next_obs_t = torch.tensor(next_obs, dtype=torch.get_default_dtype())
         done_t = torch.tensor(done, dtype=torch.get_default_dtype())
-
-        if done:
-            self.traj=[]
-            
+    
         with torch.no_grad():
             # get discriminator reward and train on that
             #print([p.norm(2) for p in self.discriminator.parameters()])
@@ -531,6 +533,12 @@ class SwilReward(gym.Wrapper):
                 obs_t, acs_t, next_obs_t, done_t).cpu().numpy()
             #irl_reward = self.discriminator.get_reward(obs_t, acs_t, next_obs_t).cpu().numpy()
         self.obs = next_obs
+        self.traj_.append(irl_reward)        
+        if done:
+            print("episode reward gt:", np.sum(np.array(self.traj)))
+            print("episode reward irl:", np.sum(np.array(self.traj_)))
+            self.traj=[]
+            self.traj_=[]
 
         return next_obs, irl_reward, done, info
 
@@ -634,6 +642,10 @@ class SwilIRDiffReward(gym.Wrapper):
                     obs_nextobs = torch.cat([obs_t, next_obs_t],-1)
                     obs_t_slice = self.gsw.get_slice(
                         torch.unsqueeze(obs_nextobs,0), self.gsw.theta)
+                elif self.opt.measurable_space == 'sxa':
+                    obs_nextobs = torch.cat([obs_t, acs_t], -1)
+                    obs_t_slice = self.gsw.get_slice(
+                        torch.unsqueeze(obs_nextobs, 0), self.gsw.theta)
                 else:
                     obs_t_slice = self.gsw.get_slice(
                         torch.unsqueeze(next_obs_t,0), self.gsw.theta)

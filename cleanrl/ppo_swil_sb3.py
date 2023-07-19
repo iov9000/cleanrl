@@ -78,7 +78,7 @@ def parse_args():
         help="the learning rate of the optimizer")
     parser.add_argument("--num_envs", type=int, default=1,
         help="the number of parallel game environments")
-    parser.add_argument("--num_steps", type=int, default=1024, # 2048
+    parser.add_argument("--num_steps", type=int, default=2048,
         help="the number of steps to run in each environment per policy rollout")
     parser.add_argument("--agent_size", type=int, default=64, help='actor-critic network size')
     parser.add_argument("--gamma", type=float, default=0.95, # 0.99
@@ -87,7 +87,7 @@ def parse_args():
         help="the lambda for the general advantage estimation")
     parser.add_argument("--num_minibatches", type=int, default=32, # 32
         help="the number of mini-batches")
-    parser.add_argument("--update_epochs", type=int, default=5, #10
+    parser.add_argument("--update_epochs", type=int, default=10,
         help="the K epochs to update the policy")
     parser.add_argument("--clip_coef", type=float, default=0.3,
         help="the surrogate clipping coefficient")
@@ -314,6 +314,11 @@ class SWILUpdateCallback(BaseCallback):
                     [rb.observations[idx_rb], rb.observations[idx_rb+1]], -1))
                 demo_sample = np.concatenate(
                     [self.demos['obs'][idx], self.demos['obs'][idx+1]], -1)
+            elif self.opt.measurable_space == 'sxa':
+                rb_sample = np.squeeze(np.concatenate(
+                    [rb.observations[idx_rb], rb.actions[idx_rb]], -1))
+                demo_sample = np.concatenate(
+                    [self.demos['obs'][idx], self.demos['acs'][idx]], -1)
             else:
                 rb_sample = np.squeeze(rb.sample(n_demo_samples).observations)
                 demo_sample = np.concatenate([self.demos['obs'][idx]])
@@ -373,7 +378,7 @@ if __name__ == "__main__":
     kwargs = {
         'learning_rate': args.lr,
         'n_steps': args.num_steps,
-        'n_epochs': 3
+        'n_epochs': args.update_epochs
         #'buffer_size': 1000000,
     }
     demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)['all']

@@ -122,7 +122,7 @@ def parse_args():
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
     parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
     parser.add_argument("--swil_loss", default='gsw', type=str, required=False, help="loss_type:")
-    parser.add_argument("--gsw_df", default='poly', type=str, required=False, help="Radon transform defining function: nn/poly/linear/circular")
+    parser.add_argument("--gsw_df", default='nn', type=str, required=False, help="Radon transform defining function: nn/poly/linear/circular")
 
     parser.add_argument("--proj_layer", default=False, required=False, action='store_true', 
                                         help="use nn instead of mean of projections")
@@ -484,6 +484,7 @@ if __name__ == "__main__":
                 n_irl_epochs = args.irl_epochs
             init = False
 
+            print("polciy deon")
 
             for epoch in range(n_irl_epochs):            
                 # GAIL Discriminator Update 
@@ -522,7 +523,6 @@ if __name__ == "__main__":
                         + args.lip_coeff * loss_dict['lip_penalty'] + args.recon_coeff*loss_dict['recon_loss']
                     if args.irm_coeff > 1.0:
                         loss /= args.irm_coeff
-
                     disc.update(loss)
                 
                     if global_step % args.logging_interval == 0:
