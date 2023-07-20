@@ -104,6 +104,8 @@ def parse_args():
         action='store_false', required=False, help='normalize irl rewards') 
     parser.add_argument('--collision_loss', default=False, 
         action='store_true', required=False, help='end episode on collision')  
+    parser.add_argument('--hard_collisions', default=True, 
+        action='store_false', required=False, help='dont progress on collision')  
     parser.add_argument('--continuous_actions', default=False, 
         action='store_true', required=False, help='normalize irl rewards')  
     parser.add_argument('--render_meshes', default=True, 
@@ -323,6 +325,7 @@ if __name__ == "__main__":
                              state_spec=args.state_spec, 
                              step_size=args.step_size,
                              done_on_collision=args.done_on_collision,
+                             hard_collisions=args.hard_collisions,
                              plot_meshes=args.render_meshes,
                              collision_loss=args.collision_loss)
 

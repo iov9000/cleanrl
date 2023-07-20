@@ -654,18 +654,20 @@ class SwilIRDiffReward(gym.Wrapper):
                 sorted_proj_tgt = self.gsw.Yslices_sorted
                 n = len(sorted_proj)
 
-                idx = torch.searchsorted(sorted_proj.T, obs_t_slice.T)
+                #idx = torch.searchsorted(sorted_proj.T.contiguous(), obs_t_slice.T.contiguous())#, right=True)
+                idx = torch.searchsorted(sorted_proj, obs_t_slice.T)#, right=True)
+
                 # shift extreme indices
                 idx[idx==0] +=1
                 idx[idx==n] -=1
-                w = 1/(n*(n+1))
-                diff = sorted_proj[1:]-sorted_proj[:-1]
 
                 # TODO: what if target CDF is left or mixed?
                 for j,i in enumerate(idx):
                     if self.opt.swil_rew == 'insertion_loss':
-                        #w = 1
+                        w = 1/(n*(n+1))
                         # new atom contribution
+                        diff = sorted_proj[1:]-sorted_proj[:-1]
+
                         rew += w*torch.sum(sorted_proj[i,j]-obs_t_slice[0,j] +
                                         sorted_proj[i-1,j]-obs_t_slice[0,j])
                         # reweighting of integrals
@@ -673,8 +675,9 @@ class SwilIRDiffReward(gym.Wrapper):
                         rew += torch.sum(w*diff[i:,j])
                     else:
                         # calculate diff when replacing atom
+                        w = 1
                         a_prev = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
-                        a_new = (sorted_proj_tgt[i,j] - obs_t_slice[0, j])**2
+                        a_new = (sorted_proj_tgt[i,j] - obs_t_slice[0,j])**2
 
                         rew += w*(a_new - a_prev)
 

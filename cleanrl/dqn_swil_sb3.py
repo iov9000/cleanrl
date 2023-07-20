@@ -78,7 +78,7 @@ def parse_args():
         help="the learning rate of the optimizer")
     parser.add_argument("--num_envs", type=int, default=1,
         help="the number of parallel game environments")
-    parser.add_argument("--num_steps", type=int, default=1024, # 2048
+    parser.add_argument("--num_steps", type=int, default=2048,
         help="the number of steps to run in each environment per policy rollout")
     parser.add_argument("--agent_size", type=int, default=64, help='actor-critic network size')
     parser.add_argument("--gamma", type=float, default=0.95, # 0.99
@@ -87,7 +87,7 @@ def parse_args():
         help="the lambda for the general advantage estimation")
     parser.add_argument("--num_minibatches", type=int, default=32, # 32
         help="the number of mini-batches")
-    parser.add_argument("--update_epochs", type=int, default=5, #10
+    parser.add_argument("--update_epochs", type=int, default=10,
         help="the K epochs to update the policy")
     parser.add_argument("--clip_coef", type=float, default=0.3,
         help="the surrogate clipping coefficient")
@@ -163,17 +163,21 @@ def parse_args():
         help="divergence type")
     parser.add_argument('--normalize_irl_rewards', default=True, 
         action='store_false', required=False, help='normalize irl rewards')  
+
+    # SWIL specific arguments
     parser.add_argument('--new_theta', default=False, 
         action='store_true', required=False, help='sample new direction of keep one during training')  
     parser.add_argument('--sw_poly_deg', default=2, type=int, 
         required=False, help='GSW polynomial degree')
-    parser.add_argument('--sw_eval_freq', default=10, type=int, 
+    parser.add_argument('--sw_eval_freq', default=1, type=int, 
         required=False, help='GSW evaluation frequency')
     parser.add_argument('--sw_sample_size', default=1000, type=int, 
         required=False, help='GSW evaluation frequency')
-    parser.add_argument('--swil_rew', default='insertion_loss', type=str, 
+    parser.add_argument('--swil_rew', default='replacement_loss', type=str, 
         required=False, help='SWIL loss type (atom insertion vs. atom replacement)')
     parser.add_argument('--radon_df_type', default='linear', type=str, 
+        required=False, help='GRT defining function')
+    parser.add_argument('--measurable_space', default='s', type=str, 
         required=False, help='GRT defining function')
 
     args = parser.parse_args()
@@ -189,6 +193,86 @@ def parse_args():
     # fmt: on
     return args, non_default
 
+def plot_densities(policy_atoms, expert_atoms, theta, step, log_path):
+    f = plt.gcf()
+    ax = plt.gca()
+    plt.scatter(10, 10, s=200, c='b', marker='o', alpha=1.0)
+    plt.scatter(190, 190, s=200, c='r',
+                marker='*', alpha=1.0)
+    plt.scatter(expert_atoms[:, 0], expert_atoms[:, 1],
+                s=20, c='g', alpha=0.3, label='expert')
+    plt.scatter(policy_atoms[:, 0], policy_atoms[:, 1], s=20,
+                c='m', alpha=0.3, label='agent')
+    
+    plt.axis('equal')
+    plt.tight_layout()
+    ax.axes.get_xaxis().set_ticks([])
+    ax.axes.get_yaxis().set_ticks([])
+    ax.axes.xaxis.set_ticklabels([])
+    ax.axes.yaxis.set_ticklabels([])
+    #plt.legend()
+    plt.savefig(os.path.join(log_path, f"swil_scatter_{step}.png"))
+    plt.clf()
+
+def plot_scatter_cdf(policy_atoms, expert_atoms, 
+                    pa_subset, ea_subset, 
+                    data1_sorted, data2_sorted, theta, 
+                    sw, step, log_path):
+    # Calculate the ECDFs
+    x1 = torch.squeeze(data1_sorted).detach().numpy()
+    # x1[5]+=0.1
+    y1 = np.arange(1, len(x1) + 1) / len(x1)
+    x2 = torch.squeeze(data2_sorted).detach().numpy()
+    y2 = np.arange(1, len(x2) + 1) / len(x2)
+
+    # Calculate the rectangle coordinates
+    left = np.minimum(x1[:-1], x2[:-1])
+    right = np.maximum(x1[:-1], x2[:-1])
+    bottom = np.minimum(y1[:-1], y2[:-1])
+    height = np.abs(y1[1:] - y2[:-1])
+
+    # Create the figure and axes
+    fig, ax = plt.subplots(1,3, figsize=(15, 5))
+
+    # plot scatter
+    #ax[0].scatter(10, 10, s=200, c='b', marker='o', alpha=1.0)
+    #ax[0].scatter(190, 190, s=200, c='r',
+    #            marker='*', alpha=1.0)
+    ax[0].scatter(expert_atoms[:, 0], expert_atoms[:, 1],
+                s=20, c='g', alpha=0.3, label='expert')
+    ax[0].scatter(policy_atoms[:, 0], policy_atoms[:, 1], s=20,
+                c='m', alpha=0.3, label='agent')
+    ax[0].scatter(ea_subset[:, 0], ea_subset[:, 1],
+                s=20, c='b', alpha=0.4, label='expert_ss')
+    ax[0].scatter(pa_subset[:, 0], pa_subset[:, 1], s=20,
+                c='r', alpha=0.4, label='agent_ss')
+
+    # Plot the ECDFsg
+    ax[1].scatter(x1, np.zeros_like(x1))
+    ax[1].scatter(x2, np.zeros_like(x2))
+    ax[1].step(x1, y1, label='Policy CDF')
+    ax[1].step(x2, y2, label='Expert CDF')
+
+    # Draw the rectangles
+    for l, r, b, h in zip(left, right, bottom, height):
+        rect = plt.Rectangle((l, b), r - l, h, alpha=0.3, facecolor='green')
+        ax[1].add_patch(rect)
+
+    # Add labels and legend
+    ax[0].set_xlabel('X')
+    ax[0].set_ylabel('Y')
+    ax[0].set_title('State occupancy for slice XY')
+    ax[1].set_xlabel('X')
+    ax[1].set_ylabel('Cumulative Probability')
+    ax[1].set_title('Distance between ECDFs')
+    ax[1].legend()
+
+    ax[2].plot(sw)
+    ax[2].set_xlabel('steps')
+    ax[2].set_ylabel('SW distance')
+    ax[2].set_title('Distance between ECDFs')
+    plt.savefig(os.path.join(log_path, f"swil_scatter_cdf_{step}.png"))
+    plt.clf()
 
 class SWILUpdateCallback(BaseCallback):
     def __init__(self, opt, demos, verbose=0, id="", log_path=None):
@@ -196,8 +280,10 @@ class SWILUpdateCallback(BaseCallback):
         self.cnt = 0
         self.opt = opt
         self.eval_freq = opt.sw_eval_freq
+        self.sw_dists = []
         self.demos = demos
         self.id = id
+        self.log_path = log_path
         #self.aux_writer = SummaryWriter(log_path)
 
     def _on_training_start(self) -> None:
@@ -213,20 +299,48 @@ class SWILUpdateCallback(BaseCallback):
         return True
 
     def _on_rollout_end(self) -> None:
+        # update the sorted slices and compute 
         if self.cnt%self.eval_freq == 0:
             # eval sw distance
             rb = self.locals['replay_buffer']
             env = self.locals['env']
-            idx = np.random.randint(0, len(self.demos['obs']), self.opt.sw_sample_size)
+            n_demo_samples = min(self.opt.sw_sample_size, self.opt.num_steps)
+            idx = np.random.randint(0, len(self.demos['obs'])-1, n_demo_samples)
+            idx_rb = np.random.randint(0, len(rb.observations)-1, n_demo_samples)
 
-            policy_atoms = torch.Tensor(rb.sample(self.opt.sw_sample_size).observations)
-            expert_atoms = torch.Tensor(self.demos['obs'][idx])
+            # M(SxS)?
+            if self.opt.measurable_space == 'sxs':
+                rb_sample = np.squeeze(np.concatenate(
+                    [rb.observations[idx_rb], rb.observations[idx_rb+1]], -1))
+                demo_sample = np.concatenate(
+                    [self.demos['obs'][idx], self.demos['obs'][idx+1]], -1)
+            elif self.opt.measurable_space == 'sxa':
+                rb_sample = np.squeeze(np.concatenate(
+                    [rb.observations[idx_rb], rb.actions[idx_rb]], -1))
+                demo_sample = np.concatenate(
+                    [self.demos['obs'][idx], np.expand_dims(self.demos['acs'][idx],-1)], -1)
+            else:
+                rb_sample = np.squeeze(rb.sample(n_demo_samples).observations)
+                demo_sample = np.concatenate([self.demos['obs'][idx]])
+
+            # shuffling?
+            policy_atoms = torch.Tensor(rb_sample)
+            #policy_atoms = torch.Tensor(rb.observations)
+            expert_atoms = torch.Tensor(demo_sample)
 
             if self.opt.max_gsw:
                 sw_dist = env.envs[0].gsw.max_gsw(policy_atoms, expert_atoms)
             else:
                 sw_dist = env.envs[0].gsw.gsw(policy_atoms, expert_atoms, new_theta=self.opt.new_theta)
+            
+            self.sw_dists.append(sw_dist.detach().numpy())
+            theta = env.envs[0].gsw.theta
             self.logger.record("irl/sw_dist", sw_dist)
+            p_sl = env.envs[0].gsw.Xslices_sorted[...,0]
+            exp_sl = env.envs[0].gsw.Yslices_sorted[..., 0]
+            plot_scatter_cdf(rb.observations.squeeze(), self.demos['obs'], 
+                            rb_sample, demo_sample, p_sl, exp_sl, 
+                            theta, self.sw_dists, self.cnt, self.log_path)
 
         self.cnt +=1
 
@@ -247,9 +361,9 @@ if __name__ == "__main__":
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
         
-    test_env = gym.make('MoveP-v0')
+    test_env = gym.make(args.env_id)
     seed = args.seed
-    env = gym.make('MoveP-v0')
+    env = gym.make(args.env_id)
     env = SwilIRDiffReward(env, args)
 
     # seed environment
@@ -263,14 +377,17 @@ if __name__ == "__main__":
 
     kwargs = {
         'learning_rate': args.lr,
-        'buffer_size': 10000,
+        #'n_steps': args.num_steps,
+        #'n_epochs': args.update_epochs
+        'buffer_size': 1000000,
     }
     demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)['all']
+    #fig = plt.figure(figsize=(10,10))
 
-    #model = PPOSB('MlpPolicy', env, verbose=1, **kwargs, tensorboard_log=f"runs/{id_string}_sb3")
+    #model = PPOSB('MlpPolicy', env, verbose=0, **kwargs, tensorboard_log=output_dir)
     model = DQNSB('MlpPolicy', env, verbose=1, **kwargs, tensorboard_log=output_dir)
     # define callbacks
-    swil_cb = SWILUpdateCallback(args, demos)
+    swil_cb = SWILUpdateCallback(args, demos, log_path=output_dir)
     eval_cb = EvalCallback(
         test_env, best_model_save_path=output_dir, log_path=output_dir, 
         eval_freq=10000, deterministic=False)

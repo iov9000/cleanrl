@@ -104,7 +104,7 @@ class Laparos(Env):
                  state_spec='r3', gc=True, condition_on_n_tasks_completed=True, 
                  condition_on_anatomy_distance=False, random_init=False,
                     done_on_collision=True, continuous_actions=False,
-                    plot_meshes=True, collision_loss=False):
+                    plot_meshes=True, collision_loss=False, hard_collisions=False):
         super(Laparos, self).__init__()
 
         self.anatomy_list = ['DomeOfBladder.obj', 'Uterus.obj', 'CecumAppendix.obj', 'ColonRight.obj', 
@@ -127,6 +127,7 @@ class Laparos(Env):
         self.plot_meshes = plot_meshes
         self.done_on_collision = done_on_collision
         self.collision_loss = collision_loss
+        self.hard_collisions = hard_collisions
         self.condition_on_anatomy_distance = condition_on_anatomy_distance
 
         self.render_cnt = 0
@@ -259,7 +260,7 @@ class Laparos(Env):
 
         move_ = np.array(move)
 
-        self.agent = np.clip(self.agent + move_, self.space_min, self.space_max)
+        tentative_move = np.clip(self.agent + move_, self.space_min, self.space_max)
 
         # REMOVE NOOP
         #elif action == 4:
@@ -276,6 +277,18 @@ class Laparos(Env):
                     if self.done_on_collision:
                         self.done = True
                         self.needs_reset = True
+    
+        if self.hard_collisions:
+            for k, v in self.meshes.items():
+                dist = np.sum((tentative_move-v.vertices)**2, -1) < self.radius
+                if np.any(dist):
+                    print(f"Hard Collision with {k}")
+                    #reward -= 10
+                else:
+                    self.agent = tentative_move
+        else:
+            self.agent = tentative_move
+                    
             
         curr_tgt = np.array(self.waypoints[self.curr_tgt])
         # l2 distance as reward

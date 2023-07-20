@@ -169,11 +169,11 @@ def parse_args():
         action='store_true', required=False, help='sample new direction of keep one during training')  
     parser.add_argument('--sw_poly_deg', default=2, type=int, 
         required=False, help='GSW polynomial degree')
-    parser.add_argument('--sw_eval_freq', default=10, type=int, 
+    parser.add_argument('--sw_eval_freq', default=1, type=int, 
         required=False, help='GSW evaluation frequency')
     parser.add_argument('--sw_sample_size', default=1000, type=int, 
         required=False, help='GSW evaluation frequency')
-    parser.add_argument('--swil_rew', default='insertion_loss', type=str, 
+    parser.add_argument('--swil_rew', default='replacement_loss', type=str, 
         required=False, help='SWIL loss type (atom insertion vs. atom replacement)')
     parser.add_argument('--radon_df_type', default='linear', type=str, 
         required=False, help='GRT defining function')
@@ -338,6 +338,7 @@ class SWILUpdateCallback(BaseCallback):
             self.logger.record("irl/sw_dist", sw_dist)
             p_sl = env.envs[0].gsw.Xslices_sorted[...,0]
             exp_sl = env.envs[0].gsw.Yslices_sorted[..., 0]
+            # plot a projection, cdfs of projection and distances
             plot_scatter_cdf(rb.observations.squeeze(), self.demos['obs'], 
                             rb_sample, demo_sample, p_sl, exp_sl, 
                             theta, self.sw_dists, self.cnt, self.log_path)
