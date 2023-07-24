@@ -1,7 +1,7 @@
 import os
 import sys
 
-from gym import Env, spaces
+from gymnasium import Env, spaces
 #import open3d as o3d
 import trimesh
 
@@ -183,7 +183,7 @@ class Laparos(Env):
         # rotate camera
         return state
 
-    def reset(self):
+    def reset(self, seed: int = None):
         # Flag that marks the termination of an episode
         self.done = False
         # Reset the fuel consumed
@@ -218,7 +218,7 @@ class Laparos(Env):
 
         self.needs_reset = False
         # return the observation
-        return state
+        return state, {}
     
     def clamp(self, n, minn, maxn):
         return max(min(maxn, n), minn)
@@ -332,7 +332,7 @@ class Laparos(Env):
             self.done = True
             self.needs_reset = True
 
-        return state, reward, self.done, {"terminal_observation": state}
+        return state, reward, self.done, self.done, {"terminal_observation": state}
 
     def render(self, mode = "rgb_array"):
         # do 3d plot with meshes
