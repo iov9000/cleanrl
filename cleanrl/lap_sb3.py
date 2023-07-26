@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 import sys
 import numpy as np
 import gymnasium as gym
@@ -12,11 +12,6 @@ from datetime import datetime
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3 import DQN as DQNSB
 
-
-module_path = os.path.abspath(os.path.join('..'))
-if module_path not in sys.path:
-    sys.path.append(module_path)
-
 gym.envs.register(
      id='Lap-v0',
      entry_point='envs.env_lap:Laparos',
@@ -26,13 +21,15 @@ gym.envs.register(
 
 def parse_args():
     # fmt: off
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--exp-name", type=str,
-                        default=os.path.basename(__file__).rstrip(".py"),
+    euler_res = "/cluster/project/jbuhmann/workspace/lap/results/"
+    parser = argparse.ArgumentParser(description="Laparos experiments")
+    parser.add_argument("--results_dir", type=Path, default=Path(euler_res),
+                        help="Path in which results of training are/will be "
+                             "located")
+    parser.add_argument("--exp-name", type=str, default="laparos",
                         help="the name of this experiment")
     parser.add_argument("--seed", type=int, default=1,
                         help="seed of the experiment")
-
     parser.add_argument('--normalize_obs', default=True,
                         action='store_true', required=False,
                         help='normalize observations')
@@ -347,16 +344,19 @@ if __name__ == "__main__":
         'max_grad_norm': args.max_grad_norm
     }
 
-    model = DQNSB('MlpPolicy', env, verbose=1, tensorboard_log=f"runs/{id_string}_sb3")
-
+    time = datetime.now().strftime('%Y%m%d_%H%M%S%f')
+    id_string = f"{id_string}_{time}"
+    exp_dir = args.results_dir / id_string
+    exp_dir.mkdir(parents=True, exist_ok=True)
+    model = DQNSB('MlpPolicy', env, verbose=1,
+                  tensorboard_log=exp_dir / "sb3")
     model.learn(total_timesteps=args.n_timesteps)
 
     # save model
-    model_dir = 'sb3_models'
-    if not os.path.exists(model_dir):
-        os.mkdir(model_dir)
-
-    model.save(os.path.join(model_dir, id_string))
-    #save_expert_traj(env, model, nr_trajectories=10, render=False, 
-    #                 filename=fname+str(n_timesteps), deterministic=save_deterministic)
+    model_dir = exp_dir / 'sb3_models'
+    model_dir.mkdir(parents=True, exist_ok=True)
+    model.save(str(model_dir))
+    # save_expert_traj(env, model, nr_trajectories=10, render=False,
+    #                 filename=fname+str(n_timesteps),
+    #                  deterministic=save_deterministic)
 
