@@ -1,45 +1,21 @@
 import os
 import sys
-import re
 import numpy as np
-import matplotlib.pyplot as plt
-#%matplotlib inline
-import PIL.Image as Image
 import gymnasium as gym
 import random
 import torch 
 import torch.functional as F
 import torch.nn as nn
-import time
-import imageio
-import datetime
-from argparse import Namespace
-import argparse 
-
-import ot
-
-from itertools import count
-from torch.utils.tensorboard import SummaryWriter
-from collections import deque
+import argparse
 from datetime import datetime
-from tqdm.notebook import tqdm
-#font = cv2.FONT_HERSHEY_COMPLEX_SMALL 
+
+from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3 import DQN as DQNSB
+
 
 module_path = os.path.abspath(os.path.join('..'))
 if module_path not in sys.path:
     sys.path.append(module_path)
-
-# stable baselines imports
-import stable_baselines3 as sb
-from stable_baselines3.common.callbacks import CallbackList, BaseCallback, EvalCallback
-from stable_baselines3.common.utils import configure_logger
-from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
-from stable_baselines3 import PPO as PPOSB
-from stable_baselines3 import TD3 as TD3SB
-from stable_baselines3.common.noise import NormalActionNoise
-from stable_baselines3 import SAC as SACSB
-from stable_baselines3 import DQN as DQNSB
 
 gym.envs.register(
      id='Lap-v0',
@@ -47,73 +23,88 @@ gym.envs.register(
      max_episode_steps=10000,
 )
 
+
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
-    parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
-        help="the name of this experiment")
+    parser.add_argument("--exp-name", type=str,
+                        default=os.path.basename(__file__).rstrip(".py"),
+                        help="the name of this experiment")
     parser.add_argument("--seed", type=int, default=1,
-        help="seed of the experiment")
+                        help="seed of the experiment")
 
-    parser.add_argument('--normalize_obs', default=True, 
-        action='store_true', required=False, help='normalize observations')  
-    parser.add_argument('--normalize_rewards', default=True, 
-        action='store_true', required=False, help='normalize irl rewards')  
-    parser.add_argument('--clip_action', default=True, 
-        action='store_true', required=False, help='clip actions')
+    parser.add_argument('--normalize_obs', default=True,
+                        action='store_true', required=False,
+                        help='normalize observations')
+    parser.add_argument('--normalize_rewards', default=True,
+                        action='store_true', required=False,
+                        help='normalize irl rewards')
+    parser.add_argument('--clip_action', default=True, action='store_true',
+                        required=False, help='clip actions')
 
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="Lap-v0",
-        help="the id of the environment")
+                        help="the id of the environment")
     parser.add_argument("--n_timesteps", type=int, default=10000000, #1e6
-        help="total timesteps of the experiments")
-    parser.add_argument("--lr", type=float, default=3e-4, # 3e-4
-        help="the learning rate of the optimizer")
+                        help="total timesteps of the experiments")
+    parser.add_argument("--lr", type=float, default=3e-4,
+                        help="the learning rate of the optimizer")
     parser.add_argument("--num_envs", type=int, default=1,
-        help="the number of parallel game environments")
+                        help="the number of parallel game environments")
     parser.add_argument("--num_steps", type=int, default=1024, # 2048
-        help="the number of steps to run in each environment per policy rollout")
-    parser.add_argument("--agent_size", type=int, default=64, help='actor-critic network size')
-    parser.add_argument("--anneal_lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="Toggle learning rate annealing for policy and value networks")
+                        help="the number of steps to run in each environment "
+                             "per policy rollout")
+    parser.add_argument("--agent_size", type=int, default=64,
+                        help='actor-critic network size')
+    parser.add_argument("--anneal_lr", type=lambda x: bool(strtobool(x)),
+                        default=True, nargs="?", const=True,
+                        help="Toggle learning rate annealing for policy and "
+                             "value networks")
     parser.add_argument("--gamma", type=float, default=0.95, # 0.99
-        help="the discount factor gamma")
+                        help="the discount factor gamma")
     parser.add_argument("--gae_lambda", type=float, default=0.9, #0.95
-        help="the lambda for the general advantage estimation")
+                        help="the lambda for the general advantage estimation")
     parser.add_argument("--num_minibatches", type=int, default=32, # 32
-        help="the number of mini-batches")
+                        help="the number of mini-batches")
     parser.add_argument("--update_epochs", type=int, default=5, #10
-        help="the K epochs to update the policy")
+                        help="the K epochs to update the policy")
     parser.add_argument("--clip_coef", type=float, default=0.3,
-        help="the surrogate clipping coefficient")
+                        help="the surrogate clipping coefficient")
     parser.add_argument("--ent_coef", type=float, default=0.0,
-        help="coefficient of the entropy")
+                        help="coefficient of the entropy")
     parser.add_argument("--vf_coef", type=float, default=0.5,
-        help="coefficient of the value function")
+                        help="coefficient of the value function")
     parser.add_argument("--max_grad_norm", type=float, default=0.5,
-        help="the maximum norm for the gradient clipping")
+                        help="the maximum norm for the gradient clipping")
     parser.add_argument("--target_kl", type=float, default=None,
-        help="the target KL divergence threshold")
+                        help="the target KL divergence threshold")
 
     # environment specific arguments
     parser.add_argument('--goal_conditioning', default=True, 
-        action='store_false', required=False, help='normalize irl rewards')  
+                        action='store_false', required=False,
+                        help='normalize irl rewards')
     parser.add_argument('--condition_on_n_tasks_completed', default=True, 
-        action='store_false', required=False, help='normalize irl rewards')  
+                        action='store_false', required=False,
+                        help='normalize irl rewards')
     parser.add_argument('--done_on_collision', default=True, 
-        action='store_false', required=False, help='normalize irl rewards') 
+                        action='store_false', required=False,
+                        help='normalize irl rewards')
     parser.add_argument('--collision_loss', default=False, 
-        action='store_true', required=False, help='end episode on collision')  
+                        action='store_true', required=False,
+                        help='end episode on collision')
     parser.add_argument('--hard_collisions', default=True, 
-        action='store_false', required=False, help='dont progress on collision')  
+                        action='store_false', required=False,
+                        help='dont progress on collision')
     parser.add_argument('--continuous_actions', default=False, 
-        action='store_true', required=False, help='normalize irl rewards')  
+                        action='store_true', required=False,
+                        help='normalize irl rewards')
     parser.add_argument('--render_meshes', default=True, 
-        action='store_true', required=False, help='normalize irl rewards')  
+                        action='store_true', required=False,
+                        help='normalize irl rewards')
     parser.add_argument("--step_size", type=float, default=0.3,
-        help="step magnitude")
+                        help="step magnitude")
     parser.add_argument("--state_spec", type=str, default="r3",
-        help="state spec (r3/r3so3)")
+                        help="state spec (r3/r3so3)")
 
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
@@ -173,20 +164,17 @@ class GAILDiscriminator(nn.Module):
             if self.use_cnn_base:
                 self.base = MiniGridCNN(layer_dims, self.use_actions)
             else:
-                self.base = nn.Sequential(torch.nn.Linear(self.layer_dims[0],
-                                                        self.layer_dims[1], self.bias),
-                                        nonlin)
+                self.base = nn.Sequential(torch.nn.Linear(
+                    self.layer_dims[0], self.layer_dims[1], self.bias), nonlin)
 
             self.discriminator_layers = []
             for i in range(2, len(layer_dims)):
-                self.discriminator_layers += [torch.nn.Linear(in_features=layer_dims[i - 1],
-                                                            out_features=layer_dims[i],
-                                                            bias=self.bias),
-                                            nonlin]
+                self.discriminator_layers += [torch.nn.Linear(
+                    in_features=layer_dims[i - 1], out_features=layer_dims[i],
+                    bias=self.bias), nonlin]
 
-            self.discriminator_layers += [torch.nn.Linear(in_features=layer_dims[-1],
-                                                        out_features=1,
-                                                        bias=self.bias)]
+            self.discriminator_layers += [torch.nn.Linear(
+                in_features=layer_dims[-1], out_features=1, bias=self.bias)]
 
             self.discriminator = nn.Sequential(*self.discriminator_layers)
 
@@ -194,12 +182,11 @@ class GAILDiscriminator(nn.Module):
             self.base.cuda()
             self.discriminator.cuda()
 
-        # self.module_list = nn.ModuleList([self.base, self.discriminator])
         base_params = list(self.base.parameters())
         d_params = list(self.discriminator.parameters())
         base_params.extend(d_params)
-        #self.d_optimizer = Adam(base_params, lr=self.lr, weight_decay=self.l2_coeff)
-        self.d_optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.l2_coeff)
+        self.d_optimizer = torch.optim.Adam(self.parameters(), lr=self.lr,
+                                            weight_decay=self.l2_coeff)
 
     def base_forward(self,ob, ac):
         if self.use_actions and (self.use_cnn_base or self.is_atari):
@@ -228,7 +215,8 @@ class GAILDiscriminator(nn.Module):
 
     def compute_loss(self, update_dict):
         d_out = self.forward(update_dict['all_obs'], update_dict['all_acs'])
-        self.bce_loss = F.binary_cross_entropy_with_logits(d_out, update_dict['collision'])
+        self.bce_loss = F.binary_cross_entropy_with_logits(
+            d_out, update_dict['collision'])
         self.loss = self.bce_loss
 
         return self.bce_loss
@@ -237,6 +225,7 @@ class GAILDiscriminator(nn.Module):
         self.d_optimizer.zero_grad()
         loss.backward()
         self.d_optimizer.step()
+
 
 # collision classifier: learn to predict paths which lead to failures (buffer pruning)
 class CCUpdateCallback(BaseCallback):
@@ -288,9 +277,10 @@ class CCUpdateCallback(BaseCallback):
             all_obs = torch.cat([expert_obs_t, obs], 0)
             all_acs = torch.cat([expert_acs_t, actions], 0)
 
-            loss_dict = self.disc.compute_loss({'expert_obs': expert_obs_t, 'expert_acs': expert_acs_t,
-                                                'policy_obs': obs, 'policy_acs': actions,
-                                                'all_obs': all_obs, 'all_acs': all_acs})
+            loss_dict = self.disc.compute_loss(
+                {'expert_obs': expert_obs_t, 'expert_acs': expert_acs_t,
+                 'policy_obs': obs, 'policy_acs': actions,
+                 'all_obs': all_obs, 'all_acs': all_acs})
 
             loss = loss_dict['d_loss'] + args.irm_coeff * \
                 loss_dict['grad_penalty'] + \
@@ -311,7 +301,6 @@ class CCUpdateCallback(BaseCallback):
         pass
 
 
-
 if __name__ == "__main__":
 
     args, non_default = parse_args()
@@ -321,18 +310,17 @@ if __name__ == "__main__":
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
 
     seed = args.seed
-    env = gym.make('Lap-v0', gc=args.goal_conditioning, 
-                             state_spec=args.state_spec, 
-                             step_size=args.step_size,
-                             done_on_collision=args.done_on_collision,
-                             hard_collisions=args.hard_collisions,
-                             plot_meshes=args.render_meshes,
-                             collision_loss=args.collision_loss)
+    env = gym.make('Lap-v0',
+                   gc=args.goal_conditioning,
+                   state_spec=args.state_spec,
+                   step_size=args.step_size,
+                   done_on_collision=args.done_on_collision,
+                   hard_collisions=args.hard_collisions,
+                   plot_meshes=args.render_meshes,
+                   collision_loss=args.collision_loss)
 
     # collision classification loss wrapper
 
-    # seed environment
-    # env.seed(seed)
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
     random.seed(seed)
@@ -359,7 +347,6 @@ if __name__ == "__main__":
         'max_grad_norm': args.max_grad_norm
     }
 
-    #model = PPOSB('MlpPolicy', env, verbose=1, **kwargs, tensorboard_log=f"runs/{id_string}_sb3")
     model = DQNSB('MlpPolicy', env, verbose=1, tensorboard_log=f"runs/{id_string}_sb3")
 
     model.learn(total_timesteps=args.n_timesteps)
