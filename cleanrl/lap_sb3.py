@@ -1,5 +1,5 @@
 from pathlib import Path
-import sys
+import pickle
 import numpy as np
 import gymnasium as gym
 import random
@@ -298,6 +298,53 @@ class CCUpdateCallback(BaseCallback):
         pass
 
 
+def save_expert_traj(env, model, nr_trajectories=10, file_path=None,
+                     deterministic=True):
+    num_steps = 0
+    expert_obs = []
+    expert_acs = []
+    expert_rew = []
+    expert_done = []
+
+    cnt = 0
+    while cnt < nr_trajectories:
+        ob = env.reset()
+        done = False
+        total_reward = 0
+        episode_obs = []
+        episode_acs = []
+        episode_rew = []
+        episode_done = []
+
+        while not done:
+            ac, _states = model.predict(ob)
+            next_ob, reward, term, trunc, _ = env.step(ac)
+            ob = next_ob
+            total_reward += reward
+            done = term or trunc
+            episode_obs.append(ob)
+            episode_acs.append(ac)
+            episode_rew.append(reward)
+            episode_done.append(done)
+            num_steps += 1
+
+        cnt += 1
+        expert_obs.extend(episode_obs)
+        expert_acs.extend(episode_acs)
+        expert_rew.extend(episode_rew)
+        expert_done.extend(episode_done)
+
+    expert_obs = np.stack(expert_obs)
+    expert_acs = np.stack(expert_acs)
+    expert_rew = np.stack(expert_rew)
+    expert_done = np.stack(expert_done)
+    data = {'obs': expert_obs, 'acs': expert_acs, 'rew': expert_rew,
+            'done': expert_done}
+    if file_path is not None:
+        pickle.dump(data, open(str(file_path), 'wb'))
+    return data
+
+
 if __name__ == "__main__":
 
     args, non_default = parse_args()
@@ -344,8 +391,7 @@ if __name__ == "__main__":
         'max_grad_norm': args.max_grad_norm
     }
 
-    time = datetime.now().strftime('%Y%m%d_%H%M%S%f')
-    id_string = f"{id_string}_{time}"
+    id_string = f"{id_string}_{ts}"
     exp_dir = args.results_dir / id_string
     exp_dir.mkdir(parents=True, exist_ok=True)
     model = DQNSB('MlpPolicy', env, verbose=1,
@@ -356,7 +402,7 @@ if __name__ == "__main__":
     model_dir = exp_dir / 'sb3_models'
     model_dir.mkdir(parents=True, exist_ok=True)
     model.save(str(model_dir))
-    # save_expert_traj(env, model, nr_trajectories=10, render=False,
-    #                 filename=fname+str(n_timesteps),
-    #                  deterministic=save_deterministic)
+    save_expert_traj(env, model, nr_trajectories=10,
+                     file_path=exp_dir / 'expert_traj.pkl',
+                     deterministic=True)
 

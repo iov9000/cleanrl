@@ -76,6 +76,7 @@ class Laparos(Env):
                  hard_collisions=False):
         super(Laparos, self).__init__()
 
+        self.name = 'laparos'
         self.anatomy_list = [
             'DomeOfBladder.obj', 'Uterus.obj', 'CecumAppendix.obj',
             'ColonRight.obj', 'LiverRight.obj', 'Falciform.obj',
