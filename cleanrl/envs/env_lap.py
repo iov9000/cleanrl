@@ -142,7 +142,8 @@ class Laparos(Env):
         self.random_init = random_init
 
         self.agent = self.initial_position
-        self.done = False
+        self.terminated = False
+        self.truncated = False
         self.time = self.max_time
         self.curr_tgt = 0
         self.needs_reset = False
@@ -163,7 +164,8 @@ class Laparos(Env):
         return state
 
     def reset(self, seed: int = None):
-        self.done = False
+        self.terminated = False
+        self.truncated = False
         self.time = self.max_time
         self.curr_tgt = 0
 
@@ -237,7 +239,7 @@ class Laparos(Env):
                     print(f"Collision with {k}")
                     reward += -10000
                     if self.done_on_collision:
-                        self.done = True
+                        self.terminated = True
                         self.needs_reset = True
     
         if self.hard_collisions:
@@ -256,13 +258,12 @@ class Laparos(Env):
         reward += -np.linalg.norm(self.agent - curr_tgt)/1000
 
         if np.linalg.norm(self.agent - curr_tgt) < 5*self.step_size:
-            #reward += 5
             print(f"Task solved: {self.anatomy_list[self.curr_tgt]} reached ")
 
             if self.curr_tgt == len(self.waypoints)-1:
                 # task solved
                 reward += 1000
-                self.done = True
+                self.terminated = True
             else:
                 # update target
                 reward += 500
@@ -286,14 +287,15 @@ class Laparos(Env):
                     mesh, [self.agent])
                 dists.append(dist)
             dists = np.squeeze(np.array(dists))
-            state = np.concatenate([state, dists],-1)
+            state = np.concatenate([state, dists], -1)
 
         # If out of fuel, end the episode.
         if self.time == 0:
-            self.done = True
+            self.truncated = True
             self.needs_reset = True
 
-        return state, reward, self.done, self.done, {"terminal_observation": state}
+        info = {'terminal_observation': state}
+        return state, reward, self.terminated, self.truncated, info
 
     def render(self, mode="rgb_array"):
         # do 3d plot with meshes
@@ -309,7 +311,7 @@ class Laparos(Env):
 
         idx = np.arange(500,560)
         scale = 1
-        self.render_cnt+=1
+        self.render_cnt += 1
         print("Render count: ", self.render_cnt, flush=True)
         #ax.view_init(-10, 90)
         total_points = 0
@@ -323,11 +325,13 @@ class Laparos(Env):
             bb_c = np.array(v.centroid)*scale
             if self.plot_meshes:
                 if 'LiverRight' in k:
-                    ax.scatter(-vtx[:,0],vtx[:,1],-vtx[:,2], s=0.3)
-                    ax.scatter(-vtx[idx,0],vtx[idx,1],-vtx[idx,2], s=3, c='cyan')
+                    ax.scatter(-vtx[:, 0], vtx[:, 1], -vtx[:, 2], s=0.3)
+                    ax.scatter(-vtx[idx, 0], vtx[idx, 1], -vtx[idx, 2],
+                               s=3, c='cyan')
                 else:
-                    ax.scatter(vtx[:,0],vtx[:,1],vtx[:,2], s=0.3)
-                    ax.scatter(vtx[idx,0],vtx[idx,1],vtx[idx,2], s=3, c='cyan')
+                    ax.scatter(vtx[:, 0], vtx[:, 1], vtx[:, 2], s=0.3)
+                    ax.scatter(vtx[idx, 0], vtx[idx, 1], vtx[idx, 2],
+                               s=3, c='cyan')
 
             #ax.scatter(bb[:,0],bb[:,1],bb[:,2], s=10, c='red')
             ax.scatter(bb_c[0], bb_c[1], bb_c[2], s=10, c='yellow')
@@ -337,10 +341,10 @@ class Laparos(Env):
             ax.set_zlabel('Z')
 
         # plot agent
-        ax.scatter(self.agent[0],self.agent[1],self.agent[2], s=50, c='red')
+        ax.scatter(self.agent[0], self.agent[1], self.agent[2], s=50, c='red')
 
         wp = np.array(self.waypoints)
-        ax.scatter(wp[:, 0], wp[:, 1],wp[:, 2], s=30, c='green')
+        ax.scatter(wp[:, 0], wp[:, 1], wp[:, 2], s=30, c='green')
         wp_curr = wp[self.curr_tgt]
 
         ax.scatter(wp_curr[0], wp_curr[1], wp_curr[2], s=40, c='m')
@@ -350,7 +354,6 @@ class Laparos(Env):
             plt.show()
 
         elif mode == "rgb_array":
-            #return fig
             fig.canvas.draw()
             data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
             data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
