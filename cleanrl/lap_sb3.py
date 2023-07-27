@@ -37,7 +37,7 @@ class GAILDiscriminator(nn.Module):
         self.lip_coeff = opt.lip_coeff
         self.use_cnn_base = opt.use_cnn_base
         self.bias = opt.use_disc_bias
-        self.is_atari = 'atari' in self.opt.exp_name
+        self.is_atari = 'atari' in self.opt.run_id
 
         if opt.disc_nonlin == 'relu':
             nonlin = nn.ReLU()
@@ -377,7 +377,7 @@ def main():
     parser.add_argument("--results_dir", type=Path, default=Path(euler_res),
                         help="Path in which results of training are/will be "
                              "located")
-    parser.add_argument("--exp-name", type=str, default="laparos",
+    parser.add_argument("--run_id", type=str, default="laparos",
                         help="the name of this experiment")
     parser.add_argument("--seed",
                         nargs="+",
