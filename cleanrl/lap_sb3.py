@@ -454,6 +454,47 @@ def main():
     parser.add_argument("--state_spec", type=str, default="r3",
                         help="state spec (r3/r3so3)")
 
+    # Cluster arguments
+    parser.add_argument('--no_submit', default=False, required=False,
+                        action='store_true',
+                        help='Do not submit to Euler. Default will submit.')
+    parser.add_argument('--any_gpu', default=False, required=False,
+                        action='store_true',
+                        help='Do not select a specific GPU in oder to wait '
+                             'less in the queue. Selecting a specific GPU is '
+                             'important for reproducibility in order to run '
+                             'deterministic experiments, but this could be '
+                             'ignored sometimes.')
+    parser.add_argument('--no_gpu', default=False, required=False,
+                        action='store_true',
+                        help='Do not request any gpus.')
+    parser.add_argument("--batch_system",
+                        type=str,
+                        default='slurm',
+                        choices=["slurm", "lsf"],
+                        help="Which batch system to use for submission. "
+                             "lsf is becoming  obsolete on Euler very soon.")
+    parser.add_argument("-s", "--scratch", action='store_true',
+                        help="Whether to first copy the dataset to the "
+                             "scratch storage of Leonhard. Do not use on "
+                             "other systems than Leonhard.")
+    parser.add_argument("-m", "--memory",
+                        type=int,
+                        default=8000,
+                        help="Memory allocated for each leonhard job. This "
+                             "will be ignored of Leonhard is not selected.")
+    parser.add_argument("-t", "--time",
+                        type=int,
+                        default=4,
+                        help="Number of hours requested for the job on "
+                             "Leonhard. For virtual models usually it "
+                             "requires more time than this default value.")
+    parser.add_argument("-r", "--repetitions",
+                        type=int,
+                        default=1,
+                        help="Number of repetitions to run_mlagents the same "
+                             "experiment")
+
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
