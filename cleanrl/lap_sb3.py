@@ -309,7 +309,17 @@ def submit_jobs(args):
                            f"supported on the cluster.")
 
 
-def run_training(args):
+def run_training(args, parser):
+    args.batch_size = int(args.num_envs * args.num_steps)
+    args.minibatch_size = int(args.batch_size // args.num_minibatches)
+
+    non_default = {
+        opt.dest: getattr(args, opt.dest)
+        for opt in parser._option_string_actions.values()
+        if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
+    }
+    args.non_default = non_default
+
     ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
 
     # create output folder with non default arguments in the name
@@ -507,23 +517,13 @@ def main():
                              "experiment")
 
     args = parser.parse_args()
-    args.batch_size = int(args.num_envs * args.num_steps)
-    args.minibatch_size = int(args.batch_size // args.num_minibatches)
-
-    non_default = {
-        opt.dest: getattr(args, opt.dest)
-        for opt in parser._option_string_actions.values()
-        if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
-    }
-    args.non_default = non_default
-
     print("   Experiment parameters: ")
     print("-" * 100)
     pprint.pprint(vars(args), indent=5)
     print("-" * 100)
 
     if args.no_submit:
-        run_training(args)
+        run_training(args, parser)
     else:
         submit_jobs(args)
 
