@@ -412,7 +412,6 @@ def main():
                         required=False, help='clip actions')
 
     # Algorithm specific arguments
-                        help="the id of the environment")
     parser.add_argument("--n_timesteps", type=int, default=10000000,  # 1e6
                         help="total timesteps of the experiments")
     parser.add_argument("--lr", type=float, default=3e-4,
