@@ -379,8 +379,19 @@ def main():
                              "located")
     parser.add_argument("--exp-name", type=str, default="laparos",
                         help="the name of this experiment")
-    parser.add_argument("--seed", type=int, default=1,
-                        help="seed of the experiment")
+    parser.add_argument("--seed",
+                        nargs="+",
+                        default=None,
+                        help="Random seed to use. If None, randomly generated "
+                             "seeds for each experiment will be used. If a "
+                             "single value, the same seed will be used for "
+                             "all the experiments. If the a list of seeds, "
+                             "each seed will be used for each of the "
+                             "experiments. In this case, the length of seed "
+                             "must be the same as number of repetitions (-r)."
+                             "if it's set to -1 the same set of  seeds will "
+                             "be used for the sake of  experiments' "
+                             "consistency.")
     parser.add_argument('--normalize_obs', default=True,
                         action='store_true', required=False,
                         help='normalize observations')
