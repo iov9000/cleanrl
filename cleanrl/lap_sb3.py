@@ -299,10 +299,10 @@ def submit_jobs(args):
         newargs = newargs + f" --no_submit"
 
         if args.batch_system == 'slurm':
-            command = f"python euler_train.py {newargs}"
+            command = f"python lap_sb3.py {newargs}"
             subprocess.check_output(args=euler_slurm.split() + [command])
         elif args.batch_system == 'lsf':
-            command = euler_lsf + f"python euler_train.py {newargs}"
+            command = euler_lsf + f"python lap_sb3.py {newargs}"
             subprocess.check_output(args=command.split())
         else:
             NotImplemented(f"batch system {args.batch_system} is not "
