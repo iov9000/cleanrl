@@ -310,6 +310,11 @@ def submit_jobs(args):
 
 
 def run_training(args, parser):
+    if isinstance(args.seed, list):
+        args.seed = int(args.seed[0])
+    elif args.seed is None:
+        args.seed = random.sample(range(1, 1000), args.repetitions)[0]
+
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
 
