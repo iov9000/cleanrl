@@ -198,8 +198,11 @@ class Laparos(Env):
         self.needs_reset = False
         self.collisions.append(self.ep_collisions)
         self.ep_collisions = []
+
+        state = state.astype(np.float32)
+        info = {'terminal_observation': state}
         # return the observation
-        return state.astype(np.float32), {}
+        return state, info
 
     def get_reward(self, state, tgt=(175, 175)):
         curr_tgt = np.array(tgt)
