@@ -104,20 +104,29 @@ class Laparos(Env):
         self.condition_on_anatomy_distance = condition_on_anatomy_distance
 
         self.render_cnt = 0
-        # Define a 3-D or 7-D observation space 
+        # Define a 3-D or 7-D observation space
+
         if state_spec == 'r3so3':
             obs_dim = 7
         else:
             obs_dim = 3
 
+        print(f"state_spec: {state_spec}")
+        print(f"obs_dim: {obs_dim}")
+
         if self.goal_conditioning:
             obs_dim = obs_dim*2
+            print(f"goal_conditioning: {self.goal_conditioning}")
 
         if condition_on_n_tasks_completed:
             obs_dim += 1
+            print(f"condition_on_n_tasks_completed: {self.condition_on_n_tasks_completed}")
 
         if condition_on_anatomy_distance:
             obs_dim += len(self.anatomy_list)
+            print(f"condition_on_anatomy_distance: {self.condition_on_anatomy_distance}")
+
+        print(f"obs_dim: {obs_dim}")
         self.observation_shape = (obs_dim,)
         self.observation_space = spaces.Box(
             low=np.ones(self.observation_shape,

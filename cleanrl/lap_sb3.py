@@ -334,14 +334,16 @@ def run_training(args, parser):
     id_string = "default" if id_string == '' else id_string
 
     seed = args.seed
-    env = gym.make('Lap-v0',
-                   gc=args.goal_conditioning,
-                   state_spec=args.state_spec,
-                   step_size=args.step_size,
-                   done_on_collision=args.done_on_collision,
-                   hard_collisions=args.hard_collisions,
-                   plot_meshes=args.render_meshes,
-                   collision_loss=args.collision_loss)
+    env = gym.make(
+        'Lap-v0',
+        gc=args.goal_conditioning,
+        condition_on_n_tasks_completed=args.condition_on_n_tasks_completed,
+        state_spec=args.state_spec,
+        step_size=args.step_size,
+        done_on_collision=args.done_on_collision,
+        hard_collisions=args.hard_collisions,
+        plot_meshes=args.render_meshes,
+        collision_loss=args.collision_loss)
 
     # collision classification loss wrapper
 
