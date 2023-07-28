@@ -249,22 +249,29 @@ class Laparos(Env):
         reward = 0
         if self.collision_loss:
             for k, v in self.meshes.items():
-                dist = np.sum((self.agent-v.vertices)**2, -1) < self.radius
+                dist = np.sum((tentative_move-v.vertices)**2, -1) < self.radius
                 if np.any(dist):
                     print(f"Collision with {k}")
                     reward += -10000
                     if self.done_on_collision:
                         self.terminated = True
                         self.needs_reset = True
-    
-        if self.hard_collisions:
-            for k, v in self.meshes.items():
-                dist = np.sum((tentative_move-v.vertices)**2, -1) < self.radius
-                if np.any(dist):
-                    self.ep_collisions.append(k)
-                    # Ignore the move
-                else:
-                    self.agent = tentative_move
+
+        # Check for collisions
+        collided = False
+        for k, v in self.meshes.items():
+            dist = np.sum((tentative_move-v.vertices)**2, -1) < self.radius
+            if np.any(dist):
+                collided = True
+                self.ep_collisions.append(k)
+                if self.collision_loss:
+                    reward += -10000
+                if self.done_on_collision:
+                    self.terminated = True
+                    self.needs_reset = True
+
+        if collided and self.hard_collisions:
+            pass
         else:
             self.agent = tentative_move
 
