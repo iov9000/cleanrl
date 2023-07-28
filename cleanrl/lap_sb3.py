@@ -331,6 +331,7 @@ def run_training(args, parser):
     id_string = str(args.non_default).replace(' ', '').replace(
         ':', '').replace('Namespace', '').replace('{', '').replace(
         '}', '').replace("'", "_").replace(",", "_")
+    id_string = "default" if id_string == '' else id_string
 
     seed = args.seed
     env = gym.make('Lap-v0',

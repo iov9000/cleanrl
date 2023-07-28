@@ -66,7 +66,7 @@ def load_meshes_tri(folder, anatomy_list, simplify_mesh=False, scale=1000):
 
 
 class Laparos(Env):
-    metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 5}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 5}
 
     def __init__(self, step_size=0.3, mesh_folder='envs/obj', 
                  state_spec='r3', gc=True, condition_on_n_tasks_completed=True, 
@@ -120,8 +120,10 @@ class Laparos(Env):
             obs_dim += len(self.anatomy_list)
         self.observation_shape = (obs_dim,)
         self.observation_space = spaces.Box(
-            low=np.ones(self.observation_shape)*self.space_min,
-            high=np.ones(self.observation_shape)*self.space_max,
+            low=np.ones(self.observation_shape,
+                        dtype=np.float32)*self.space_min,
+            high=np.ones(self.observation_shape,
+                         dtype=np.float32)*self.space_max,
             dtype=np.float32)
     
         if state_spec == 'r3so3':
@@ -164,7 +166,7 @@ class Laparos(Env):
         # rotate camera
         return state
 
-    def reset(self, seed: int = None):
+    def reset(self, seed: int = None, **kwargs):
         self.terminated = False
         self.truncated = False
         self.time = self.max_time
@@ -177,7 +179,7 @@ class Laparos(Env):
         
         curr_tgt = np.array(self.waypoints[self.curr_tgt])
         if self.goal_conditioning:
-            state = np.concatenate([self.agent, curr_tgt],0)
+            state = np.concatenate([self.agent, curr_tgt], 0)
         else:
             state = self.agent
         
@@ -192,14 +194,14 @@ class Laparos(Env):
                 _, dist, _ = trimesh.proximity.closest_point(mesh, [self.agent])
                 dists.append(dist)
             dists = np.squeeze(np.array(dists))
-            state = np.concatenate([state, dists],-1)
+            state = np.concatenate([state, dists], -1)
         self.needs_reset = False
         self.collisions.append(self.ep_collisions)
         self.ep_collisions = []
         # return the observation
-        return state, {}
+        return state.astype(np.float32), {}
 
-    def get_reward(self, state, tgt = (175,175)):
+    def get_reward(self, state, tgt=(175, 175)):
         curr_tgt = np.array(tgt)
         # l2 distance as reward
         reward = -(np.sqrt((state[0] - curr_tgt[0])**2 + (state[1]-curr_tgt[1])**2))/1000
@@ -295,6 +297,7 @@ class Laparos(Env):
             self.truncated = True
             self.needs_reset = True
 
+        state = state.astype(np.float32)
         info = {'terminal_observation': state}
         return state, reward, self.terminated, self.truncated, info
 
@@ -304,7 +307,7 @@ class Laparos(Env):
         matplotlib.style.use('seaborn')
 
         #fig = plt.gcf()
-        fig = plt.figure(figsize=[10,10])
+        fig = plt.figure(figsize=[10, 10])
         ax = fig.add_subplot(111, projection='3d')
         #ax = Axes3D(fig)
         ax.view_init(-50, 90)
