@@ -213,7 +213,7 @@ def save_expert_traj(env, model, nr_trajectories=10, file_path=None,
 
     cnt = 0
     while cnt < nr_trajectories:
-        ob = env.reset()
+        ob, _ = env.reset()
         done = False
         total_reward = 0
         episode_obs = []
