@@ -268,6 +268,7 @@ class Laparos(Env):
             if self.curr_tgt == len(self.waypoints)-1:
                 # task solved
                 reward += 1000
+                self.curr_tgt += 1
                 self.terminated = True
             else:
                 # update target
