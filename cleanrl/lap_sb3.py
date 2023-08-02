@@ -461,13 +461,13 @@ def main():
     parser.add_argument('--condition_on_n_tasks_completed', default=True,
                         action='store_false', required=False,
                         help='normalize irl rewards')
-    parser.add_argument('--done_on_collision', default=True,
+    parser.add_argument('--done_on_collision', default=False,
                         action='store_false', required=False,
                         help='normalize irl rewards')
     parser.add_argument('--collision_loss', default=False,
                         action='store_true', required=False,
                         help='end episode on collision')
-    parser.add_argument('--hard_collisions', default=True,
+    parser.add_argument('--hard_collisions', default=False,
                         action='store_false', required=False,
                         help='dont progress on collision')
     parser.add_argument('--continuous_actions', default=False,
