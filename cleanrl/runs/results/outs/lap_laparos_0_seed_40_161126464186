@@ -1,0 +1,2548 @@
+   Experiment parameters: 
+----------------------------------------------------------------------------------------------------
+{    'agent_size': 64,
+     'anneal_lr': True,
+     'any_gpu': False,
+     'batch_system': 'slurm',
+     'clip_action': True,
+     'clip_coef': 0.3,
+     'collision_loss': False,
+     'condition_on_n_tasks_completed': True,
+     'continuous_actions': False,
+     'done_on_collision': False,
+     'ent_coef': 0.0,
+     'gae_lambda': 0.9,
+     'gamma': 0.95,
+     'goal_conditioning': True,
+     'hard_collisions': False,
+     'lr': 0.0003,
+     'max_grad_norm': 0.5,
+     'memory': 8000,
+     'n_timesteps': 10000000,
+     'no_gpu': False,
+     'no_submit': True,
+     'normalize_obs': True,
+     'normalize_rewards': True,
+     'num_envs': 1,
+     'num_minibatches': 32,
+     'num_steps': 1024,
+     'render_meshes': True,
+     'repetitions': 1,
+     'results_dir': PosixPath('/cluster/project/jbuhmann/workspace/lap/results'),
+     'run_id': 'lap_laparos_0_seed_40_161126464186',
+     'scratch': False,
+     'seed': ['40'],
+     'state_spec': 'r3',
+     'step_size': 0.3,
+     'target_kl': None,
+     'time': 4,
+     'update_epochs': 5,
+     'vf_coef': 0.5}
+----------------------------------------------------------------------------------------------------
+Using cuda device
+Wrapping the env with a `Monitor` wrapper
+Wrapping the env in a DummyVecEnv.
+Logging to /cluster/project/jbuhmann/workspace/lap/results/run_id_lap_laparos_0_seed_40_161126464186_seed_40_no_submit_True_20230802_161208_022179/sb3/DQN_1
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -317     |
+|    exploration_rate | 0.981    |
+| time/               |          |
+|    episodes         | 4        |
+|    fps              | 210      |
+|    time_elapsed     | 94       |
+|    total_timesteps  | 20000    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -312     |
+|    exploration_rate | 0.962    |
+| time/               |          |
+|    episodes         | 8        |
+|    fps              | 254      |
+|    time_elapsed     | 157      |
+|    total_timesteps  | 40000    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -311     |
+|    exploration_rate | 0.943    |
+| time/               |          |
+|    episodes         | 12       |
+|    fps              | 263      |
+|    time_elapsed     | 228      |
+|    total_timesteps  | 60000    |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000477 |
+|    n_updates        | 2499     |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -329     |
+|    exploration_rate | 0.924    |
+| time/               |          |
+|    episodes         | 16       |
+|    fps              | 258      |
+|    time_elapsed     | 308      |
+|    total_timesteps  | 80000    |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.00159  |
+|    n_updates        | 7499     |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -342     |
+|    exploration_rate | 0.905    |
+| time/               |          |
+|    episodes         | 20       |
+|    fps              | 257      |
+|    time_elapsed     | 388      |
+|    total_timesteps  | 100000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 8.29e-05 |
+|    n_updates        | 12499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -358     |
+|    exploration_rate | 0.886    |
+| time/               |          |
+|    episodes         | 24       |
+|    fps              | 256      |
+|    time_elapsed     | 468      |
+|    total_timesteps  | 120000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000351 |
+|    n_updates        | 17499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -370     |
+|    exploration_rate | 0.867    |
+| time/               |          |
+|    episodes         | 28       |
+|    fps              | 254      |
+|    time_elapsed     | 550      |
+|    total_timesteps  | 140000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000191 |
+|    n_updates        | 22499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -384     |
+|    exploration_rate | 0.848    |
+| time/               |          |
+|    episodes         | 32       |
+|    fps              | 253      |
+|    time_elapsed     | 630      |
+|    total_timesteps  | 160000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000134 |
+|    n_updates        | 27499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -397     |
+|    exploration_rate | 0.829    |
+| time/               |          |
+|    episodes         | 36       |
+|    fps              | 253      |
+|    time_elapsed     | 711      |
+|    total_timesteps  | 180000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 4.84e-05 |
+|    n_updates        | 32499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -411     |
+|    exploration_rate | 0.81     |
+| time/               |          |
+|    episodes         | 40       |
+|    fps              | 252      |
+|    time_elapsed     | 793      |
+|    total_timesteps  | 200000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 8.87e-05 |
+|    n_updates        | 37499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -428     |
+|    exploration_rate | 0.791    |
+| time/               |          |
+|    episodes         | 44       |
+|    fps              | 251      |
+|    time_elapsed     | 874      |
+|    total_timesteps  | 220000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000273 |
+|    n_updates        | 42499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -444     |
+|    exploration_rate | 0.772    |
+| time/               |          |
+|    episodes         | 48       |
+|    fps              | 251      |
+|    time_elapsed     | 955      |
+|    total_timesteps  | 240000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000847 |
+|    n_updates        | 47499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -461     |
+|    exploration_rate | 0.753    |
+| time/               |          |
+|    episodes         | 52       |
+|    fps              | 250      |
+|    time_elapsed     | 1038     |
+|    total_timesteps  | 260000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 4.9e-05  |
+|    n_updates        | 52499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -470     |
+|    exploration_rate | 0.734    |
+| time/               |          |
+|    episodes         | 56       |
+|    fps              | 250      |
+|    time_elapsed     | 1118     |
+|    total_timesteps  | 280000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.00042  |
+|    n_updates        | 57499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -482     |
+|    exploration_rate | 0.715    |
+| time/               |          |
+|    episodes         | 60       |
+|    fps              | 250      |
+|    time_elapsed     | 1199     |
+|    total_timesteps  | 300000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000534 |
+|    n_updates        | 62499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -495     |
+|    exploration_rate | 0.696    |
+| time/               |          |
+|    episodes         | 64       |
+|    fps              | 249      |
+|    time_elapsed     | 1282     |
+|    total_timesteps  | 320000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 8.69e-05 |
+|    n_updates        | 67499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -512     |
+|    exploration_rate | 0.677    |
+| time/               |          |
+|    episodes         | 68       |
+|    fps              | 249      |
+|    time_elapsed     | 1364     |
+|    total_timesteps  | 340000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 2.63e-05 |
+|    n_updates        | 72499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -523     |
+|    exploration_rate | 0.658    |
+| time/               |          |
+|    episodes         | 72       |
+|    fps              | 248      |
+|    time_elapsed     | 1446     |
+|    total_timesteps  | 360000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000484 |
+|    n_updates        | 77499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -525     |
+|    exploration_rate | 0.639    |
+| time/               |          |
+|    episodes         | 76       |
+|    fps              | 248      |
+|    time_elapsed     | 1531     |
+|    total_timesteps  | 380000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000222 |
+|    n_updates        | 82499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -529     |
+|    exploration_rate | 0.62     |
+| time/               |          |
+|    episodes         | 80       |
+|    fps              | 247      |
+|    time_elapsed     | 1613     |
+|    total_timesteps  | 400000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.00032  |
+|    n_updates        | 87499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -536     |
+|    exploration_rate | 0.601    |
+| time/               |          |
+|    episodes         | 84       |
+|    fps              | 247      |
+|    time_elapsed     | 1696     |
+|    total_timesteps  | 420000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 4.55e-05 |
+|    n_updates        | 92499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -543     |
+|    exploration_rate | 0.582    |
+| time/               |          |
+|    episodes         | 88       |
+|    fps              | 246      |
+|    time_elapsed     | 1781     |
+|    total_timesteps  | 440000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.0002   |
+|    n_updates        | 97499    |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -546     |
+|    exploration_rate | 0.563    |
+| time/               |          |
+|    episodes         | 92       |
+|    fps              | 246      |
+|    time_elapsed     | 1864     |
+|    total_timesteps  | 460000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000105 |
+|    n_updates        | 102499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -551     |
+|    exploration_rate | 0.544    |
+| time/               |          |
+|    episodes         | 96       |
+|    fps              | 246      |
+|    time_elapsed     | 1948     |
+|    total_timesteps  | 480000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 1.72e-05 |
+|    n_updates        | 107499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -552     |
+|    exploration_rate | 0.525    |
+| time/               |          |
+|    episodes         | 100      |
+|    fps              | 245      |
+|    time_elapsed     | 2033     |
+|    total_timesteps  | 500000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 6.59e-05 |
+|    n_updates        | 112499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -563     |
+|    exploration_rate | 0.506    |
+| time/               |          |
+|    episodes         | 104      |
+|    fps              | 245      |
+|    time_elapsed     | 2116     |
+|    total_timesteps  | 520000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000169 |
+|    n_updates        | 117499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -575     |
+|    exploration_rate | 0.487    |
+| time/               |          |
+|    episodes         | 108      |
+|    fps              | 245      |
+|    time_elapsed     | 2201     |
+|    total_timesteps  | 540000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 5.05e-05 |
+|    n_updates        | 122499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -586     |
+|    exploration_rate | 0.468    |
+| time/               |          |
+|    episodes         | 112      |
+|    fps              | 244      |
+|    time_elapsed     | 2286     |
+|    total_timesteps  | 560000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 4.13e-05 |
+|    n_updates        | 127499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -594     |
+|    exploration_rate | 0.449    |
+| time/               |          |
+|    episodes         | 116      |
+|    fps              | 244      |
+|    time_elapsed     | 2371     |
+|    total_timesteps  | 580000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000118 |
+|    n_updates        | 132499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -599     |
+|    exploration_rate | 0.43     |
+| time/               |          |
+|    episodes         | 120      |
+|    fps              | 244      |
+|    time_elapsed     | 2457     |
+|    total_timesteps  | 600000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 2.74e-05 |
+|    n_updates        | 137499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -599     |
+|    exploration_rate | 0.411    |
+| time/               |          |
+|    episodes         | 124      |
+|    fps              | 243      |
+|    time_elapsed     | 2541     |
+|    total_timesteps  | 620000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000878 |
+|    n_updates        | 142499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -596     |
+|    exploration_rate | 0.392    |
+| time/               |          |
+|    episodes         | 128      |
+|    fps              | 243      |
+|    time_elapsed     | 2626     |
+|    total_timesteps  | 640000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 6.98e-05 |
+|    n_updates        | 147499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -592     |
+|    exploration_rate | 0.373    |
+| time/               |          |
+|    episodes         | 132      |
+|    fps              | 242      |
+|    time_elapsed     | 2717     |
+|    total_timesteps  | 660000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000218 |
+|    n_updates        | 152499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -586     |
+|    exploration_rate | 0.354    |
+| time/               |          |
+|    episodes         | 136      |
+|    fps              | 242      |
+|    time_elapsed     | 2807     |
+|    total_timesteps  | 680000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000282 |
+|    n_updates        | 157499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -581     |
+|    exploration_rate | 0.335    |
+| time/               |          |
+|    episodes         | 140      |
+|    fps              | 241      |
+|    time_elapsed     | 2896     |
+|    total_timesteps  | 700000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000326 |
+|    n_updates        | 162499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -572     |
+|    exploration_rate | 0.316    |
+| time/               |          |
+|    episodes         | 144      |
+|    fps              | 241      |
+|    time_elapsed     | 2987     |
+|    total_timesteps  | 720000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 7.54e-05 |
+|    n_updates        | 167499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -561     |
+|    exploration_rate | 0.297    |
+| time/               |          |
+|    episodes         | 148      |
+|    fps              | 240      |
+|    time_elapsed     | 3073     |
+|    total_timesteps  | 740000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000237 |
+|    n_updates        | 172499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -547     |
+|    exploration_rate | 0.278    |
+| time/               |          |
+|    episodes         | 152      |
+|    fps              | 240      |
+|    time_elapsed     | 3161     |
+|    total_timesteps  | 760000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 8.23e-05 |
+|    n_updates        | 177499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -542     |
+|    exploration_rate | 0.259    |
+| time/               |          |
+|    episodes         | 156      |
+|    fps              | 239      |
+|    time_elapsed     | 3253     |
+|    total_timesteps  | 780000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000241 |
+|    n_updates        | 182499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -533     |
+|    exploration_rate | 0.24     |
+| time/               |          |
+|    episodes         | 160      |
+|    fps              | 239      |
+|    time_elapsed     | 3342     |
+|    total_timesteps  | 800000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000228 |
+|    n_updates        | 187499   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -523     |
+|    exploration_rate | 0.221    |
+| time/               |          |
+|    episodes         | 164      |
+|    fps              | 238      |
+|    time_elapsed     | 3431     |
+|    total_timesteps  | 820000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000244 |
+|    n_updates        | 192499   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -501     |
+|    exploration_rate | 0.202    |
+| time/               |          |
+|    episodes         | 168      |
+|    fps              | 238      |
+|    time_elapsed     | 3527     |
+|    total_timesteps  | 840500   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000105 |
+|    n_updates        | 197624   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5e+03    |
+|    ep_rew_mean      | -486     |
+|    exploration_rate | 0.183    |
+| time/               |          |
+|    episodes         | 172      |
+|    fps              | 237      |
+|    time_elapsed     | 3618     |
+|    total_timesteps  | 860500   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.00021  |
+|    n_updates        | 202624   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.01e+03 |
+|    ep_rew_mean      | -474     |
+|    exploration_rate | 0.163    |
+| time/               |          |
+|    episodes         | 176      |
+|    fps              | 237      |
+|    time_elapsed     | 3714     |
+|    total_timesteps  | 881000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000221 |
+|    n_updates        | 207749   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.01e+03 |
+|    ep_rew_mean      | -470     |
+|    exploration_rate | 0.144    |
+| time/               |          |
+|    episodes         | 180      |
+|    fps              | 236      |
+|    time_elapsed     | 3806     |
+|    total_timesteps  | 901000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.00234  |
+|    n_updates        | 212749   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.01e+03 |
+|    ep_rew_mean      | -457     |
+|    exploration_rate | 0.125    |
+| time/               |          |
+|    episodes         | 184      |
+|    fps              | 236      |
+|    time_elapsed     | 3898     |
+|    total_timesteps  | 921000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 8.51e-05 |
+|    n_updates        | 217749   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.01e+03 |
+|    ep_rew_mean      | -442     |
+|    exploration_rate | 0.106    |
+| time/               |          |
+|    episodes         | 188      |
+|    fps              | 235      |
+|    time_elapsed     | 3990     |
+|    total_timesteps  | 941000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000151 |
+|    n_updates        | 222749   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.01e+03 |
+|    ep_rew_mean      | -425     |
+|    exploration_rate | 0.0871   |
+| time/               |          |
+|    episodes         | 192      |
+|    fps              | 235      |
+|    time_elapsed     | 4082     |
+|    total_timesteps  | 961000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 5.53e-05 |
+|    n_updates        | 227749   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.01e+03 |
+|    ep_rew_mean      | -404     |
+|    exploration_rate | 0.0681   |
+| time/               |          |
+|    episodes         | 196      |
+|    fps              | 234      |
+|    time_elapsed     | 4175     |
+|    total_timesteps  | 981000   |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000129 |
+|    n_updates        | 232749   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.01e+03 |
+|    ep_rew_mean      | -395     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 200      |
+|    fps              | 234      |
+|    time_elapsed     | 4268     |
+|    total_timesteps  | 1001000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 8.26e-05 |
+|    n_updates        | 237749   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -382     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 204      |
+|    fps              | 234      |
+|    time_elapsed     | 4360     |
+|    total_timesteps  | 1021500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 6.92e-05 |
+|    n_updates        | 242874   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -366     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 208      |
+|    fps              | 234      |
+|    time_elapsed     | 4449     |
+|    total_timesteps  | 1041500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000129 |
+|    n_updates        | 247874   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -350     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 212      |
+|    fps              | 233      |
+|    time_elapsed     | 4538     |
+|    total_timesteps  | 1061500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000351 |
+|    n_updates        | 252874   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -337     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 216      |
+|    fps              | 233      |
+|    time_elapsed     | 4627     |
+|    total_timesteps  | 1081500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 4.9e-05  |
+|    n_updates        | 257874   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -328     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 220      |
+|    fps              | 233      |
+|    time_elapsed     | 4717     |
+|    total_timesteps  | 1101500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 3.83e-05 |
+|    n_updates        | 262874   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -319     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 224      |
+|    fps              | 233      |
+|    time_elapsed     | 4806     |
+|    total_timesteps  | 1121500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 3.71e-05 |
+|    n_updates        | 267874   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -310     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 228      |
+|    fps              | 232      |
+|    time_elapsed     | 4900     |
+|    total_timesteps  | 1141500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 3.43e-05 |
+|    n_updates        | 272874   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -300     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 232      |
+|    fps              | 232      |
+|    time_elapsed     | 4995     |
+|    total_timesteps  | 1161500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000109 |
+|    n_updates        | 277874   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -290     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 236      |
+|    fps              | 232      |
+|    time_elapsed     | 5088     |
+|    total_timesteps  | 1181500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.00144  |
+|    n_updates        | 282874   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -277     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 240      |
+|    fps              | 231      |
+|    time_elapsed     | 5181     |
+|    total_timesteps  | 1201500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 5.16e-05 |
+|    n_updates        | 287874   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -266     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 244      |
+|    fps              | 231      |
+|    time_elapsed     | 5275     |
+|    total_timesteps  | 1221500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 9.91e-05 |
+|    n_updates        | 292874   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -256     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 248      |
+|    fps              | 231      |
+|    time_elapsed     | 5367     |
+|    total_timesteps  | 1241500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.00012  |
+|    n_updates        | 297874   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -247     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 252      |
+|    fps              | 230      |
+|    time_elapsed     | 5461     |
+|    total_timesteps  | 1261500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000225 |
+|    n_updates        | 302874   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -233     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 256      |
+|    fps              | 230      |
+|    time_elapsed     | 5550     |
+|    total_timesteps  | 1281500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000351 |
+|    n_updates        | 307874   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: DomeOfBladder.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -209     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 260      |
+|    fps              | 230      |
+|    time_elapsed     | 5644     |
+|    total_timesteps  | 1302500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 3.79e-05 |
+|    n_updates        | 313124   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -193     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 264      |
+|    fps              | 230      |
+|    time_elapsed     | 5732     |
+|    total_timesteps  | 1322500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 8.77e-05 |
+|    n_updates        | 318124   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -187     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 268      |
+|    fps              | 230      |
+|    time_elapsed     | 5822     |
+|    total_timesteps  | 1342500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 8.46e-05 |
+|    n_updates        | 323124   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -176     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 272      |
+|    fps              | 230      |
+|    time_elapsed     | 5911     |
+|    total_timesteps  | 1362500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 4.64e-05 |
+|    n_updates        | 328124   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -169     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 276      |
+|    fps              | 230      |
+|    time_elapsed     | 6001     |
+|    total_timesteps  | 1382500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 1.46e-05 |
+|    n_updates        | 333124   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -151     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 280      |
+|    fps              | 230      |
+|    time_elapsed     | 6090     |
+|    total_timesteps  | 1402500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 2.29e-05 |
+|    n_updates        | 338124   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -134     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 284      |
+|    fps              | 230      |
+|    time_elapsed     | 6182     |
+|    total_timesteps  | 1423000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 4.94e-05 |
+|    n_updates        | 343249   |
+----------------------------------
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.02e+03 |
+|    ep_rew_mean      | -123     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 288      |
+|    fps              | 230      |
+|    time_elapsed     | 6271     |
+|    total_timesteps  | 1443000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000147 |
+|    n_updates        | 348249   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.04e+03 |
+|    ep_rew_mean      | -102     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 292      |
+|    fps              | 229      |
+|    time_elapsed     | 6372     |
+|    total_timesteps  | 1465500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000181 |
+|    n_updates        | 353874   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: DomeOfBladder.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.06e+03 |
+|    ep_rew_mean      | -82.7    |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 296      |
+|    fps              | 229      |
+|    time_elapsed     | 6468     |
+|    total_timesteps  | 1487000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000364 |
+|    n_updates        | 359249   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.09e+03 |
+|    ep_rew_mean      | -50.3    |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 300      |
+|    fps              | 229      |
+|    time_elapsed     | 6571     |
+|    total_timesteps  | 1510000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 2.12e-05 |
+|    n_updates        | 364999   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.12e+03 |
+|    ep_rew_mean      | -21.9    |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 304      |
+|    fps              | 229      |
+|    time_elapsed     | 6678     |
+|    total_timesteps  | 1534000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 2.95e-05 |
+|    n_updates        | 370999   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.16e+03 |
+|    ep_rew_mean      | -5.63    |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 308      |
+|    fps              | 229      |
+|    time_elapsed     | 6786     |
+|    total_timesteps  | 1558000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000123 |
+|    n_updates        | 376999   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.2e+03  |
+|    ep_rew_mean      | 28.1     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 312      |
+|    fps              | 229      |
+|    time_elapsed     | 6893     |
+|    total_timesteps  | 1582000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000181 |
+|    n_updates        | 382999   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.24e+03 |
+|    ep_rew_mean      | 56.4     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 316      |
+|    fps              | 229      |
+|    time_elapsed     | 6996     |
+|    total_timesteps  | 1605000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 3.58e-05 |
+|    n_updates        | 388749   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.28e+03 |
+|    ep_rew_mean      | 77.8     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 320      |
+|    fps              | 229      |
+|    time_elapsed     | 7104     |
+|    total_timesteps  | 1629000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000181 |
+|    n_updates        | 394749   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.32e+03 |
+|    ep_rew_mean      | 95.3     |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 324      |
+|    fps              | 229      |
+|    time_elapsed     | 7211     |
+|    total_timesteps  | 1653000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 4.04e-05 |
+|    n_updates        | 400749   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.36e+03 |
+|    ep_rew_mean      | 122      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 328      |
+|    fps              | 229      |
+|    time_elapsed     | 7319     |
+|    total_timesteps  | 1677000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 9.38e-05 |
+|    n_updates        | 406749   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.4e+03  |
+|    ep_rew_mean      | 135      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 332      |
+|    fps              | 229      |
+|    time_elapsed     | 7427     |
+|    total_timesteps  | 1701000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 7.21e-05 |
+|    n_updates        | 412749   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.43e+03 |
+|    ep_rew_mean      | 161      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 336      |
+|    fps              | 228      |
+|    time_elapsed     | 7531     |
+|    total_timesteps  | 1724500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 1.44e-05 |
+|    n_updates        | 418624   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.47e+03 |
+|    ep_rew_mean      | 194      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 340      |
+|    fps              | 228      |
+|    time_elapsed     | 7639     |
+|    total_timesteps  | 1748500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 8e-05    |
+|    n_updates        | 424624   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.51e+03 |
+|    ep_rew_mean      | 230      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 344      |
+|    fps              | 228      |
+|    time_elapsed     | 7746     |
+|    total_timesteps  | 1772500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 5.15e-05 |
+|    n_updates        | 430624   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.54e+03 |
+|    ep_rew_mean      | 262      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 348      |
+|    fps              | 228      |
+|    time_elapsed     | 7851     |
+|    total_timesteps  | 1796000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000148 |
+|    n_updates        | 436499   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.58e+03 |
+|    ep_rew_mean      | 298      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 352      |
+|    fps              | 228      |
+|    time_elapsed     | 7959     |
+|    total_timesteps  | 1820000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000129 |
+|    n_updates        | 442499   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.62e+03 |
+|    ep_rew_mean      | 334      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 356      |
+|    fps              | 228      |
+|    time_elapsed     | 8066     |
+|    total_timesteps  | 1844000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000658 |
+|    n_updates        | 448499   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.66e+03 |
+|    ep_rew_mean      | 360      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 360      |
+|    fps              | 228      |
+|    time_elapsed     | 8174     |
+|    total_timesteps  | 1868000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 3.32e-05 |
+|    n_updates        | 454499   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.7e+03  |
+|    ep_rew_mean      | 398      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 364      |
+|    fps              | 228      |
+|    time_elapsed     | 8281     |
+|    total_timesteps  | 1892000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 5.5e-05  |
+|    n_updates        | 460499   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.74e+03 |
+|    ep_rew_mean      | 435      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 368      |
+|    fps              | 228      |
+|    time_elapsed     | 8388     |
+|    total_timesteps  | 1916000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000127 |
+|    n_updates        | 466499   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.78e+03 |
+|    ep_rew_mean      | 473      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 372      |
+|    fps              | 228      |
+|    time_elapsed     | 8496     |
+|    total_timesteps  | 1940000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 2.28e-05 |
+|    n_updates        | 472499   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.82e+03 |
+|    ep_rew_mean      | 510      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 376      |
+|    fps              | 228      |
+|    time_elapsed     | 8603     |
+|    total_timesteps  | 1964000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000206 |
+|    n_updates        | 478499   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.86e+03 |
+|    ep_rew_mean      | 548      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 380      |
+|    fps              | 228      |
+|    time_elapsed     | 8710     |
+|    total_timesteps  | 1988000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 3.92e-05 |
+|    n_updates        | 484499   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.9e+03  |
+|    ep_rew_mean      | 584      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 384      |
+|    fps              | 228      |
+|    time_elapsed     | 8820     |
+|    total_timesteps  | 2012500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 9.87e-06 |
+|    n_updates        | 490624   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.94e+03 |
+|    ep_rew_mean      | 623      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 388      |
+|    fps              | 228      |
+|    time_elapsed     | 8927     |
+|    total_timesteps  | 2036500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 6.64e-05 |
+|    n_updates        | 496624   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.95e+03 |
+|    ep_rew_mean      | 646      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 392      |
+|    fps              | 228      |
+|    time_elapsed     | 9033     |
+|    total_timesteps  | 2060500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.00031  |
+|    n_updates        | 502624   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 5.98e+03 |
+|    ep_rew_mean      | 670      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 396      |
+|    fps              | 228      |
+|    time_elapsed     | 9143     |
+|    total_timesteps  | 2085000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 3.69e-05 |
+|    n_updates        | 508749   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6e+03    |
+|    ep_rew_mean      | 691      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 400      |
+|    fps              | 227      |
+|    time_elapsed     | 9253     |
+|    total_timesteps  | 2109500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 7.27e-06 |
+|    n_updates        | 514874   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6e+03    |
+|    ep_rew_mean      | 713      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 404      |
+|    fps              | 227      |
+|    time_elapsed     | 9362     |
+|    total_timesteps  | 2134000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 6.94e-05 |
+|    n_updates        | 520999   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.01e+03 |
+|    ep_rew_mean      | 750      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 408      |
+|    fps              | 227      |
+|    time_elapsed     | 9474     |
+|    total_timesteps  | 2159000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.00011  |
+|    n_updates        | 527249   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.02e+03 |
+|    ep_rew_mean      | 765      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 412      |
+|    fps              | 227      |
+|    time_elapsed     | 9583     |
+|    total_timesteps  | 2183500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000179 |
+|    n_updates        | 533374   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.03e+03 |
+|    ep_rew_mean      | 789      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 416      |
+|    fps              | 227      |
+|    time_elapsed     | 9692     |
+|    total_timesteps  | 2208000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 5.63e-05 |
+|    n_updates        | 539499   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.04e+03 |
+|    ep_rew_mean      | 826      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 420      |
+|    fps              | 227      |
+|    time_elapsed     | 9803     |
+|    total_timesteps  | 2233000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 9.21e-05 |
+|    n_updates        | 545749   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.05e+03 |
+|    ep_rew_mean      | 864      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 424      |
+|    fps              | 227      |
+|    time_elapsed     | 9915     |
+|    total_timesteps  | 2258000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 5.83e-05 |
+|    n_updates        | 551999   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.08e+03 |
+|    ep_rew_mean      | 902      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 428      |
+|    fps              | 227      |
+|    time_elapsed     | 10033    |
+|    total_timesteps  | 2284500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 6.79e-05 |
+|    n_updates        | 558624   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.1e+03  |
+|    ep_rew_mean      | 958      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 432      |
+|    fps              | 227      |
+|    time_elapsed     | 10154    |
+|    total_timesteps  | 2311500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 3.6e-05  |
+|    n_updates        | 565374   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.14e+03 |
+|    ep_rew_mean      | 995      |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 436      |
+|    fps              | 227      |
+|    time_elapsed     | 10274    |
+|    total_timesteps  | 2338500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 9.42e-05 |
+|    n_updates        | 572124   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.18e+03 |
+|    ep_rew_mean      | 1.03e+03 |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 440      |
+|    fps              | 227      |
+|    time_elapsed     | 10397    |
+|    total_timesteps  | 2366000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 1.82e-05 |
+|    n_updates        | 578999   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.21e+03 |
+|    ep_rew_mean      | 1.07e+03 |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 444      |
+|    fps              | 227      |
+|    time_elapsed     | 10520    |
+|    total_timesteps  | 2393500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000311 |
+|    n_updates        | 585874   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: LiverRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.26e+03 |
+|    ep_rew_mean      | 1.12e+03 |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 448      |
+|    fps              | 227      |
+|    time_elapsed     | 10646    |
+|    total_timesteps  | 2422000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000133 |
+|    n_updates        | 592999   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.3e+03  |
+|    ep_rew_mean      | 1.16e+03 |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 452      |
+|    fps              | 227      |
+|    time_elapsed     | 10772    |
+|    total_timesteps  | 2450000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000118 |
+|    n_updates        | 599999   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.34e+03 |
+|    ep_rew_mean      | 1.2e+03  |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 456      |
+|    fps              | 227      |
+|    time_elapsed     | 10898    |
+|    total_timesteps  | 2478000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 1.48e-05 |
+|    n_updates        | 606999   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.38e+03 |
+|    ep_rew_mean      | 1.24e+03 |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 460      |
+|    fps              | 227      |
+|    time_elapsed     | 11021    |
+|    total_timesteps  | 2505500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.00119  |
+|    n_updates        | 613874   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.42e+03 |
+|    ep_rew_mean      | 1.28e+03 |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 464      |
+|    fps              | 227      |
+|    time_elapsed     | 11147    |
+|    total_timesteps  | 2533500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000205 |
+|    n_updates        | 620874   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.46e+03 |
+|    ep_rew_mean      | 1.32e+03 |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 468      |
+|    fps              | 227      |
+|    time_elapsed     | 11272    |
+|    total_timesteps  | 2561500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 3.94e-05 |
+|    n_updates        | 627874   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.5e+03  |
+|    ep_rew_mean      | 1.36e+03 |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 472      |
+|    fps              | 227      |
+|    time_elapsed     | 11397    |
+|    total_timesteps  | 2589500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 3.53e-05 |
+|    n_updates        | 634874   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.54e+03 |
+|    ep_rew_mean      | 1.4e+03  |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 476      |
+|    fps              | 227      |
+|    time_elapsed     | 11521    |
+|    total_timesteps  | 2617500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 4.21e-05 |
+|    n_updates        | 641874   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.58e+03 |
+|    ep_rew_mean      | 1.44e+03 |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 480      |
+|    fps              | 227      |
+|    time_elapsed     | 11646    |
+|    total_timesteps  | 2645500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000281 |
+|    n_updates        | 648874   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.61e+03 |
+|    ep_rew_mean      | 1.48e+03 |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 484      |
+|    fps              | 227      |
+|    time_elapsed     | 11771    |
+|    total_timesteps  | 2673500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.0002   |
+|    n_updates        | 655874   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.65e+03 |
+|    ep_rew_mean      | 1.51e+03 |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 488      |
+|    fps              | 227      |
+|    time_elapsed     | 11896    |
+|    total_timesteps  | 2701500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000101 |
+|    n_updates        | 662874   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.69e+03 |
+|    ep_rew_mean      | 1.55e+03 |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 492      |
+|    fps              | 227      |
+|    time_elapsed     | 12021    |
+|    total_timesteps  | 2729500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 1.05e-05 |
+|    n_updates        | 669874   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.72e+03 |
+|    ep_rew_mean      | 1.59e+03 |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 496      |
+|    fps              | 227      |
+|    time_elapsed     | 12146    |
+|    total_timesteps  | 2757500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 1.32e-05 |
+|    n_updates        | 676874   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: LiverRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.76e+03 |
+|    ep_rew_mean      | 1.63e+03 |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 500      |
+|    fps              | 226      |
+|    time_elapsed     | 12273    |
+|    total_timesteps  | 2786000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000177 |
+|    n_updates        | 683999   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: LiverRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.8e+03  |
+|    ep_rew_mean      | 1.67e+03 |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 504      |
+|    fps              | 226      |
+|    time_elapsed     | 12400    |
+|    total_timesteps  | 2814500  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000118 |
+|    n_updates        | 691124   |
+----------------------------------
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: LiverRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+Task solved: DomeOfBladder.obj reached 
+Task solved: Uterus.obj reached 
+Task solved: CecumAppendix.obj reached 
+Task solved: ColonRight.obj reached 
+----------------------------------
+| rollout/            |          |
+|    ep_len_mean      | 6.84e+03 |
+|    ep_rew_mean      | 1.7e+03  |
+|    exploration_rate | 0.05     |
+| time/               |          |
+|    episodes         | 508      |
+|    fps              | 226      |
+|    time_elapsed     | 12528    |
+|    total_timesteps  | 2843000  |
+| train/              |          |
+|    learning_rate    | 0.0001   |
+|    loss             | 0.000915 |
+|    n_updates        | 698249   |
+----------------------------------

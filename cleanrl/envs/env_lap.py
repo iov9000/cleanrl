@@ -141,7 +141,7 @@ class Laparos(Env):
         # Define target points based on geometry
         
         # Maximum episode length
-        self.max_time = 5000
+        self.max_time = 20000
 
         self.step_size = step_size
         self.random_init = random_init
@@ -272,7 +272,7 @@ class Laparos(Env):
             else:
                 # update target
                 reward += 500
-                self.time += 500
+                # self.time += 500
                 self.curr_tgt += 1
 
         if self.goal_conditioning:
