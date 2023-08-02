@@ -10,7 +10,9 @@ import argunparse
 import subprocess
 from datetime import datetime
 
+from stable_baselines3.common.logger import TensorBoardOutputFormat
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.callbacks import CallbackList
 from stable_baselines3 import DQN as DQNSB
 
 gym.envs.register(
@@ -18,6 +20,35 @@ gym.envs.register(
      entry_point='envs.env_lap:Laparos',
      max_episode_steps=10000,
 )
+
+
+class NumTasksDoneCallBack(BaseCallback):
+    """
+    Custom callback for plotting additional values in tensorboard.
+    """
+    def __init__(self, env, _log_freq=2000):
+        self.env = env
+        self._log_freq = _log_freq
+        super(NumTasksDoneCallBack, self).__init__()
+
+    def _on_training_start(self):
+        output_formats = self.logger.output_formats
+        # Save reference to tensorboard formatter object
+        # note: the failure case (not formatter found) is not handled here,
+        # should be done with try/except.
+        self.tb_formatter = next(
+            formatter for formatter in output_formats
+            if isinstance(formatter, TensorBoardOutputFormat))
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self._log_freq == 0:
+            tasks_hist = np.array(self.env.num_tasks_completed)
+            self.tb_formatter.writer.add_histogram(
+                "env/num_tasks_hist", tasks_hist, self.num_timesteps)
+            self.tb_formatter.writer.add_scalar(
+                "env/num_tasks", self.env.curr_tgt, self.num_timesteps)
+            self.tb_formatter.writer.flush()
+        return True
 
 
 def save_expert_traj(env, model, nr_trajectories=10, file_path=None,
@@ -195,9 +226,14 @@ def run_training(args, parser):
     id_string = f"{id_string}_{ts}"
     exp_dir = args.results_dir / id_string
     exp_dir.mkdir(parents=True, exist_ok=True)
+
+    nt_logs = NumTasksDoneCallBack(env, _log_freq=args.eval_freq // 2)
+    cb_list = [nt_logs]
+    callback_list = CallbackList(cb_list)
+
     model = DQNSB('MlpPolicy', env, verbose=1,
                   tensorboard_log=exp_dir / "sb3")
-    model.learn(total_timesteps=args.n_timesteps)
+    model.learn(total_timesteps=args.n_timesteps, callback=callback_list)
 
     # save model
     model_dir = exp_dir / 'sb3_models'
@@ -237,6 +273,8 @@ def main():
                         help='normalize irl rewards')
     parser.add_argument('--clip_action', default=True, action='store_true',
                         required=False, help='clip actions')
+    parser.add_argument("--eval_freq", type=int, default=2000,
+                        help="the frequency of evaluation")
 
     # Algorithm specific arguments
     parser.add_argument("--n_timesteps", type=int, default=10000000,  # 1e6

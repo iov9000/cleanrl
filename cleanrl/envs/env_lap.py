@@ -152,6 +152,7 @@ class Laparos(Env):
         self.time = self.max_time
         self.curr_tgt = 0
         self.needs_reset = False
+        self.num_tasks_completed = []
 
         self.collisions = []
         self.ep_collisions = []
@@ -172,6 +173,7 @@ class Laparos(Env):
         self.terminated = False
         self.truncated = False
         self.time = self.max_time
+        self.num_tasks_completed.append(self.curr_tgt)
         self.curr_tgt = 0
 
         # Determine a place to intialise the agent in
@@ -316,13 +318,13 @@ class Laparos(Env):
         ax.view_init(-50, 90)
         ax.dist = 5
 
-        idx = np.arange(500,560)
+        idx = np.arange(500, 560)
         scale = 1
         self.render_cnt += 1
         print("Render count: ", self.render_cnt, flush=True)
         #ax.view_init(-10, 90)
         total_points = 0
-        for k,v in self.meshes.items():
+        for k, v in self.meshes.items():
             total_points += len(v.vertices)
             vtx = np.array(v.vertices)
             idx = np.arange(int(len(v.vertices)/2)-30, int(len(v.vertices)/2)+30)
