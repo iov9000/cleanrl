@@ -250,7 +250,7 @@ def save_expert_traj(env, model, nr_trajectories=10, file_path=None,
     return data
 
 
-def submit_jobs(args):
+def submit_jobs(args, parser=None):
 
     # If the same seed should be used for all experiments
     random.seed(43)
@@ -274,6 +274,12 @@ def submit_jobs(args):
         args.any_gpu = True
 
     new_args_dict = vars(args).copy()
+    if parser is not None:
+        for key in new_args_dict.keys():
+            if isinstance(parser.get_default(key), bool):
+                store_false = parser.get_default(key)
+                if store_false:
+                    new_args_dict[key] = not new_args_dict[key]
     for i in range(args.repetitions):
         seed = seeds[i]
 
@@ -318,20 +324,16 @@ def run_training(args, parser):
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
 
+    # create output folder with non default arguments in the name
     non_default = {
-        opt.dest: getattr(args, opt.dest)
+        opt.dest: str(getattr(args, opt.dest))
         for opt in parser._option_string_actions.values()
         if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
     }
-    args.non_default = non_default
+    id_string = "_".join([f"{key}_{val}" for key, val in non_default.items()])
+    id_string = "default" if id_string == '' else id_string
 
     ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-
-    # create output folder with non default arguments in the name
-    id_string = str(args.non_default).replace(' ', '').replace(
-        ':', '').replace('Namespace', '').replace('{', '').replace(
-        '}', '').replace("'", "_").replace(",", "_")
-    id_string = "default" if id_string == '' else id_string
 
     seed = args.seed
     env = gym.make(
@@ -457,25 +459,25 @@ def main():
     #  environment specific arguments
     parser.add_argument('--goal_conditioning', default=True,
                         action='store_false', required=False,
-                        help='normalize irl rewards')
+                        help='Condition on goal')
     parser.add_argument('--condition_on_n_tasks_completed', default=True,
                         action='store_false', required=False,
-                        help='normalize irl rewards')
+                        help='Condition on number of tasks completed')
     parser.add_argument('--done_on_collision', default=False,
                         action='store_false', required=False,
-                        help='normalize irl rewards')
+                        help='Terminate episode on collision')
     parser.add_argument('--collision_loss', default=False,
                         action='store_true', required=False,
-                        help='end episode on collision')
+                        help='Penalize collisions')
     parser.add_argument('--hard_collisions', default=False,
                         action='store_false', required=False,
                         help='dont progress on collision')
     parser.add_argument('--continuous_actions', default=False,
                         action='store_true', required=False,
-                        help='normalize irl rewards')
+                        help='Continuous actions')
     parser.add_argument('--render_meshes', default=True,
                         action='store_true', required=False,
-                        help='normalize irl rewards')
+                        help='Render meshes')
     parser.add_argument("--step_size", type=float, default=0.3,
                         help="step magnitude")
     parser.add_argument("--state_spec", type=str, default="r3",
@@ -531,7 +533,7 @@ def main():
     if args.no_submit:
         run_training(args, parser)
     else:
-        submit_jobs(args)
+        submit_jobs(args, parser)
 
 
 if __name__ == '__main__':
