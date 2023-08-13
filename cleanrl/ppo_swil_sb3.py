@@ -39,7 +39,7 @@ from stable_baselines3.common.noise import NormalActionNoise
 from stable_baselines3 import SAC as SACSB
 from stable_baselines3 import DQN as DQNSB
 
-from irl.swil import SwilIRDiffReward
+from irl.swil import SwilIRDiffReward, SwilReward, SWILDiscriminator
 from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict, MujocoTestWrapper, save_traj_dict
 
 gym.envs.register(
@@ -99,7 +99,8 @@ def parse_args():
         help="the maximum norm for the gradient clipping")
     parser.add_argument("--target_kl", type=float, default=None,
         help="the target KL divergence threshold")
-
+    parser.add_argument("--scheduler_gamma", type=float, default=1.0,
+        help="exponential decay rate of the learning rate scheduler")
     # environment specific arguments (Lap-v0)
     parser.add_argument('--goal_conditioning', default=True, 
         action='store_false', required=False, help='normalize irl rewards')  
@@ -122,13 +123,17 @@ def parse_args():
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
     parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
     parser.add_argument("--swil_loss", default='gsw', type=str, required=False, help="loss_type:")
-    parser.add_argument("--gsw_df", default='poly', type=str, required=False, help="Radon transform defining function: nn/poly/linear/circular")
+    parser.add_argument("--gsw_df", default='nn', type=str, required=False, help="Radon transform defining function: nn/poly/linear/circular")
 
     parser.add_argument("--proj_layer", default=False, required=False, action='store_true', 
                                         help="use nn instead of mean of projections")
     parser.add_argument("--linear_proj", default=False, required=False, action='store_true', 
                                         help="linear projection only")
     parser.add_argument("--swil_ae", default=False, required=False, action='store_true', help="use autoencoder")
+
+    parser.add_argument("--on_policy", default=True, required=False, action='store_false', help="use autoencoder")
+    parser.add_argument("--use_sb_ppo", default=True, required=False, action='store_false', help="use autoencoder")
+
 
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
@@ -232,7 +237,7 @@ def plot_scatter_cdf(policy_atoms, expert_atoms,
     height = np.abs(y1[1:] - y2[:-1])
 
     # Create the figure and axes
-    fig, ax = plt.subplots(1,3, figsize=(15, 5))
+    fig, ax = plt.subplots(1,4, figsize=(20, 5))
 
     # plot scatter
     #ax[0].scatter(10, 10, s=200, c='b', marker='o', alpha=1.0)
@@ -271,6 +276,7 @@ def plot_scatter_cdf(policy_atoms, expert_atoms,
     ax[2].set_xlabel('steps')
     ax[2].set_ylabel('SW distance')
     ax[2].set_title('Distance between ECDFs')
+
     plt.savefig(os.path.join(log_path, f"swil_scatter_cdf_{step}.png"))
     plt.clf()
 
@@ -347,6 +353,74 @@ class SWILUpdateCallback(BaseCallback):
 
     def _on_training_end(self) -> None:
         pass
+
+class SWILDiscUpdateCallback(BaseCallback):
+    def __init__(self, opt, disc, policy, demos, verbose=0, id="", log_path=None):
+        super(SWILDiscUpdateCallback, self).__init__(verbose)
+        self.cnt = 0
+        self.opt = opt
+        self.eval_freq = opt.sw_eval_freq
+        self.sw_dists = []
+        self.demos = demos
+        self.disc = disc
+        self.policy = policy
+        self.id = id
+        self.log_path = log_path
+        self.n_irl_epochs = opt.irl_epochs
+        #self.aux_writer = SummaryWriter(log_path)
+
+    def _on_training_start(self) -> None:
+        pass
+
+    def _on_rollout_start(self) -> None:
+        pass
+
+    def _on_step(self) -> bool:
+        return True
+
+    def on_step(self) -> bool:
+        return True
+
+    def _on_rollout_end(self) -> None:
+        # update the sorted slices and compute 
+
+        rb = self.locals['rollout_buffer']
+        env = self.locals['env']
+
+        for epoch in range(self.n_irl_epochs):
+            # GAIL Discriminator Update
+            gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+            if args.env_id == "MoveP-v0":
+                fig = plt.figure(figsize=(10, 10))
+            for d in gen_demos:
+                if len(d['obs']) < args.batch_size:
+                    obs_ = rb.observations[:len(d['obs'])]
+                    actions_ = rb.actions[:len(d['obs'])]
+                    #dones_ = rb.dones[:len(d['obs'])]
+                    dones_ = d['done']
+
+                else:
+                    obs_ = rb.observations
+                    actions_ = rb.actions
+                    dones_ = d['done']#rb.dones
+
+                update_dict = prepare_batch_update_irl(
+                    env, args, d, obs_, actions_, dones_, self.policy)
+
+                loss_dict = disc.compute_loss(update_dict)
+
+                loss = args.gsw_coeff*loss_dict['d_loss'] + args.lip_coeff * \
+                    loss_dict['lip_penalty'] + args.recon_coeff*loss_dict['recon_loss']
+
+                disc.update(loss)
+
+                self.logger.record('irl/swil_d_loss', loss_dict['d_loss'])
+                self.logger.record('irl/swil_ae_loss', loss_dict['recon_loss'])
+
+        self.cnt +=1
+
+    def _on_training_end(self) -> None:
+        pass
     
 
 if __name__ == "__main__":
@@ -363,9 +437,12 @@ if __name__ == "__main__":
         os.mkdir(output_dir)
         
     test_env = gym.make(args.env_id)
+    discrete = not isinstance(test_env.action_space, gym.spaces.Box)
+    disc = SWILDiscriminator(test_env, args)
     seed = args.seed
     env = gym.make(args.env_id)
-    env = SwilIRDiffReward(env, args)
+    #env = SwilIRDiffReward(env, args)
+    env = SwilReward(env, args, disc)
 
     # seed environment
     env.seed(seed)
@@ -382,13 +459,15 @@ if __name__ == "__main__":
         'n_epochs': args.update_epochs
         #'buffer_size': 1000000,
     }
-    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)['all']
+    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)#['all']
     #fig = plt.figure(figsize=(10,10))
 
     model = PPOSB('MlpPolicy', env, verbose=0, **kwargs, tensorboard_log=output_dir)
     #model = DQNSB('MlpPolicy', env, verbose=1, **kwargs, tensorboard_log=output_dir)
     # define callbacks
-    swil_cb = SWILUpdateCallback(args, demos, log_path=output_dir)
+    #swil_cb = SWILUpdateCallback(args, demos, log_path=output_dir)
+    swil_cb = SWILDiscUpdateCallback(args, disc, model, demos, log_path=output_dir)
+    
     eval_cb = EvalCallback(
         test_env, best_model_save_path=output_dir, log_path=output_dir, 
         eval_freq=10000, deterministic=False)

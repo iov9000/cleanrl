@@ -139,6 +139,8 @@ def parse_args():
     parser.add_argument('--irl_epochs', default=1, type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--irl_init_epochs', default=1, type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
+    parser.add_argument('--lip_p', default=1, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
+
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
     parser.add_argument('--use_cnn_base', default=False, required=False, 
@@ -151,6 +153,8 @@ def parse_args():
         help="divergence type")
     parser.add_argument('--normalize_irl_rewards', default=True, 
         action='store_true', required=False, help='normalize irl rewards') 
+
+    parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
 
     parser.add_argument('--on_policy', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
@@ -528,6 +532,11 @@ if __name__ == "__main__":
             
                 if global_step % args.logging_interval  == 0:
                     writer.add_scalar('irl/gail_bce_loss', loss_dict['d_loss'], global_step)
+                    # track norms
+                    writer.add_scalar('irl/lip_grad_mix_norm', torch.norm(loss_dict['lip_grad_mix']), global_step)
+                    #writer.add_scalar('irl/lip_grad_e_norm', torch.norm(loss_dict['grad_e']), global_step)
+                    #writer.add_scalar('irl/lip_grad_p_norm', torch.norm(loss_dict['grad_p']), global_step)
+                    writer.add_scalar('irl/irm_grad_norm', torch.norm(loss_dict['irm_grad']), global_step)
                     if args.irm_coeff > 0:
                         writer.add_scalar('irl/gail_irm_loss', loss_dict['grad_penalty'], global_step)
 

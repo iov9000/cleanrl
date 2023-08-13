@@ -39,7 +39,7 @@ from stable_baselines3.common.noise import NormalActionNoise
 from stable_baselines3 import SAC as SACSB
 from stable_baselines3 import DQN as DQNSB
 
-from irl.swil import SwilIRDiffReward
+from irl.swil import SwilIRDiffReward, FlowModel, SwilFlowReward
 from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict, MujocoTestWrapper, save_traj_dict
 
 gym.envs.register(
@@ -164,6 +164,9 @@ def parse_args():
     parser.add_argument('--normalize_irl_rewards', default=True, 
         action='store_false', required=False, help='normalize irl rewards')  
 
+    parser.add_argument("--scheduler_gamma", type=float, default=1.0,
+        help="exponential decay rate of the learning rate scheduler")
+
     # SWIL specific arguments
     parser.add_argument('--new_theta', default=False, 
         action='store_true', required=False, help='sample new direction of keep one during training')  
@@ -179,6 +182,10 @@ def parse_args():
         required=False, help='GRT defining function')
     parser.add_argument('--measurable_space', default='s', type=str, 
         required=False, help='GRT defining function')
+    parser.add_argument('--swil_reward_wrapper', default='irdiff', type=str, 
+        required=False, help='GRT defining function')
+
+
 
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
@@ -217,7 +224,7 @@ def plot_densities(policy_atoms, expert_atoms, theta, step, log_path):
 def plot_scatter_cdf(policy_atoms, expert_atoms, 
                     pa_subset, ea_subset, 
                     data1_sorted, data2_sorted, theta, 
-                    sw, step, log_path):
+                    sw, w2, step, log_path):
     # Calculate the ECDFs
     x1 = torch.squeeze(data1_sorted).detach().numpy()
     # x1[5]+=0.1
@@ -232,7 +239,10 @@ def plot_scatter_cdf(policy_atoms, expert_atoms,
     height = np.abs(y1[1:] - y2[:-1])
 
     # Create the figure and axes
-    fig, ax = plt.subplots(1,3, figsize=(15, 5))
+    fig, ax = plt.subplots(1,4, figsize=(20, 5))
+
+    #ray_x = np.arange(0, np.max(data2_sorted))
+    #ray_y = theta*ray_x
 
     # plot scatter
     #ax[0].scatter(10, 10, s=200, c='b', marker='o', alpha=1.0)
@@ -246,6 +256,7 @@ def plot_scatter_cdf(policy_atoms, expert_atoms,
                 s=20, c='b', alpha=0.4, label='expert_ss')
     ax[0].scatter(pa_subset[:, 0], pa_subset[:, 1], s=20,
                 c='r', alpha=0.4, label='agent_ss')
+    #ax[0].plot(ray_x,ray_y)
 
     # Plot the ECDFsg
     ax[1].scatter(x1, np.zeros_like(x1))
@@ -271,16 +282,112 @@ def plot_scatter_cdf(policy_atoms, expert_atoms,
     ax[2].set_xlabel('steps')
     ax[2].set_ylabel('SW distance')
     ax[2].set_title('Distance between ECDFs')
+
+    ax[3].plot(w2)
+    ax[3].set_xlabel('steps')
+    ax[3].set_ylabel('W2 distance')
+    ax[3].set_title('Distance between atoms')
     plt.savefig(os.path.join(log_path, f"swil_scatter_cdf_{step}.png"))
     plt.clf()
 
-class SWILUpdateCallback(BaseCallback):
+class SWILIRDiffUpdateCallback(BaseCallback):
     def __init__(self, opt, demos, verbose=0, id="", log_path=None):
-        super(SWILUpdateCallback, self).__init__(verbose)
+        super(SWILIRDiffUpdateCallback, self).__init__(verbose)
         self.cnt = 0
         self.opt = opt
         self.eval_freq = opt.sw_eval_freq
         self.sw_dists = []
+        self.w2_dists = []
+
+        self.demos = demos
+        self.id = id
+        self.log_path = log_path
+        #self.aux_writer = SummaryWriter(log_path)
+
+    def _on_training_start(self) -> None:
+        pass
+
+    def _on_rollout_start(self) -> None:
+        pass
+
+    def _on_step(self) -> bool:
+        return True
+
+    def on_step(self) -> bool:
+        return True
+
+    def _on_rollout_end(self) -> None:
+        # update the sorted slices and compute 
+        if self.cnt%self.eval_freq == 0:
+            # eval sw distance
+            rb = self.locals['replay_buffer']
+            env = self.locals['env']
+            #n_demo_samples = min(self.opt.sw_sample_size, self.opt.num_steps)
+            n_demo_samples = min(self.opt.sw_sample_size, len(self.demos['obs'])-1)
+            idx = np.random.randint(0, len(self.demos['obs'])-1, n_demo_samples)
+            idx_rb = np.random.randint(0, len(rb.observations)-1, n_demo_samples)
+
+            #idx = np.arange(0, n_demo_samples)
+            #idx_rb = np.arange(0, n_demo_samples)
+
+            # for DQN, instead of randomly sampling, take last trajectory!
+            # M(SxS)?
+            if self.opt.measurable_space == 'sxs':
+                rb_sample = np.squeeze(np.concatenate(
+                    [rb.observations[idx_rb], rb.observations[idx_rb+1]], -1))
+                demo_sample = np.concatenate(
+                    [self.demos['obs'][idx], self.demos['obs'][idx+1]], -1)
+            elif self.opt.measurable_space == 'sxa':
+                rb_sample = np.squeeze(np.concatenate(
+                    [rb.observations[idx_rb], rb.actions[idx_rb]], -1))
+                demo_sample = np.concatenate(
+                    [self.demos['obs'][idx], np.expand_dims(self.demos['acs'][idx],-1)], -1)
+            else:
+                rb_sample = np.squeeze(rb.observations[idx_rb])
+                #rb_sample = np.squeeze(rb.sample(n_demo_samples).observations)
+                #rb_sample = np.squeeze(rb._get_samples(idx_rb).observations)
+                demo_sample = np.concatenate([self.demos['obs'][idx]])
+
+            # shuffling?
+            policy_atoms = torch.Tensor(rb_sample)
+            #policy_atoms = torch.Tensor(rb.observations)
+            expert_atoms = torch.Tensor(demo_sample)
+
+            if self.opt.max_gsw:
+                sw_dist = env.envs[0].gsw.max_gsw(policy_atoms, expert_atoms)
+            else:
+                sw_dist = env.envs[0].gsw.gsw(policy_atoms, expert_atoms, new_theta=self.opt.new_theta)
+            
+            # compute reference W2 distance
+            pa_d = policy_atoms.detach().numpy()
+            ea_d = expert_atoms.detach().numpy()
+            #M = ot.dist(pa_d, ea_d, metric='euclidean')
+            #self.w2_dists.append(ot.emd(pa_d,ea_d,M,1))
+            self.w2_dists.append(sw_dist.detach().numpy())
+
+            self.sw_dists.append(sw_dist.detach().numpy())
+            theta = env.envs[0].gsw.theta
+            self.logger.record("irl/sw_dist", sw_dist)
+            p_sl = env.envs[0].gsw.Xslices_sorted[...,0]
+            exp_sl = env.envs[0].gsw.Yslices_sorted[..., 0]
+            plot_scatter_cdf(rb.observations.squeeze(), self.demos['obs'], 
+                            rb_sample, demo_sample, p_sl, exp_sl, 
+                            theta, self.sw_dists, self.w2_dists, self.cnt, self.log_path)
+
+        self.cnt +=1
+
+    def _on_training_end(self) -> None:
+        pass
+    
+class SWILFlowUpdateCallback(BaseCallback):
+    def __init__(self, opt, demos, verbose=0, id="", log_path=None):
+        super(SWILFlowUpdateCallback, self).__init__(verbose)
+        self.cnt = 0
+        self.opt = opt
+        self.eval_freq = opt.sw_eval_freq
+        self.sw_dists = []
+        self.w2_dists = []
+
         self.demos = demos
         self.id = id
         self.log_path = log_path
@@ -305,9 +412,11 @@ class SWILUpdateCallback(BaseCallback):
             rb = self.locals['replay_buffer']
             env = self.locals['env']
             n_demo_samples = min(self.opt.sw_sample_size, self.opt.num_steps)
+            #n_demo_samples = min(self.opt.sw_sample_size, len(self.demos['obs'])-1)
             idx = np.random.randint(0, len(self.demos['obs'])-1, n_demo_samples)
             idx_rb = np.random.randint(0, len(rb.observations)-1, n_demo_samples)
 
+            # for DQN, instead of randomly sampling, take last trajectory!
             # M(SxS)?
             if self.opt.measurable_space == 'sxs':
                 rb_sample = np.squeeze(np.concatenate(
@@ -321,6 +430,7 @@ class SWILUpdateCallback(BaseCallback):
                     [self.demos['obs'][idx], np.expand_dims(self.demos['acs'][idx],-1)], -1)
             else:
                 rb_sample = np.squeeze(rb.sample(n_demo_samples).observations)
+                #rb_sample = np.squeeze(rb._get_samples(idx_rb).observations)
                 demo_sample = np.concatenate([self.demos['obs'][idx]])
 
             # shuffling?
@@ -328,19 +438,27 @@ class SWILUpdateCallback(BaseCallback):
             #policy_atoms = torch.Tensor(rb.observations)
             expert_atoms = torch.Tensor(demo_sample)
 
-            if self.opt.max_gsw:
-                sw_dist = env.envs[0].gsw.max_gsw(policy_atoms, expert_atoms)
-            else:
-                sw_dist = env.envs[0].gsw.gsw(policy_atoms, expert_atoms, new_theta=self.opt.new_theta)
+            ## update gradient estimator
+            sw_dist,p_sl, exp_sl = env.envs[0].update_gradient_estimator(policy_atoms, expert_atoms)
             
+            # compute reference W2 distance
+            pa_d = policy_atoms.detach().numpy()
+            ea_d = expert_atoms.detach().numpy()
+
+            #sw_dist = ot.sliced_wasserstein_distance(pa_d, ea_d, n_projections=args.n_proj)
+            #M = ot.dist(pa_d, ea_d, metric='euclidean')
+            #self.w2_dists.append(ot.emd(pa_d,ea_d,M,1))
+            self.w2_dists.append(sw_dist.detach().numpy())
+
             self.sw_dists.append(sw_dist.detach().numpy())
-            theta = env.envs[0].gsw.theta
+            #theta = env.envs[0].gsw.theta
+            theta = None
             self.logger.record("irl/sw_dist", sw_dist)
-            p_sl = env.envs[0].gsw.Xslices_sorted[...,0]
-            exp_sl = env.envs[0].gsw.Yslices_sorted[..., 0]
+            p_sl = p_sl[...,0]
+            exp_sl = exp_sl[..., 0]
             plot_scatter_cdf(rb.observations.squeeze(), self.demos['obs'], 
                             rb_sample, demo_sample, p_sl, exp_sl, 
-                            theta, self.sw_dists, self.cnt, self.log_path)
+                            theta, self.sw_dists, self.w2_dists, self.cnt, self.log_path)
 
         self.cnt +=1
 
@@ -364,7 +482,10 @@ if __name__ == "__main__":
     test_env = gym.make(args.env_id)
     seed = args.seed
     env = gym.make(args.env_id)
-    env = SwilIRDiffReward(env, args)
+    if args.swil_reward_wrapper == 'irdiff':
+        env = SwilIRDiffReward(env, args)
+    elif args.swil_reward_wrapper == 'flow':
+        env = SwilFlowReward(env, args)
 
     # seed environment
     env.seed(seed)
@@ -379,7 +500,7 @@ if __name__ == "__main__":
         'learning_rate': args.lr,
         #'n_steps': args.num_steps,
         #'n_epochs': args.update_epochs
-        'buffer_size': 1000000,
+        'buffer_size': 10000,
     }
     demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)['all']
     #fig = plt.figure(figsize=(10,10))
@@ -387,7 +508,11 @@ if __name__ == "__main__":
     #model = PPOSB('MlpPolicy', env, verbose=0, **kwargs, tensorboard_log=output_dir)
     model = DQNSB('MlpPolicy', env, verbose=1, **kwargs, tensorboard_log=output_dir)
     # define callbacks
-    swil_cb = SWILUpdateCallback(args, demos, log_path=output_dir)
+    if args.swil_reward_wrapper == 'irdiff':
+        swil_cb = SWILIRDiffUpdateCallback(args, demos, log_path=output_dir)
+    else:
+        swil_cb = SWILFlowUpdateCallback(args, demos, log_path=output_dir)
+
     eval_cb = EvalCallback(
         test_env, best_model_save_path=output_dir, log_path=output_dir, 
         eval_freq=10000, deterministic=False)

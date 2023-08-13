@@ -233,6 +233,9 @@ class SWILDiscriminator(nn.Module):
         else:
             self.gsw_module = GSW('poly', nofprojections=opt.n_proj, degree=opt.poly_degree)
 
+        # init sorted arrays
+        self.pi_atoms_sorted = None
+        self.exp_atoms_sorted = None
 
         self.policy_obs = torch.randn([opt.batch_size, *ob_shapes])#, requires_grad=True)
         self.policy_acs = torch.randn([opt.batch_size, *ac_shapes])#, requires_grad=True)
@@ -282,7 +285,56 @@ class SWILDiscriminator(nn.Module):
         if callable(reset_parameters):
             self.reward.reset_parameters()
 
-    def get_reward(self, ob, ac, nob=None,d=None):
+    def compute_replacement_reward(self, ob, ac, nob=None,d=None):
+        with torch.no_grad():
+            # project next state and rank it as part of previous evaluation
+            base_out = self.base_fwd(ob,ac,nob,d)
+            obs_t_slice = self.reward(base_out).unsqueeze(0)
+            sorted_proj = self.pi_atoms_sorted
+            sorted_proj_tgt = self.exp_atoms_sorted
+
+            if sorted_proj is None:
+                return torch.zeros(1)
+
+            n = len(sorted_proj)
+
+            #idx = torch.searchsorted(sorted_proj.T.contiguous(), obs_t_slice.T.contiguous())#, right=True)
+            # determine slice index in previously sorted atoms used for SWD computation
+            idx = torch.searchsorted(sorted_proj.T, obs_t_slice.T)#, right=True)
+
+            # shift extreme indices
+            idx[idx==0] +=1
+            idx[idx==n] -=1
+
+            rew = 0
+
+            # TODO: what if target CDF is left or mixed?
+            for j,i in enumerate(idx):
+                if self.opt.swil_rew == 'insertion_loss':
+                    w = 1/(n*(n+1))
+                    # new atom contribution
+                    diff = sorted_proj[1:]-sorted_proj[:-1]
+
+                    rew += w*torch.sum(sorted_proj[i,j]-obs_t_slice[0,j] +
+                                    sorted_proj[i-1,j]-obs_t_slice[0,j])
+                    # reweighting of integrals
+                    rew -= torch.sum(w*diff[:i-1,j])
+                    rew += torch.sum(w*diff[i:,j])
+                else:
+                    # calculate diff when replacing atom
+                    w = 1/n
+                    a_prev = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
+                    a_new = (sorted_proj_tgt[i,j] - obs_t_slice[0,j])**2
+                    #w = 1/ (n + a_prev) # more reward if closer
+
+                    rew += w*(a_new - a_prev)
+
+            rew = -rew
+
+        return rew
+            
+    def swil_reward(self, ob, ac, nob=None,d=None):
+        ## TODO: replacement loss here..
         if self.opt.gsw_df == 'nn':
             base_out = self.base_fwd(ob,ac,nob,d)
             if self.reward_type == 'linear':
@@ -310,6 +362,12 @@ class SWILDiscriminator(nn.Module):
             # potentially use more sophisticated mechanism for averaging out projections
             # Self-Attention sliced wasserstein distances is a weighted sum? 
             return gsw_dist
+
+    def get_reward(self, ob, ac, nob=None,d=None):
+        if self.opt.swil_rew == 'old_swil':
+            return self.swil_reward(ob,ac,nob,d)
+        else:
+            return self.compute_replacement_reward(ob,ac,nob,d)
 
     def get_slice(self, ob, ac, theta):
         ''' Slices samples from distribution X~P_X
@@ -378,6 +436,9 @@ class SWILDiscriminator(nn.Module):
         pi_slices_sorted = torch.sort(pi_slices, dim=0)[0]
         exp_slices_sorted = torch.sort(exp_slices, dim=0)[0]
         
+        self.pi_atoms_sorted = pi_slices_sorted
+        self.exp_atoms_sorted = exp_slices_sorted
+
         return torch.sqrt(torch.sum((pi_slices_sorted-exp_slices_sorted)**2))
 
     def atom_gsw(self, obs_pi, acs_pi, obs_exp, acs_exp, random=False):
@@ -467,7 +528,7 @@ class SWILDiscriminator(nn.Module):
                 gsw_dist = self.max_gsw(self.policy_obs, self.policy_acs,
                             exp_obs, exp_acs)
             else:
-                gsw_dist = self.gsw_dist_nn(self.policy_obs, self.policy_acs, policy_obs_next, policy_dones,
+                gsw_dist = -self.gsw_dist_nn(self.policy_obs, self.policy_acs, policy_obs_next, policy_dones,
                             exp_obs, exp_acs, exp_obs_next, exp_dones, random=False)
             d_loss = gsw_dist
 
@@ -497,6 +558,151 @@ class SWILDiscriminator(nn.Module):
         self.d_optimizer.zero_grad()
         if self.opt.swil_loss != 'approx_sw':        
             loss.backward()
+        self.d_optimizer.step()
+        self.d_scheduler.step()
+
+
+class FlowModel(nn.Module):
+    def __init__(self, env, opt):
+        super(FlowModel, self).__init__()
+
+        self.env = env
+        self.opt = opt
+        self.gsw_df = opt.gsw_df
+        self.layer_dims = opt.d_layer_dims
+        self.lr = opt.disc_lr
+        self.use_actions = opt.use_actions
+        self.use_dones = opt.use_dones
+        self.use_next_obs = opt.use_next_obs
+        self.irm_coeff = opt.irm_coeff
+        self.l2_coeff = opt.l2_coeff
+        self.lip_coeff = opt.lip_coeff
+        self.use_cnn_base = opt.use_cnn_base
+        use_cnn_base = self.use_cnn_base
+        self.bias = opt.use_disc_bias
+        bias = self.bias
+        self.n_proj = opt.n_proj
+        self.l2_coeff = opt.l2_coeff
+        self.model_type = opt.swil_reward_type
+        self.is_atari = 'atari' in self.opt.exp_name
+
+        if opt.disc_nonlin == 'relu':
+            nonlin = nn.ReLU()
+        elif opt.disc_nonlin == 'leakyrelu':
+            nonlin = nn.LeakyReLU()
+        elif opt.disc_nonlin == 'tanh':
+            nonlin = nn.Tanh()
+        elif opt.disc_nonlin == 'id':
+            nonlin = nn.Identity()
+        else:
+            nonlin = nn.PReLU()
+
+        ob_shapes = list(env.observation_space.shape)
+        ac_shapes = list(env.action_space.shape)
+        if not ac_shapes:
+            ac_shapes = [1]
+
+        dim0 = ob_shapes[-1]
+        if self.use_actions:
+            dim0 = dim0 + ac_shapes[-1]
+        if opt.use_dones:
+            dim0 = dim0 + 1
+        if opt.use_next_obs:
+            dim0 = dim0 + ob_shapes[-1]
+
+        self.layer_dims = [dim0] + self.layer_dims
+
+        ac_len = ac_shapes[0]
+
+        if use_cnn_base:
+            self.base = MiniGridCNN(self.layer_dims, self.use_actions)
+        elif self.is_atari:
+            self.base = AtariCNNBase(opt, env, self.use_actions)
+        elif opt.linear_proj:
+            self.base = linlayer(self.layer_dims[0], ob_shapes[-1], bias)
+        else:
+            self.base = nn.Sequential(
+                linlayer(self.layer_dims[0], self.layer_dims[1], bias), nonlin)
+
+        if self.is_atari:
+            self.model = nn.Linear(512, ob_shapes[-1])
+        elif opt.linear_proj:
+            self.model = nn.Identity()
+        else:
+            if self.model_type == 'linear':
+                self.model_layers = []
+                for i in range(2, len(self.layer_dims)):
+                    self.model_layers += [
+                        linlayer(self.layer_dims[i - 1], self.layer_dims[i], bias), nonlin]
+
+                self.model_layers += [
+                    linlayer(self.layer_dims[-1], ob_shapes[-1], bias)]
+                self.model = nn.Sequential(*self.model_layers)
+            else:
+                self.model = nn.MultiheadAttention(
+                    embed_dim=self.layer_dims[1], num_heads=1)
+
+
+        if torch.cuda.is_available():
+            self.base.cuda()
+            self.model.cuda()
+            if self.opt.proj_layer:
+                self.proj_layer.cuda()
+
+        self.d_optimizer = Adam(
+            self.parameters(), lr=self.lr, weight_decay=self.l2_coeff)  # , eps=1e-5)
+        self.d_scheduler = ExponentialLR(
+            self.d_optimizer, gamma=opt.scheduler_gamma)
+
+
+    def forward(self, ob, ac=None, nob=None, d=None, lprobs=None):
+        # forward the nn models
+        base_out = self.base_fwd(ob, ac, nob, d)
+        grads = self.model(base_out)
+
+        # get random projections based on reward
+        return grads
+
+    def base_fwd(self, ob, ac=None, nob=None, d=None):
+        if self.use_actions and (self.use_cnn_base or self.is_atari):
+            base_out = self.base(ob, ac)
+        elif self.use_actions and not (self.use_cnn_base or self.is_atari):
+            if len(ob.shape) != len(ac.shape):
+                ac = torch.unsqueeze(ac, -1)
+            base_out = self.base(torch.cat([ob, ac], axis=-1))
+        else:
+            base_out = self.base(ob)
+
+        return base_out
+
+    def weight_reset(self):
+        reset_parameters = getattr(self.reward, "reset_parameters", None)
+        if callable(reset_parameters):
+            self.reward.reset_parameters()
+
+    def get_reward(self, ob, ac, nob=None, d=None):
+        base_out = self.base_fwd(ob, ac, nob, d)
+        grads = self.model(base_out)
+
+        d_ob = nob-ob
+        d_ob = d_ob/torch.norm(d_ob,-1)
+        grads = grads/torch.norm(grads,-1)
+        # dot product
+        return torch.sum((nob-ob)*grads,-1)
+
+    def prepare_x(self, ob, ac):
+        if self.use_actions:
+            if len(ob.shape) != len(ac.shape):
+                ac = torch.unsqueeze(ac, -1)
+            X = torch.cat([ob, ac], axis=-1)
+        else:
+            X = ob
+
+        return X
+
+    def update(self, loss):
+        self.d_optimizer.zero_grad()
+        loss.backward()
         self.d_optimizer.step()
         self.d_scheduler.step()
 
@@ -540,15 +746,15 @@ class SwilReward(gym.Wrapper):
             self.traj=[]
             self.traj_=[]
 
-        return next_obs, irl_reward, done, info
+        return next_obs, irl_reward[0], done, info
 
 
 class SwilFlowReward(gym.Wrapper):
-    def __init__(self, env, opt, disc):
+    def __init__(self, env, opt):
         super().__init__(env=env)
         # self.reward_fn = make_network(**reward_fn_spec)
         self.use_actions = opt.use_actions
-        self.discriminator = disc
+        self.gradient_model = FlowModel(env, opt)
         self.obs = None
         self.n_proj = opt.n_proj
         self.sw_poly_deg = opt.sw_poly_deg
@@ -556,14 +762,22 @@ class SwilFlowReward(gym.Wrapper):
         # calculate reward at the end of trajecotiry
         self.traj = []
 
-    def compute_sw_grad(self, rho_pi, rho_e):
+    def compute_sw_grad(self, policy_atoms, expert_atoms):
         #loss = ot.sliced_wasserstein_distance(x1_torch, x2_torch, n_projections=100, seed=gen)
-        rho_pi.requires_grad_(True)
-        loss = gsw(rho_pi, rho_e, ftype=self.radon_df_type,
+        policy_atoms.requires_grad_(True)
+        sw_dist, _ , Xsorted , Ysorted = gsw(policy_atoms, expert_atoms, ftype=self.radon_df_type,
                    n_proj=self.n_proj, degree=self.sw_poly_deg)
-        loss.backward()
+        sw_dist.backward()
 
-        return rho_pi.grad
+        return sw_dist, policy_atoms.grad, Xsorted, Ysorted
+
+    def update_gradient_estimator(self, policy_atoms, expert_atoms):
+        sw_dist, policy_atoms_grad, Xsorted, Ysorted = self.compute_sw_grad(policy_atoms, expert_atoms)
+        estimated_gradients = self.gradient_model.forward(policy_atoms)
+        loss = F.mse_loss(estimated_gradients, policy_atoms_grad)
+        self.gradient_model.update(loss)
+
+        return sw_dist, Xsorted, Ysorted
 
     def step(self, action):
         next_obs, gt_reward, done, info = self.env.step(action)
@@ -585,7 +799,7 @@ class SwilFlowReward(gym.Wrapper):
             #print([p.norm(2) for p in self.discriminator.parameters()])
             d_obs = next_obs_t-obs_t
             #sw_grad_obs = 
-            irl_reward = self.discriminator.get_reward(
+            irl_reward = self.gradient_model.get_reward(
                 obs_t, acs_t, next_obs_t, done_t).cpu().numpy()
             #irl_reward = self.discriminator.get_reward(obs_t, acs_t, next_obs_t).cpu().numpy()
         self.obs = next_obs
@@ -655,7 +869,8 @@ class SwilIRDiffReward(gym.Wrapper):
                 n = len(sorted_proj)
 
                 #idx = torch.searchsorted(sorted_proj.T.contiguous(), obs_t_slice.T.contiguous())#, right=True)
-                idx = torch.searchsorted(sorted_proj, obs_t_slice.T)#, right=True)
+                idx = torch.searchsorted(sorted_proj.T, obs_t_slice.T)#, right=True)
+
 
                 # shift extreme indices
                 idx[idx==0] +=1
@@ -675,7 +890,7 @@ class SwilIRDiffReward(gym.Wrapper):
                         rew += torch.sum(w*diff[i:,j])
                     else:
                         # calculate diff when replacing atom
-                        w = 1
+                        w = 1/n
                         a_prev = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
                         a_new = (sorted_proj_tgt[i,j] - obs_t_slice[0,j])**2
 

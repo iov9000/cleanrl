@@ -181,7 +181,10 @@ def demos_gen_dict(data, batch_size, shuffle=False):
                'done': data['done'][mb_inds]}
 
 def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
-    ac_sample = env.single_action_space.sample()
+    if opt.use_sb_ppo:
+        ac_sample = env.action_space.sample()
+    else:
+        ac_sample = env.single_action_space.sample()
 
     #print(obs.shape, acs.shape, dones.shape, expert_demos['obs'].shape, expert_demos['acs'].shape, expert_demos['done'].shape)
 
@@ -254,17 +257,26 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
     #print(expert_obs_t.shape, expert_acs_t.shape, obs_t.shape, acs_t.shape)
 
     with torch.no_grad():
+
         if torch.cuda.is_available():
             if opt.on_policy:
-                _, expert_lprobs_t, _, _ = policy.get_action_and_value(expert_obs_t.cuda(), expert_acs_t.cuda())
-                _, policy_lprobs_t, _, _ = policy.get_action_and_value(obs_t.cuda(), acs_t.cuda())
+                if opt.use_sb_ppo:
+                    _, _, expert_lprobs_t = policy.policy.forward(expert_obs_t.cuda())
+                    _, _, policy_lprobs_t = policy.policy.forward(obs_t.cuda())
+                else:
+                    _, expert_lprobs_t, _, _ = policy.get_action_and_value(expert_obs_t.cuda(), expert_acs_t.cuda())
+                    _, policy_lprobs_t, _, _ = policy.get_action_and_value(obs_t.cuda(), acs_t.cuda())
             else:
                 _, expert_lprobs_t, _ = policy.get_action(expert_obs_t.cuda())
                 _, policy_lprobs_t, _ = policy.get_action(obs_t.cuda())
         else:
             if opt.on_policy:
-                _, expert_lprobs_t, _, _ = policy.get_action_and_value(expert_obs_t, expert_acs_t)
-                _, policy_lprobs_t, _, _ = policy.get_action_and_value(obs_t, acs_t)
+                if opt.use_sb_ppo:
+                    _, _, expert_lprobs_t = policy.policy.forward(expert_obs_t)
+                    _, _, policy_lprobs_t = policy.policy.forward(obs_t)
+                else:
+                    _, expert_lprobs_t, _, _ = policy.get_action_and_value(expert_obs_t, expert_acs_t)
+                    _, policy_lprobs_t, _, _ = policy.get_action_and_value(obs_t, acs_t)
             else:
                 _, expert_lprobs_t, _ = policy.get_action(expert_obs_t)
                 _, policy_lprobs_t, _ = policy.get_action(obs_t)

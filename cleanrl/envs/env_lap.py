@@ -283,7 +283,7 @@ class Laparos(Env):
                 dist = np.sum((tentative_move-v.vertices)**2, -1) < self.radius
                 if np.any(dist):
                     print(f"Hard Collision with {k}")
-                    #reward -= 10
+                    reward -= 1
                 else:
                     self.agent = tentative_move
         else:
