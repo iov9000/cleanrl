@@ -36,7 +36,7 @@ import pickle
 #     sys.path.append(module_path)
 
 # from irl.utils import AntCFWrapper
-def train_expert(env, n_timesteps, fname):
+def train_expert(env, n_timesteps, fname, n_traj, model=None):
 
     ppo_kwargs = {
         'learning_rate':0.0003, 
@@ -53,11 +53,14 @@ def train_expert(env, n_timesteps, fname):
     }
 
 
-    model = PPO('MlpPolicy', env, verbose=1, **ppo_kwargs)
-    model.learn(total_timesteps=n_timesteps)
+    if model is None:
+        model = PPO('MlpPolicy', env, verbose=1, **ppo_kwargs)
+        model.learn(total_timesteps=n_timesteps)
+    else:
+        model = PPO.load(model)
 
     model.save('model_' + fname + str(n_timesteps))
-    save_expert_traj_dict('CMoveP-v0', env, model, nr_trajectories=10, min_total_rew=-50000)
+    save_expert_traj_dict('CMoveP-v0', env, model, nr_trajectories=n_traj, min_total_rew=-50000)
     
     return model
 
@@ -115,9 +118,10 @@ if __name__ == '__main__':
     algo = sys.argv[2]
     nr_traj = int(sys.argv[3])
     min_total_rew = int(sys.argv[4])
+    model = sys.argv[5] 
 
     env = gym.make(env_name, waypoints=[(175, 175)])
-    train_expert(env, n_timesteps=1000000, fname='mp')
+    train_expert(env, n_timesteps=1000000, fname='mp', n_traj=nr_traj, model=model)
 
 
     

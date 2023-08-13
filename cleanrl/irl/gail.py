@@ -111,6 +111,7 @@ class GAILDiscriminator(nn.Module):
         base_out = self.base_forward(ob, ac)
 
         d_out = self.discriminator(base_out)
+        # XXX: log D vs log(1-D)!!!!
         self.reward = - torch.squeeze(torch.log(torch.sigmoid(d_out) + 1e-8))
         return self.reward
 
@@ -118,7 +119,11 @@ class GAILDiscriminator(nn.Module):
         scale = torch.tensor(1.).requires_grad_()
         loss = F.binary_cross_entropy_with_logits(logits * scale, y)
         grad = autograd.grad(loss, [scale], create_graph=True)[0]
-        return torch.sum(grad ** 2)
+        #safe_norm = (torch.sum(grad ** 2, dim=-1) + 1e-8).sqrt()
+        # L1
+        #gradient_mag = torch.mean((safe_norm - 1) ** 2)
+        #return gradient_mag, grad
+        return torch.sum(grad ** 2), grad
 
     def compute_penalty(self, logits, y):
         scale = torch.tensor(1.).requires_grad_()
@@ -127,7 +132,7 @@ class GAILDiscriminator(nn.Module):
         g2 = autograd.grad(loss[1::2].mean(), [scale], create_graph=True)[0]
         return (g1 * g2).sum()
 
-    def lip_penalty(self, update_dict):
+    def lip_penalty(self, update_dict, p=1):
         obs_epsilon = torch.rand(update_dict['policy_obs'].shape)
         interp_obs = obs_epsilon * update_dict['policy_obs'] + (1 - obs_epsilon) * update_dict['expert_obs']
         interp_obs.requires_grad = True  # For gradient calculation
@@ -137,17 +142,29 @@ class GAILDiscriminator(nn.Module):
             interp_acs = action_epsilon * update_dict['policy_acs'] + (1 - action_epsilon) * update_dict['expert_acs']
             interp_acs.requires_grad = True
             encoder_input = [interp_obs, interp_acs]
+
             estimate = self.forward(interp_obs, interp_acs)
         else:            
             encoder_input = [interp_obs]
             estimate = self.forward(interp_obs, ac=None)
 
-        gradient = torch.autograd.grad(estimate.sum(), encoder_input, create_graph=True)[0]
-        # Norm's gradient could be NaN at 0. Use our own safe_norm
-        safe_norm = (torch.sum(gradient ** 2, dim=1) + 1e-8).sqrt()
-        gradient_mag = torch.mean((safe_norm - 1) ** 2)
+        # policy_obs = update_dict['policy_obs']
+        # expert_obs = update_dict['expert_obs']
+        # policy_obs.requires_grad = True
+        # expert_obs.requires_grad = True
 
-        return gradient_mag
+        gradient_mix = torch.autograd.grad(estimate.sum(), encoder_input, create_graph=True)[0]
+        # gradient_p = torch.autograd.grad(
+        #     estimate.sum(), policy_obs, create_graph=True)[0]
+        # gradient_e = torch.autograd.grad(
+        #     estimate.sum(), expert_obs, create_graph=True)[0]
+
+        # Norm's gradient could be NaN at 0. Use our own safe_norm
+        safe_norm = (torch.sum(gradient_mix ** 2, dim=1) + 1e-8).sqrt()
+        # L1
+        gradient_mag = torch.mean((safe_norm - p) ** 2)
+
+        return gradient_mag, gradient_mix #, gradient_e, gradient_p
 
     # def compute_lip_pen(self, update_dict):
     #     alpha = torch.rand(update_dict['expert_obs'].size(0), 1)
@@ -192,29 +209,29 @@ class GAILDiscriminator(nn.Module):
 
         self.bce_loss = F.binary_cross_entropy_with_logits(d_out, labels)
         # self.grad_penalty = self.irm_penalty(d_out, labels)
-        lip_penalty = self.lip_penalty(update_dict)
+        lip_penalty, grad_mix = self.lip_penalty(update_dict, self.opt.lip_p)
         ## TODO: check IRM penalty form! -> ones not zeros!
         if self.opt.irm_loss_type == 'e1':
-            self.grad_penalty = self.irm_penalty(
+            self.grad_penalty, grad_irm = self.irm_penalty(
                 expert_out, torch.ones(expert_out.size()))
         elif self.opt.irm_loss_type == 'e0':
-            self.grad_penalty = self.irm_penalty(
+            self.grad_penalty, grad_irm = self.irm_penalty(
                 expert_out, torch.zeros(expert_out.size()))
         if self.opt.irm_loss_type == 'p1':
-            self.grad_penalty = self.irm_penalty(
+            self.grad_penalty, grad_irm = self.irm_penalty(
                 policy_out, torch.zeros(policy_out.size()))
         elif self.opt.irm_loss_type == 'p0':
-            self.grad_penalty = self.irm_penalty(
+            self.grad_penalty, grad_irm = self.irm_penalty(
                 policy_out, torch.zeros(policy_out.size()))
         elif self.opt.irm_loss_type == 'e1p0_sep':
-            self.grad_penalty = self.irm_penalty(policy_out, torch.zeros(policy_out.size())) +\
+            self.grad_penalty, grad_irm = self.irm_penalty(policy_out, torch.zeros(policy_out.size())) +\
                 self.irm_penalty(expert_out, torch.ones(expert_out.size()))    
         elif self.opt.irm_loss_type == 'e1p0':
-            self.grad_penalty = self.irm_penalty(d_out, labels_flipped)
+            self.grad_penalty, grad_irm = self.irm_penalty(d_out, labels_flipped)
         elif self.opt.irm_loss_type == 'e1p0sym':
-            self.grad_penalty = self.irm_penalty(d_out, labels_flipped) + self.irm_penalty(d_out, labels)
+            self.grad_penalty, grad_irm = self.irm_penalty(d_out, labels_flipped) + self.irm_penalty(d_out, labels)
         else:
-            self.grad_penalty = self.irm_penalty(d_out, labels)
+            self.grad_penalty, grad_irm = self.irm_penalty(d_out, labels)
 
 
         self.loss = self.bce_loss + self.irm_coeff * self.grad_penalty + self.lip_coeff * lip_penalty
@@ -222,7 +239,11 @@ class GAILDiscriminator(nn.Module):
         output_dict = {}
         output_dict['d_loss'] = self.bce_loss
         output_dict['lip_penalty'] = lip_penalty
+        output_dict['lip_grad_mix'] = grad_mix
+        #output_dict['lip_grad_e'] = grad_e
+        #output_dict['lip_grad_p'] = grad_p
         output_dict['grad_penalty'] = self.grad_penalty
+        output_dict['irm_grad'] = grad_irm
 
         return output_dict
         
@@ -237,6 +258,7 @@ class GailReward(gym.Wrapper):
         # self.reward_fn = make_network(**reward_fn_spec)
         self.use_actions = opt.use_actions
         self.discriminator = disc
+        self.episode_return = 0
         self.obs = None
 
     def step(self, action):
@@ -255,7 +277,11 @@ class GailReward(gym.Wrapper):
             #print([p.norm(2) for p in self.discriminator.parameters()])
             irl_reward = self.discriminator.get_reward(
                 obs_t, acs_t).cpu().numpy()
+            
             #irl_reward = self.discriminator.get_reward(obs_t, acs_t, next_obs_t).cpu().numpy()
+
+        self.episode_return += irl_reward
+
         self.obs = next_obs
 
         return next_obs, irl_reward, done, info

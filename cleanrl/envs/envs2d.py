@@ -266,12 +266,20 @@ class MovePoint(Env):
 
 # discrete movepoint
 class MoveP(Env):
-    def __init__(self, waypoints=[(175,175)], size=200, random_init=False):
+    metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
+
+    def __init__(self, waypoints=[(175,175)], size=200, random_init=False, goal_conditioning=True):
         super(MoveP, self).__init__()
         
+        self.goal_conditioning = goal_conditioning
+        if goal_conditioning:
+            dim = 4
+        else:
+            dim = 2
+
         # Define a 2-D observation space (R^4)
         self.size = size
-        self.observation_shape = (4)
+        self.observation_shape = (dim)
         self.observation_space = spaces.Box(low = np.zeros(self.observation_shape), 
                                             high = np.ones(self.observation_shape)*self.size,
                                             dtype = np.float32)
@@ -336,6 +344,13 @@ class MoveP(Env):
     def clamp(self, n, minn, maxn):
         return max(min(maxn, n), minn)
 
+    def get_reward(self, state, tgt = (175,175)):
+        curr_tgt = np.array(tgt)
+        # l2 distance as reward
+        reward = -(np.sqrt((state[0] - curr_tgt[0])**2 + (state[1]-curr_tgt[1])**2))
+        
+        return reward
+
     def step(self, action):
         # Assert that it is a valid action 
         assert self.action_space.contains(action), "Invalid Action"
@@ -377,8 +392,12 @@ class MoveP(Env):
                 # update target
                 reward += 500
                 self.curr_tgt+=1
+        
+        if self.goal_conditioning:
+            state = np.stack([self.agent[0], self.agent[1], curr_tgt[0], curr_tgt[1]])
+        else:
+            state = self.agent
 
-        state = np.stack([self.agent[0], self.agent[1], curr_tgt[0], curr_tgt[1]])
         
         # If out of fuel, end the episode.
         if self.time == 0:
@@ -398,11 +417,16 @@ class MoveP(Env):
             plt.show()
 
         elif mode == "rgb_array":
-            return fig
-
+            #return fig
+            fig.canvas.draw()
+            data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            return data
     
 # continuous movepoint
 class CMoveP(Env):
+    metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
+
     def __init__(self, waypoints=[(175,175)], size=200, random_init=False):
         super(CMoveP, self).__init__()
         

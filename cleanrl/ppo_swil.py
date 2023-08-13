@@ -38,7 +38,8 @@ from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.swil import SwilReward, SWILDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict, MujocoTestWrapper, save_traj_dict
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
+                    demos_gen_dict, MujocoTestWrapper, save_traj_dict
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -117,12 +118,22 @@ def parse_args():
         help="nonlinearity type")
     # SWIL specific 
     parser.add_argument("--n_proj", type=int, default=100, help="number of projections for SWIL")
+    parser.add_argument("--poly_degree", type=int, default=4, help="degree of polynomial for SWIL")
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
+    parser.add_argument("--swil_rew", type=str, default='old_swil', help="mean or replacement")
     parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
     parser.add_argument("--swil_loss", default='gsw', type=str, required=False, help="loss_type:")
+    parser.add_argument("--gsw_df", default='nn', type=str, required=False, help="Radon transform defining function: nn/poly/linear/circular")
+    parser.add_argument('--measurable_space', default='sxa', type=str, 
+        required=False, help='GRT defining function')
+
     parser.add_argument("--proj_layer", default=False, required=False, action='store_true', 
                                         help="use nn instead of mean of projections")
+    parser.add_argument("--linear_proj", default=False, required=False, action='store_true', 
+                                        help="linear projection only")
     parser.add_argument("--swil_ae", default=False, required=False, action='store_true', help="use autoencoder")
+
+    parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
 
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
@@ -133,20 +144,25 @@ def parse_args():
         action='store_true', help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
+    parser.add_argument('--use_dones', default=False, required=False, 
+        action='store_true', help='use actions in discriminator')
+    parser.add_argument('--use_next_obs', default=False, required=False, 
+        action='store_true', help='use actions in discriminator')
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
                    help='discriminator MLP layer dimensions')
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
     parser.add_argument('--irl_batch_size', default=64, type=int, required=False, help='batch size for discriminator updates')
-    parser.add_argument('--irl_init_epochs', default=1, type=int, required=False, help='number of discriminator updates')
-    parser.add_argument('--irl_epochs', default=1, type=int, required=False, help='number of discriminator updates')
+    parser.add_argument('--irl_init_epochs', default=1  , type=int, required=False, help='number of discriminator updates')
+    parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
-    parser.add_argument('--recon_coeff', default=0, type=float, required=False, help='ae loss coeff')
+    parser.add_argument('--gsw_coeff', default=1.0, type=float, required=False, help='ae loss coeff')
+    parser.add_argument('--recon_coeff', default=0.0, type=float, required=False, help='ae loss coeff')
     parser.add_argument('--l2_coeff', default=0.0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
-    parser.add_argument('--use_disc_bias', default=False, required=False, 
+    parser.add_argument('--use_disc_bias', default=True, required=False, 
         action='store_true', help='use bias in disc arch')
     parser.add_argument("--disc_nonlin", type=str, default="tanh",
         help="divergence type")
@@ -473,53 +489,60 @@ if __name__ == "__main__":
                 n_irl_epochs = args.irl_epochs
             init = False
 
-            for epoch in range(n_irl_epochs):            
-                # GAIL Discriminator Update 
-                gen_demos = demos_gen_dict(demos['all'], args.batch_size)
-                if args.env_id == "MoveP-v0":
-                    fig = plt.figure(figsize=(10,10))
-                for d in gen_demos:
-                    if len(d['obs']) < args.batch_size:
-                        obs_ = obs[:len(d['obs'])]
-                        actions_ = actions[:len(d['obs'])]
-                        dones_ = dones[:len(d['obs'])]
-                    else:
-                        obs_ = obs
-                        actions_ = actions
-                        dones_ = dones
+            print("policy done")
+
+            # SWIL updates
+            if update % int(np.ceil(1/n_irl_epochs)) == 0:
+                k = int(n_irl_epochs) if n_irl_epochs >=1 else 1
+                for epoch in range(k):            
+                    # GAIL Discriminator Update 
+                    gen_demos = demos_gen_dict(demos['all'], args.batch_size)
                     if args.env_id == "MoveP-v0":
-                        plt.scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
-                        plt.scatter(obs_[:,:,0], obs_[:,:,1], s=20, c='m', alpha=0.3, label='agent')
-                        plt.axis('equal')
-                        plt.tight_layout()
-                        f = plt.gca()
-                        f.axes.get_xaxis().set_ticks([])
-                        f.axes.get_yaxis().set_ticks([])
-                        f.axes.xaxis.set_ticklabels([])
-                        f.axes.yaxis.set_ticklabels([])
-                        plt.savefig(f"runs/{run_name}/swil_scatter_{global_step}.png")
+                        fig = plt.figure(figsize=(10,10))
+                    for d in gen_demos:
+                        if len(d['obs']) < args.batch_size:
+                            obs_ = obs[:len(d['obs'])]
+                            actions_ = actions[:len(d['obs'])]
+                            dones_ = dones[:len(d['obs'])]
+                        else:
+                            obs_ = obs
+                            actions_ = actions
+                            dones_ = dones
+                        if args.env_id == "MoveP-v0":
+                            plt.scatter(10, 10, s=200, c='b', marker='o',alpha=1.0)
+                            plt.scatter(190, 190, s=200, c='r', marker='*', alpha=1.0)
+                            plt.scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
+                            plt.scatter(obs[:,:,0], obs[:,:,1], s=20, c='m', alpha=0.3, label='agent')
+                            plt.axis('equal')
+                            plt.tight_layout()
+                            f = plt.gca()
+                            f.axes.get_xaxis().set_ticks([])
+                            f.axes.get_yaxis().set_ticks([])
+                            f.axes.xaxis.set_ticklabels([])
+                            f.axes.yaxis.set_ticklabels([])
+                            #plt.legend()
+                            plt.savefig(f"runs/{run_name}/swil_scatter_{global_step}.png")
 
-                    update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
+                        update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
 
-                    loss_dict = disc.compute_loss(update_dict)
+                        loss_dict = disc.compute_loss(update_dict)
 
-                    loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']\
-                        + args.lip_coeff * loss_dict['lip_penalty'] + loss_dict['recon_loss']
-                    if args.irm_coeff > 1.0:
-                        loss /= args.irm_coeff
+                        loss = args.gsw_coeff*loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']\
+                            + args.lip_coeff * loss_dict['lip_penalty'] + args.recon_coeff*loss_dict['recon_loss']
+                        if args.irm_coeff > 1.0:
+                            loss /= args.irm_coeff
+                        disc.update(loss)
+                    
+                        if global_step % args.logging_interval == 0:
+                            writer.add_scalar('irl/swil_d_loss', loss_dict['d_loss'], global_step)
+                            writer.add_scalar('irl/swil_ae_loss', loss_dict['recon_loss'], global_step)
 
-                    disc.update(loss)
-                
-                    if global_step % args.logging_interval == 0:
-                        writer.add_scalar('irl/swil_d_loss', loss_dict['d_loss'], global_step)
-                        writer.add_scalar('irl/swil_ae_loss', loss_dict['recon_loss'], global_step)
+                            #pyfor i,p in enumerate(disc.parameters()):
+                            #    writer.add_scalar(f"irl/{i}_norm", torch.norm(p.data), global_step)
+                            #    writer.add_scalar(f"irl/{i}_gradnorm", torch.norm(p.grad), global_step)
 
-                        for i,p in enumerate(disc.parameters()):
-                            writer.add_scalar(f"irl/{i}_norm", torch.norm(p.data), global_step)
-                            writer.add_scalar(f"irl/{i}_gradnorm", torch.norm(p.grad), global_step)
-
-                        if args.irm_coeff > 0:
-                            writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
+                            if args.irm_coeff > 0:
+                                writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
 
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
@@ -550,7 +573,9 @@ if __name__ == "__main__":
         test_env = gym.make(args.env_id)
     else:
         ## test model and save trajectories
-        test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
+        #test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
+        test_env = gym.make(args.env_id)
+
 
     if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
         test_env = gym.wrappers.ClipAction(test_env)
@@ -560,6 +585,13 @@ if __name__ == "__main__":
     mu, std, d_policy = save_traj_dict(args.env_id, test_env, agent, device)
 
     if args.env_id == "MoveP-v0":
+        import imageio
+        images = []
+        for filename in os.listdir(f"runs/{run_name}"):
+            if '.png' in filename:
+                images.append(imageio.imread(f"runs/{run_name}/{filename}"))
+        imageio.mimsave(f"runs/{run_name}/swil_training.gif", images)
+        # test policy
         gen_demos = demos_gen_dict(demos['all'], args.batch_size)
         for d in gen_demos:
             plt.scatter(d['obs'][:,0], d['obs'][:,1], s=5, c='g', alpha=0.3)

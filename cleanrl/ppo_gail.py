@@ -1,18 +1,29 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_continuous_actionpy
+import sys
 import argparse
 import os
-import sys
 import random
 import time
 from datetime import datetime
 from distutils.util import strtobool
 
-module_path = os.path.abspath(os.path.join('../ccl'))
-if module_path not in sys.path:
-    sys.path.append(module_path)
+import faulthandler; faulthandler.enable()
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pybullet_envs  # noqa
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.distributions.normal import Normal
+from torch.distributions.categorical import Categorical
+
+from torch.utils.tensorboard import SummaryWriter
+# module_path = os.path.abspath(os.path.join('..'))
+# if module_path not in sys.path:
+#     sys.path.append(module_path)
 
 import gym
-import matplotlib.pyplot as plt
 
 gym.envs.register(
      id='MoveP-v0',
@@ -25,19 +36,16 @@ gym.envs.register(
      entry_point='envs.envs2d:CMoveP',
      max_episode_steps=1000,
 )
-import numpy as np
-import pybullet_envs  # noqa
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.distributions.normal import Normal
-from torch.distributions.categorical import Categorical
 
-from torch.utils.tensorboard import SummaryWriter
+gym.envs.register(
+     id='Lap-v0',
+     entry_point='envs.env_lap:Laparos',
+     max_episode_steps=1000,
+)
 
 from irl.gail import GailReward, GAILDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
-                    demos_gen_dict, MujocoTestWrapper, save_traj_dict
+from irl.utils import load_hf_demos, load_lap_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
+                   demos_gen_dict, MujocoTestWrapper, save_traj_dict
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -115,8 +123,8 @@ def parse_args():
         help="expert demo folder")
     parser.add_argument("--n_demos", type=int, default=10,
         help="number of demos to use")
-    parser.add_argument('--enhance_demos', default=False, required=False, 
-        action='store_true', help='enhance demos using W2 barycenters')
+    parser.add_argument('--enhance_barys', default=0, required=False, 
+        type=int, help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
@@ -131,6 +139,8 @@ def parse_args():
     parser.add_argument('--irl_epochs', default=1, type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--irl_init_epochs', default=1, type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
+    parser.add_argument('--lip_p', default=1, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
+
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
     parser.add_argument('--use_cnn_base', default=False, required=False, 
@@ -144,9 +154,13 @@ def parse_args():
     parser.add_argument('--normalize_irl_rewards', default=True, 
         action='store_true', required=False, help='normalize irl rewards') 
 
+    parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
+
     parser.add_argument('--on_policy', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
+    parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
+
     parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
@@ -171,7 +185,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
             env = gym.wrappers.TimeAwareObservation(env)
         if capture_video:
             if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % 200 == 0)
         if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env)
         if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
@@ -295,14 +309,22 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
-    if args.enhance_demos:
-        print("Enhancing demos by computing Wasserstein barycenters")
-        demos = enhance_demos_with_barycenters(demos)
-    # get env specs
+
+    if args.env_id == 'Lap-v0':
+        demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
+    else:
+        demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
+
     test_env = gym.make(args.env_id)
+
+    if args.enhance_barys > 0:
+        print("Enhancing demos by computing Wasserstein barycenters")
+        demos = enhance_demos_with_barycenters(args, demos, test_env)
+    # get env specs
     discrete = not isinstance(test_env.action_space, gym.spaces.Box)
     disc = GAILDiscriminator(test_env, args)
+    if args.load_disc:
+        disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
@@ -483,6 +505,9 @@ if __name__ == "__main__":
                     dones_ = dones
 
                 if args.env_id == "MoveP-v0":
+                    # TODO: add second plot with W2-distance / KL-div / JS-div
+                    plt.scatter(10, 10, s=200, c='b', marker='o',alpha=1.0)
+                    plt.scatter(190, 190, s=200, c='r', marker='*', alpha=1.0)
                     plt.scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
                     plt.scatter(obs_[:,:,0], obs_[:,:,1], s=20, c='m', alpha=0.3, label='agent')
                     plt.axis('equal')
@@ -492,6 +517,7 @@ if __name__ == "__main__":
                     f.axes.get_yaxis().set_ticks([])
                     f.axes.xaxis.set_ticklabels([])
                     f.axes.yaxis.set_ticklabels([])
+                    #plt.legend()
                     plt.savefig(f"runs/{run_name}/gail_scatter_{global_step}.png")
 
                 update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
@@ -506,6 +532,11 @@ if __name__ == "__main__":
             
                 if global_step % args.logging_interval  == 0:
                     writer.add_scalar('irl/gail_bce_loss', loss_dict['d_loss'], global_step)
+                    # track norms
+                    writer.add_scalar('irl/lip_grad_mix_norm', torch.norm(loss_dict['lip_grad_mix']), global_step)
+                    #writer.add_scalar('irl/lip_grad_e_norm', torch.norm(loss_dict['grad_e']), global_step)
+                    #writer.add_scalar('irl/lip_grad_p_norm', torch.norm(loss_dict['grad_p']), global_step)
+                    writer.add_scalar('irl/irm_grad_norm', torch.norm(loss_dict['irm_grad']), global_step)
                     if args.irm_coeff > 0:
                         writer.add_scalar('irl/gail_irm_loss', loss_dict['grad_penalty'], global_step)
 
@@ -549,6 +580,14 @@ if __name__ == "__main__":
     mu, std, d_policy = save_traj_dict(args.env_id, test_env, agent, device)
 
     if args.env_id == "MoveP-v0":
+        # convert all pngs to gif
+        import imageio
+        images = []
+        for filename in os.listdir(f"runs/{run_name}"):
+            if '.png' in filename:
+                images.append(imageio.imread(f"runs/{run_name}/{filename}"))
+        imageio.mimsave(f"runs/{run_name}/gail_training.gif", images)
+
         gen_demos = demos_gen_dict(demos['all'], args.batch_size)
         for d in gen_demos:
             plt.scatter(d['obs'][:,0], d['obs'][:,1], s=5, c='g', alpha=0.3)

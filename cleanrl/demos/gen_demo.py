@@ -3,7 +3,7 @@ import os
 import gym
 import numpy as np
 from huggingface_sb3 import load_from_hub
-from stable_baselines3 import PPO, SAC, TD3
+from stable_baselines3 import PPO, SAC, TD3, DQN
 from sb3_contrib import TQC
 from stable_baselines3.common.evaluation import evaluate_policy
 from itertools import count
@@ -119,6 +119,8 @@ if __name__ == '__main__':
         model = SAC.load(checkpoint, custom_objects=custom_objects)
     elif algo == 'ppo':
         model = PPO.load(checkpoint, custom_objects=custom_objects)
+    elif algo == 'dqn':
+        model = DQN.load(checkpoint, custom_objects=custom_objects)
     elif algo == 'td3':
         model = TD3.load(checkpoint, custom_objects=custom_objects)
     elif algo == 'tqc':

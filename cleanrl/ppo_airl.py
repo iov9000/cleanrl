@@ -140,6 +140,8 @@ def parse_args():
     parser.add_argument('--on_policy', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
+    parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
+
     parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
@@ -304,6 +306,8 @@ if __name__ == "__main__":
     #    test_env = AntCFWrapper(test_env)
     disc = AIRLDiscriminator(test_env, args)
     discrete = not isinstance(test_env.action_space, gym.spaces.Box)
+    if args.load_disc:
+        disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
@@ -468,7 +472,8 @@ if __name__ == "__main__":
                     actions_ = actions
                     dones_ = dones
                 if args.env_id == "MoveP-v0":
-
+                    plt.scatter(10, 10, s=200, c='b', marker='o',alpha=1.0)
+                    plt.scatter(190, 190, s=200, c='r', marker='*', alpha=1.0)
                     plt.scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
                     plt.scatter(obs_[:,:,0], obs_[:,:,1], s=20, c='m', alpha=0.3, label='agent')
                     plt.axis('equal')
@@ -478,6 +483,7 @@ if __name__ == "__main__":
                     f.axes.get_yaxis().set_ticks([])
                     f.axes.xaxis.set_ticklabels([])
                     f.axes.yaxis.set_ticklabels([])
+                    #plt.legend()
                     plt.savefig(f"runs/{run_name}/airl_scatter_{global_step}.png")
 
                 update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
@@ -525,7 +531,7 @@ if __name__ == "__main__":
     torch.save(agent.state_dict(), f"runs/{run_name}/agent.pt")
     torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
 
-    ## test model and save trajectories
+    ## test model and save trajectories 
     ## if movep, save scatter plot
     if args.env_id == "MoveP-v0":
         test_env = gym.make(args.env_id)
@@ -541,6 +547,13 @@ if __name__ == "__main__":
     mu, std, d_policy = save_traj_dict(args.env_id, test_env, agent, device)
 
     if args.env_id == "MoveP-v0":
+        import imageio
+        images = []
+        for filename in os.listdir(f"runs/{run_name}"):
+            if '.png' in filename:
+                images.append(imageio.imread(f"runs/{run_name}/{filename}"))
+        imageio.mimsave(f"runs/{run_name}/airl_training.gif", images)
+
         gen_demos = demos_gen_dict(demos['all'], args.batch_size)
         for d in gen_demos:
             plt.scatter(d['obs'][:,0], d['obs'][:,1], s=5, c='g', alpha=0.3)
