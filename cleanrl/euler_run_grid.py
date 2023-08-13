@@ -13,9 +13,9 @@ if __name__ == '__main__':
 
     args = p.parse_args()
 
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     
     seeds = [515, 234, 894, 322, 72]
+    # seeds = [515, 234, 894]
     # seeds = [515]
     # algos = ['ppo', 'sac']
     # algos = ['ppo', 'sac']
@@ -24,10 +24,11 @@ if __name__ == '__main__':
     # disc_types = ['airl']
     # irm_coeffs = [0.0, 1.0, 10.0, 50.0]
     irm_coeffs = [0.0]
+    # irm_coeffs = [0.0]
     # irm_coeffs = [0.1, 1.0, 10.0, 50.0, 100.0]
     # irm_coeffs = [0.0, 1.0, 100.0]
     # irm_coeffs = [50.0, 100.0]
-    envs = ['Ant-v3', 'Humanoid-v3', 'Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3'] # 'LunarLanderContinuous-v2', 'BipedalWalker-v3']
+    envs = ['Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3'] # 'LunarLanderContinuous-v2', 'BipedalWalker-v3']
     # envs = ['HalfCheetah-v3', 'Walker2d-v3', 'Hopper-v3']
     # envs = ['Humanoid-v3']
     # use_acs = ['', '--use_actions']
@@ -36,8 +37,14 @@ if __name__ == '__main__':
     # lip_coeffs = [0.0, 1.0]
     ent_coeffs = [0.01]
     disc_nonlins = ['tanh', 'relu', 'prelu']
-    # n_demos = [4,10,25]
-    n_demos = [10]
+    # disc_nonlins = ['tanh', 'prelu']
+    # disc_nonlins = ['prelu']
+    # n_demos = [1,4,10]
+    n_demos = [1]
+    # loss_types = ['e1', 'e1p0', 'sym'] 
+    loss_types = ['sym'] 
+    drop_batch = ['']#, '--drop_batch'] 
+    # n_demos = [10]
     # lip_coeff = ['--use_actions']
     MEM_PER_CPU = 8000
     GPU_PER_CPU = 1
@@ -48,20 +55,23 @@ if __name__ == '__main__':
         for disc_type in disc_types:
             for irm_coeff in irm_coeffs:
                 for ent_coeff in ent_coeffs:
-                    for ua in use_acs:
-                        for n_demo in n_demos:
-                            for d_nl in disc_nonlins:
-                                for algo in algos:
-                                    for env_name in envs:
-                                        exp_id = (f"{ts}_{algo}_{disc_type}_{env_name}_seed_{seed}_{args.exp_id}_{d_nl}_{irm_coeff}_nd{n_demo}_entc{ent_coeff}_{ua}")
-                                        euler_slurm = (f"sbatch --mem-per-cpu={MEM_PER_CPU} {gpu_string} " 
-                                                    f"-o {args.output_dir / exp_id} "
-                                                    f"--time={args.time}:00:00 --wrap ")
-                                        euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
-                                        # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
-                                        exp_cmd = (f"python {algo}_{disc_type}.py --num-envs 8 --total-timesteps 10000000 --disc_nonlin={d_nl} --n_demos={n_demo} --seed={seed} --irm_coeff={irm_coeff} {ua} --ent-coef={ent_coeff} --env-id {env_name}")
-                                        cluster_cmd = euler_slurm + exp_cmd 
-                                        print("Running command: ", cluster_cmd)
-                                        # subprocess.run(cluster_cmd, shell=True)
-                                        subprocess.check_output(args=euler_slurm.split() + [exp_cmd])
+                    for lt in loss_types:
+                        for db in drop_batch:
+                            for ua in use_acs:
+                                for n_demo in n_demos:
+                                    for d_nl in disc_nonlins:
+                                        for algo in algos:
+                                            for env_name in envs:
+                                                ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+                                                exp_id = (f"{ts}_{algo}_{disc_type}_{env_name}_seed_{seed}_{args.exp_id}_{d_nl}_{irm_coeff}_nd{n_demo}_entc{ent_coeff}_{ua}")
+                                                euler_slurm = (f"sbatch --mem-per-cpu={MEM_PER_CPU} {gpu_string} " 
+                                                            f"-o {args.output_dir / exp_id} "
+                                                            f"--time={args.time}:00:00 --wrap ")
+                                                euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
+                                                # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
+                                                exp_cmd = (f"python {algo}_{disc_type}.py --total-timesteps 3000000 {db} --irm_loss_type {lt} --disc_nonlin={d_nl} --n_demos={n_demo} --seed={seed} --irm_coeff={irm_coeff} {ua} --ent-coef={ent_coeff} --env-id {env_name}")
+                                                cluster_cmd = euler_slurm + exp_cmd 
+                                                print("Running command: ", cluster_cmd)
+                                                # subprocess.run(cluster_cmd, shell=True)
+                                                subprocess.check_output(args=euler_slurm.split() + [exp_cmd])
 
