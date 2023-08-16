@@ -11,7 +11,7 @@ module_path = os.path.abspath(os.path.join('../ccl'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 
-import gym
+import gymnasium as gym
 import numpy as np
 import pybullet_envs  # noqa
 import torch

@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from distutils.util import strtobool
 
-import gym
+import gymnasium as gym
 import numpy as np
 import pybullet_envs  # noqa
 import torch
@@ -121,7 +121,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         env = WailReward(env, opt, disc)        
-        env.seed(seed)
+        #env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env

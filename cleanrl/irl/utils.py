@@ -188,7 +188,7 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
 
     #print(obs.shape, acs.shape, dones.shape, expert_demos['obs'].shape, expert_demos['acs'].shape, expert_demos['done'].shape)
 
-    if isinstance(ac_sample, int):
+    if isinstance(ac_sample, int) or isinstance(ac_sample, np.int64):  
         ac_shape = 1
     else:
         ac_shape = ac_sample.shape[-1]
@@ -515,7 +515,7 @@ class MujocoTestWrapper(gym.Wrapper):
         o = o + self.eps*np.random.randn(*o.shape)
         return o, r, d, i
 
-def save_traj_dict(env_name, env, model, device, nr_trajectories=10, min_total_rew=-1e6):
+def save_traj_dict(opt, env_name, env, model, device, nr_trajectories=10, min_total_rew=-1e6):
     num_steps = 0
     expert_obs = []
     expert_acs = []
@@ -528,7 +528,7 @@ def save_traj_dict(env_name, env, model, device, nr_trajectories=10, min_total_r
     cnt = 0
     ep_rew = []
     while cnt < nr_trajectories:
-        ob = env.reset()
+        ob, _ = env.reset(seed=opt.seed)
         done = False
         total_reward = 0
         episode_obs = []
@@ -538,7 +538,8 @@ def save_traj_dict(env_name, env, model, device, nr_trajectories=10, min_total_r
 
         while not done:
             action, logprob, _, value = model.get_action_and_value(torch.Tensor(ob).to(device).unsqueeze(0))
-            next_ob, reward, done, _ = env.step(action.squeeze().detach().cpu().numpy())
+            next_ob, reward, term, trunc, _ = env.step(action.squeeze().detach().cpu().numpy())
+            done = term or trunc
             ob = next_ob
             total_reward += reward
             episode_obs.append(ob)

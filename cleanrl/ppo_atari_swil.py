@@ -6,7 +6,7 @@ import time
 from distutils.util import strtobool
 from datetime import datetime
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn

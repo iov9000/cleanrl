@@ -262,7 +262,8 @@ class GailReward(gym.Wrapper):
         self.obs = None
 
     def step(self, action):
-        next_obs, gt_reward, done, info = self.env.step(action)
+        next_obs, gt_reward, term, trunc, info = self.env.step(action)
+        done = term or trunc
         info['gt_reward'] = gt_reward
         if self.obs is not None:
             obs_t = torch.tensor(self.obs, dtype=torch.get_default_dtype())
@@ -284,4 +285,4 @@ class GailReward(gym.Wrapper):
 
         self.obs = next_obs
 
-        return next_obs, irl_reward, done, info
+        return next_obs, irl_reward, term, trunc, info
