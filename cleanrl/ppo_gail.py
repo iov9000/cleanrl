@@ -23,7 +23,7 @@ from torch.utils.tensorboard import SummaryWriter
 # if module_path not in sys.path:
 #     sys.path.append(module_path)
 
-import gym
+import gymnasium as gym
 
 gym.envs.register(
      id='MoveP-v0',
@@ -195,7 +195,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
         if opt.normalize_irl_rewards and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeReward(env, gamma=gamma)
             env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-        env.seed(seed)
+        #env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -349,7 +349,7 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    next_obs = torch.Tensor(envs.reset()).to(device)
+    next_obs = torch.Tensor(envs.reset(seed=args.seed)[0]).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
     init = True
@@ -377,17 +377,25 @@ if __name__ == "__main__":
             logprobs[step] = logprob
 
             # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, reward, done, info = envs.step(action.cpu().numpy())
+            next_obs, reward, term, trunc, info = envs.step(action.cpu().numpy())
+            done = term or trunc
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 
+            if not isinstance(info, list):
+                info = [info]
+
             for item in info:
-                if "episode" in item.keys():
+                # TODO: fix this for new Gymnasium
+                if "final_info" in item.keys():
                     if args.verbose:
-                        print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
+                        print(
+                            f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
                     if global_step % 10 == 0:
-                        writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
-                        writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
+                        writer.add_scalar(
+                            "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                        writer.add_scalar(
+                            "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
                     break
 
         # bootstrap value if not done

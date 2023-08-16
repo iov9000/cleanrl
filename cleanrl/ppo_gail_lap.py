@@ -23,7 +23,7 @@ from torch.utils.tensorboard import SummaryWriter
 # if module_path not in sys.path:
 #     sys.path.append(module_path)
 
-import gym
+import gymnasium as gym
 
 gym.envs.register(
      id='MoveP-v0',

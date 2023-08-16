@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 #%matplotlib inline
 import PIL.Image as Image
-import gym
+import gymnasium as gym
 import random
 import torch 
 import time

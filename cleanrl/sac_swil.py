@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from distutils.util import strtobool
 
-import gym
+import gymnasium as gym
 
 gym.envs.register(
      id='MoveP-v0',

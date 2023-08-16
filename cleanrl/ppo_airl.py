@@ -1,4 +1,6 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_continuous_actionpy
+import matplotlib.pyplot as plt
+import gymnasium as gym
 import argparse
 import os
 import sys
@@ -11,8 +13,6 @@ module_path = os.path.abspath(os.path.join('../ccl'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 
-import gym
-import matplotlib.pyplot as plt
 
 gym.envs.register(
      id='MoveP-v0',

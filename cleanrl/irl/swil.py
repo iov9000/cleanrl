@@ -8,7 +8,7 @@ import torch.autograd as autograd
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ExponentialLR
 
-from torch.nn.utils import spectral_norm
+from torch.nn.utils import spectral_norm, weight_norm
 from irl.utils import ResNetAIRLDisc, MiniGridCNN, AtariCNNBase
 from irl.gsw_utils import gsw, get_slice
 from tqdm import tqdm
@@ -111,9 +111,12 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     #torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
-def linlayer(in_dim, out_dim, bias=True):
+def linlayer(in_dim, out_dim, bias=True, wnorm=False):
     #return layer_init(nn.Linear(in_dim, out_dim, bias=bias))
-    return nn.Linear(in_dim, out_dim, bias=bias)
+    if wnorm:
+        return weight_norm(nn.Linear(in_dim, out_dim, bias=bias),'weight')
+    else:
+        return nn.Linear(in_dim, out_dim, bias=bias)
 
 class SWILDiscriminator(nn.Module):
     def __init__(self, env, opt):
@@ -178,11 +181,12 @@ class SWILDiscriminator(nn.Module):
             elif self.is_atari:
                 self.base = AtariCNNBase(opt, env, self.use_actions)
             elif opt.linear_proj:
-                self.base = linlayer(self.layer_dims[0], self.n_proj, bias)
+                self.base = linlayer(self.layer_dims[0], self.n_proj, bias, opt.use_weight_norm)
             else:
                 #self.base = nn.Sequential(torch.nn.Linear(self.layer_dims[0],
                 #                                          self.layer_dims[1], bias), nonlin)
-                self.base = nn.Sequential(linlayer(self.layer_dims[0], self.layer_dims[1], bias), nonlin)
+                self.base = nn.Sequential(linlayer(
+                    self.layer_dims[0], self.layer_dims[1], bias, opt.use_weight_norm), nonlin)
 
             if self.is_atari:
                 self.reward = nn.Linear(512,self.n_proj)
@@ -195,12 +199,14 @@ class SWILDiscriminator(nn.Module):
                         # self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[i - 1],
                         #                                     out_features=self.layer_dims[i],
                         #                                     bias=bias), nonlin]
-                        self.reward_layers += [linlayer(self.layer_dims[i - 1], self.layer_dims[i], bias), nonlin]
+                        self.reward_layers += [linlayer(
+                            self.layer_dims[i - 1], self.layer_dims[i], bias, opt.use_weight_norm), nonlin]
 
                     # self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[-1],
                     #                                     out_features=self.n_proj,
                     #                                     bias=bias)]
-                    self.reward_layers += [linlayer(self.layer_dims[-1], self.n_proj, bias)]
+                    self.reward_layers += [
+                        linlayer(self.layer_dims[-1], self.n_proj, bias, opt.use_weight_norm)]
                     self.reward = nn.Sequential(*self.reward_layers)
                 else:
                     self.reward = nn.MultiheadAttention(embed_dim=self.layer_dims[1], num_heads = 1)
@@ -209,7 +215,7 @@ class SWILDiscriminator(nn.Module):
                 # self.proj_layer = nn.Sequential(nn.Linear(in_features=self.n_proj,
                 #                                         out_features=1,
                 #                                         bias=bias), torch.nn.Tanh())
-                self.proj_layer = nn.Sequential(linlayer(self.n_proj, 1, bias), torch.nn.Tanh())
+                self.proj_layer = nn.Sequential(linlayer(self.n_proj, 1, bias, opt.use_weight_norm), torch.nn.Tanh())
 
             if self.opt.swil_ae:
                 self.ae_layers = []
@@ -258,7 +264,7 @@ class SWILDiscriminator(nn.Module):
         return gsw_dist
 
     def proj(self, ob, ac, nob=None, d=None):
-        base_out = self.base_fwd(ob,ac)
+        base_out = self.base_fwd(ob, ac, nob, d)
 
         # rew, v, v_n, d_out = self.forward(ob, next_ob, ac, lprobs) TODO??
         # potentially use more sophisticated mechanism
@@ -266,17 +272,39 @@ class SWILDiscriminator(nn.Module):
             return self.proj_layer(self.reward(base_out))
         else:
             # XXX: additional noise?
-            return self.reward(base_out)# + torch.randn_like(self.reward(base_out))
+            rew = self.reward(base_out)
+            #out = rew/rew.norm(-1)
+            return rew# + torch.randn_like(self.reward(base_out))
 
     def base_fwd(self, ob, ac, nob=None, d=None):
-        if self.use_actions and (self.use_cnn_base or self.is_atari):
-            base_out = self.base(ob, ac)
-        elif self.use_actions and not (self.use_cnn_base or self.is_atari):
+        if (self.use_cnn_base or self.is_atari):
+            if self.use_actions and self.use_next_obs and self.use_dones:
+                base_out = self.base(ob, ac, nob, d)
+            elif self.use_actions and self.use_dones and not self.use_next_obs:
+                base_out = self.base(ob, ac, d)
+            elif self.use_actions and not self.use_dones and self.use_next_obs:
+                base_out = self.base(ob, ac, nob)
+            elif self.use_actions and not self.use_dones and not self.use_next_obs:
+                base_out = self.base(ob, ac)
+            else:
+                base_out = self.base(ob)
+        else:
+            # match tensor sizes
             if len(ob.shape) != len(ac.shape):
                 ac = torch.unsqueeze(ac, -1)
-            base_out = self.base(torch.cat([ob, ac], axis=-1))
-        else:
-            base_out = self.base(ob)
+            if len(ob.shape) != len(d.shape):
+                d = torch.unsqueeze(d, -1)
+
+            if self.use_actions and self.use_next_obs and self.use_dones:
+                base_out = self.base(torch.cat([ob, ac, nob, d], axis=-1))
+            elif self.use_actions and self.use_dones and not self.use_next_obs:
+                base_out = self.base(torch.cat([ob, ac, d], axis=-1))
+            elif self.use_actions and not self.use_dones and self.use_next_obs:
+                base_out = self.base(torch.cat([ob, ac, nob], axis=-1))
+            elif self.use_actions and not self.use_dones and not self.use_next_obs:
+                base_out = self.base(torch.cat([ob, ac], axis=-1))
+            else:
+                base_out = self.base(ob)
 
         return base_out
 
@@ -429,8 +457,8 @@ class SWILDiscriminator(nn.Module):
             self.reward.reset()
         
         # project slices
-        pi_slices = self.proj(obs_pi, acs_pi)
-        exp_slices = self.proj(obs_exp, acs_exp)
+        pi_slices = self.proj(obs_pi, acs_pi, nobs_pi, d_pi)
+        exp_slices = self.proj(obs_exp, acs_exp, nobs_exp, d_exp)
 
         # sort slices
         pi_slices_sorted = torch.sort(pi_slices, dim=0)[0]
@@ -712,6 +740,9 @@ class SwilReward(gym.Wrapper):
         super().__init__(env=env)
         # self.reward_fn = make_network(**reward_fn_spec)
         self.use_actions = opt.use_actions
+        self.use_next_obs = opt.use_next_obs
+        self.use_dones = opt.use_dones
+
         self.discriminator = disc
         self.obs = None
         # calculate reward at the end of trajecotiry
@@ -720,7 +751,8 @@ class SwilReward(gym.Wrapper):
 
 
     def step(self, action):
-        next_obs, gt_reward, done, info = self.env.step(action)
+        next_obs, gt_reward, term, trunc, info = self.env.step(action)
+        done = term or trunc
         info['gt_reward'] = gt_reward
         self.traj.append(gt_reward)
         if self.obs is not None:
@@ -746,7 +778,7 @@ class SwilReward(gym.Wrapper):
             self.traj=[]
             self.traj_=[]
 
-        return next_obs, irl_reward[0], done, info
+        return next_obs, irl_reward[0], term, trunc, info
 
 
 class SwilFlowReward(gym.Wrapper):

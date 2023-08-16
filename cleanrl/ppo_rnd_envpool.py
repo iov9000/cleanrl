@@ -7,7 +7,7 @@ from collections import deque
 from distutils.util import strtobool
 
 import envpool
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn

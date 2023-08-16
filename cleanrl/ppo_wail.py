@@ -1,4 +1,6 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_continuous_actionpy
+import numpy as np
+import gymnasium as gym
 import argparse
 import os
 import sys
@@ -11,8 +13,6 @@ module_path = os.path.abspath(os.path.join('../ccl'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 
-import gym
-import numpy as np
 import pybullet_envs  # noqa
 import torch
 import torch.nn as nn

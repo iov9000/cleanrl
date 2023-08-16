@@ -12,7 +12,7 @@ module_path = os.path.abspath(os.path.join('../ccl'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 
-import gym
+import gymnasium as gym
 
 gym.envs.register(
      id='MoveP-v0',
@@ -125,7 +125,7 @@ def parse_args():
     parser.add_argument("--swil_loss", default='gsw', type=str, required=False, help="loss_type:")
     parser.add_argument("--gsw_df", default='nn', type=str, required=False, help="Radon transform defining function: nn/poly/linear/circular")
     parser.add_argument('--measurable_space', default='sxa', type=str, 
-        required=False, help='GRT defining function')
+        required=False, help='measurable space (s, sxs, sxa)')
 
     parser.add_argument("--proj_layer", default=False, required=False, action='store_true', 
                                         help="use nn instead of mean of projections")
@@ -163,7 +163,9 @@ def parse_args():
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
     parser.add_argument('--use_disc_bias', default=True, required=False, 
-        action='store_true', help='use bias in disc arch')
+        action='store_false', help='use bias in disc arch')
+    parser.add_argument('--use_weight_norm', default=False, required=False, 
+        action='store_true', help='use weight norm')
     parser.add_argument("--disc_nonlin", type=str, default="tanh",
         help="divergence type")
     parser.add_argument('--normalize_irl_rewards', default=True, 
@@ -210,7 +212,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
         if opt.normalize_irl_rewards and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeReward(env, gamma=gamma)
             env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-        env.seed(seed)
+        #env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -333,6 +335,9 @@ if __name__ == "__main__":
     test_env = gym.make(args.env_id)
     discrete = not isinstance(test_env.action_space, gym.spaces.Box)
     disc = SWILDiscriminator(test_env, args)
+
+    print(">>>>>> Discriminator structure: ", disc.base, disc.reward)
+
     if args.load_disc:
         disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
 
@@ -359,7 +364,7 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    next_obs = torch.Tensor(envs.reset()).to(device)
+    next_obs = torch.Tensor(envs.reset(seed=args.seed)[0]).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
 
@@ -386,17 +391,24 @@ if __name__ == "__main__":
                 logprobs[step] = logprob
 
                 # TRY NOT TO MODIFY: execute the game and log data.
-                next_obs, reward, done, info = envs.step(action.cpu().numpy())
+                next_obs, reward, term, trunc, info = envs.step(action.cpu().numpy())
+                done = term or trunc # don't make the distinction here
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 
+                if not isinstance(info,list):
+                    info = [info]
+
                 for item in info:
-                    if "episode" in item.keys():
+                    # TODO: fix this for new Gymnasium
+                    if "final_info" in item.keys():
                         if args.verbose:
-                            print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
+                            print(f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
                         if global_step % 10 == 0:
-                            writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
-                            writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
+                            writer.add_scalar(
+                                "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                            writer.add_scalar(
+                                "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
                         break
 
             # bootstrap value if not done
@@ -582,7 +594,7 @@ if __name__ == "__main__":
     if args.normalize_obs:
         test_env = gym.wrappers.NormalizeObservation(test_env)
         test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
-    mu, std, d_policy = save_traj_dict(args.env_id, test_env, agent, device)
+    mu, std, d_policy = save_traj_dict(args, args.env_id, test_env, agent, device)
 
     if args.env_id == "MoveP-v0":
         import imageio
