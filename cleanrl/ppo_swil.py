@@ -508,7 +508,7 @@ if __name__ == "__main__":
                 k = int(n_irl_epochs) if n_irl_epochs >=1 else 1
                 for epoch in range(k):            
                     # GAIL Discriminator Update 
-                    gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+                    gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=False)
                     if args.env_id == "MoveP-v0":
                         fig = plt.figure(figsize=(10,10))
                     for d in gen_demos:

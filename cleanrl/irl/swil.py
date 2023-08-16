@@ -215,7 +215,8 @@ class SWILDiscriminator(nn.Module):
                 # self.proj_layer = nn.Sequential(nn.Linear(in_features=self.n_proj,
                 #                                         out_features=1,
                 #                                         bias=bias), torch.nn.Tanh())
-                self.proj_layer = nn.Sequential(linlayer(self.n_proj, 1, bias, opt.use_weight_norm), torch.nn.Tanh())
+                self.proj_layer = nn.Sequential(
+                    linlayer(self.n_proj, 1, bias, opt.use_weight_norm), torch.nn.Tanh())
 
             if self.opt.swil_ae:
                 self.ae_layers = []
