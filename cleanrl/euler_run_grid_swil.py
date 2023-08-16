@@ -23,22 +23,22 @@ if __name__ == '__main__':
     # irm_coeffs = [0.0, 0.1, 1.0, 10.0, 100.0]
     irm_coeffs = [0.0]
     # n_projs = [1,5,20,50]
-    n_projs = [1,5,20,50]
+    n_projs = [1,20,100]
     # irm_coeffs = [0.1, 1.0, 10.0, 50.0, 100.0]
     # irm_coeffs = [0.0, 1.0, 100.0]
     # irm_coeffs = [50.0, 100.0]
-    # envs = ['Ant-v3', 'Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3']
-    envs = ['Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3']
+    envs = ['Ant-v3', 'Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3']
+    # envs = ['Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3']
     # envs = ['HalfCheetah-v3']
     # use_acs = ['', '--use_actions']
     use_acs = ['']
     # n_demos = [1,4,10]
     n_demos = [1,4,10,25]
     # n_envs = [1,8,16]
-    ent_coeffs = [0.01]
+    ent_coeffs = [0.0]
     # ent_coeffs = [0.0, 0.01]
     # disc_nonlins = ['tanh', 'prelu', 'relu']
-    disc_nonlins = ['tanh', 'prelu', 'relu']
+    disc_nonlins = ['tanh', 'leakyrelu']
     # lip_coeffs = [1.0]
     # lip_coeffs = [0.0, 1.0]
     # lip_coeff = ['--use_actions']
@@ -63,7 +63,7 @@ if __name__ == '__main__':
                                                     f"--time={args.time}:00:00 --wrap ")
                                         euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
                                         # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
-                                        exp_cmd = (f"python {algo}_swil.py --swil_ae --n_demos={n_demo} --ent-coef={ec} --disc_nonlin={d_nl} --verbose --seed={seed} --n_proj={n_proj} {ua} --env-id {env_name}")
+                                        exp_cmd = (f"python {algo}_swil.py --n_demos={n_demo} --ent-coef={ec} --disc_nonlin={d_nl} --verbose --seed={seed} --n_proj={n_proj} {ua} --env-id {env_name}")
                                         cluster_cmd = euler_slurm + exp_cmd 
                                         print("Running command: ", cluster_cmd)
                                         # subprocess.run(cluster_cmd, shell=True)

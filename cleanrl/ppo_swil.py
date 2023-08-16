@@ -120,7 +120,7 @@ def parse_args():
     parser.add_argument("--n_proj", type=int, default=100, help="number of projections for SWIL")
     parser.add_argument("--poly_degree", type=int, default=4, help="degree of polynomial for SWIL")
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
-    parser.add_argument("--swil_rew", type=str, default='old_swil', help="mean or replacement")
+    parser.add_argument("--swil_rew", type=str, default='repl_loss', help="mean or replacement")
     parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
     parser.add_argument("--swil_loss", default='gsw', type=str, required=False, help="loss_type:")
     parser.add_argument("--gsw_df", default='nn', type=str, required=False, help="Radon transform defining function: nn/poly/linear/circular")
