@@ -27,7 +27,9 @@ if __name__ == '__main__':
     # irm_coeffs = [0.1, 1.0, 10.0, 50.0, 100.0]
     # irm_coeffs = [0.0, 1.0, 100.0]
     # irm_coeffs = [50.0, 100.0]
-    envs = ['Ant-v3', 'Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3']
+    envs = ['Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3']
+    lins = ['--linear_proj', '']
+    usenobs = ['--use_next_obs', '', '--use_next_obs --use_dones']
     # envs = ['Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3']
     # envs = ['HalfCheetah-v3']
     # use_acs = ['', '--use_actions']
@@ -48,22 +50,23 @@ if __name__ == '__main__':
     # f"--gpus=gtx_1080:1 "
     
     for seed in seeds:
-        for irm_coeff in irm_coeffs:
+        for lin in lins:
             for n_proj in n_projs:
-                for ua in use_acs:
+                for ua in usenobs:
                     for n_demo in n_demos:
                         for d_nl in disc_nonlins:
                             for ec in ent_coeffs:
                                 for algo in algos:
                                     for env_name in envs:
                                         ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-                                        exp_id = (f"{ts}_{algo}_swil_{env_name}_seed_{seed}_{args.exp_id}_np{n_proj}_{ua}")
+                                        ua_rbl = ua.replace(" ", "")
+                                        exp_id = (f"{ts}_{algo}_swil_{env_name}_seed_{seed}_{args.exp_id}_np{n_proj}_{ua_rbl}_{lin}")
                                         euler_slurm = (f"sbatch --mem-per-cpu={MEM_PER_CPU} {gpu_string} " 
                                                     f"-o {args.output_dir / exp_id} "
                                                     f"--time={args.time}:00:00 --wrap ")
                                         euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
                                         # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
-                                        exp_cmd = (f"python {algo}_swil.py --n_demos={n_demo} --ent-coef={ec} --disc_nonlin={d_nl} --verbose --seed={seed} --n_proj={n_proj} {ua} --env-id {env_name}")
+                                        exp_cmd = (f"python {algo}_swil.py --n_demos={n_demo} --ent-coef={ec} {lin} --disc_nonlin={d_nl} --verbose --seed={seed} --n_proj={n_proj} {ua} --env-id {env_name}")
                                         cluster_cmd = euler_slurm + exp_cmd 
                                         print("Running command: ", cluster_cmd)
                                         # subprocess.run(cluster_cmd, shell=True)
