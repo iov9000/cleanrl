@@ -268,11 +268,12 @@ class Laparos(Env):
         if np.linalg.norm(self.agent - curr_tgt) < 5*self.step_size:
             print(f"Task solved: {self.anatomy_list[self.curr_tgt]} reached ")
 
-            if self.curr_tgt == len(self.waypoints)-1:
+            if self.curr_tgt == len(self.waypoints):
                 # task solved
                 reward += 1000
                 self.curr_tgt += 1
                 self.terminated = True
+                print(f"All tasks solved!")
             else:
                 # update target
                 reward += 500
