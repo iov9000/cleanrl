@@ -49,10 +49,10 @@ def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, off
         if cnt > n_demos:
             break
 
-    expert_demos['obs'] = np.concatenate(obs,0)
-    expert_demos['acs'] = np.concatenate(acs,0)
-    expert_demos['rew'] = np.concatenate(rew,0)
-    expert_demos['done'] = np.concatenate(dones,0)
+    expert_demos['obs'] = np.concatenate(obs, 0)
+    expert_demos['acs'] = np.concatenate(acs, 0)
+    expert_demos['rew'] = np.concatenate(rew, 0)
+    expert_demos['done'] = np.concatenate(dones, 0)
 
     return {'all': expert_demos}
 

@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 
 import torch
 import torch.multiprocessing
@@ -8,6 +8,7 @@ import torch.autograd as autograd
 from torch.optim import Adam
 from torch.nn.utils import spectral_norm
 from irl.utils import ResNetAIRLDisc, MiniGridCNN, AtariCNNBase
+
 
 class GAILDiscriminator(nn.Module):
     def __init__(self, env, opt):
@@ -24,7 +25,7 @@ class GAILDiscriminator(nn.Module):
         self.lip_coeff = opt.lip_coeff
         self.use_cnn_base = opt.use_cnn_base
         self.bias = opt.use_disc_bias
-        self.is_atari = 'atari' in self.opt.exp_name
+        self.is_atari = 'atari' in self.opt.run_id
 
         if opt.disc_nonlin == 'relu':
             nonlin = nn.ReLU()
@@ -233,6 +234,7 @@ class GAILDiscriminator(nn.Module):
         loss.backward()
         self.d_optimizer.step()
 
+
 class GailReward(gym.Wrapper):
     def __init__(self, env, opt, disc):
         super().__init__(env=env)
@@ -242,7 +244,8 @@ class GailReward(gym.Wrapper):
         self.obs = None
 
     def step(self, action):
-        next_obs, gt_reward, done, info = self.env.step(action)
+        next_obs, gt_reward, termincated, truncated, info = self.env.step(
+            action)
         info['gt_reward'] = gt_reward
         if self.obs is not None:
             obs_t = torch.tensor(self.obs, dtype=torch.get_default_dtype())
@@ -262,4 +265,4 @@ class GailReward(gym.Wrapper):
 
         self.obs = next_obs
 
-        return next_obs, irl_reward, done, info
+        return next_obs, irl_reward, termincated, truncated, info
