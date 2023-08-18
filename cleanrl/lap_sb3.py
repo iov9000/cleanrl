@@ -41,14 +41,20 @@ class NumTasksDoneCallBack(BaseCallback):
             if isinstance(formatter, TensorBoardOutputFormat))
 
     def _on_step(self) -> bool:
-        if self.n_calls % self._log_freq == 0:
-            tasks_hist = np.array(self.env.num_tasks_completed)
+        return True
+
+    def _on_rollout_end(self) -> None:
+        """
+        This event is triggered before updating the policy.
+        """
+        self.tb_formatter.writer.add_scalar(
+            "env/num_tasks", self.env.curr_tgt, self.num_timesteps)
+        self.tb_formatter.writer.flush()
+
+        if len(self.env.num_tasks_completed[-20:]) > 0:
+            tasks_hist = np.array(self.env.num_tasks_completed[-20:])
             self.tb_formatter.writer.add_histogram(
                 "env/num_tasks_hist", tasks_hist, self.num_timesteps)
-            self.tb_formatter.writer.add_scalar(
-                "env/num_tasks", self.env.curr_tgt, self.num_timesteps)
-            self.tb_formatter.writer.flush()
-        return True
 
 
 def save_expert_traj(env, model, nr_trajectories=10, file_path=None,

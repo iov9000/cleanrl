@@ -255,6 +255,7 @@ class Laparos(Env):
                 if self.done_on_collision:
                     self.terminated = True
                     self.needs_reset = True
+                    print(f"Collision with {k}, terminating episode")
 
         if collided and self.hard_collisions:
             pass
@@ -266,9 +267,10 @@ class Laparos(Env):
         reward += -np.linalg.norm(self.agent - curr_tgt)/1000
 
         if np.linalg.norm(self.agent - curr_tgt) < 5*self.step_size:
-            print(f"Task solved: {self.anatomy_list[self.curr_tgt]} reached ")
+            print(f"Task {self.curr_tgt} solved:"
+                  f" {self.anatomy_list[self.curr_tgt]} reached ")
 
-            if self.curr_tgt == len(self.waypoints):
+            if self.curr_tgt == len(self.waypoints) - 1:
                 # task solved
                 reward += 1000
                 self.curr_tgt += 1
@@ -303,9 +305,12 @@ class Laparos(Env):
         if self.time == 0:
             self.truncated = True
             self.needs_reset = True
+            print(f"Out of time, terminating episode")
 
         state = state.astype(np.float32)
         info = {'terminal_observation': state}
+        self.terminated = self.terminated or self.truncated  # for
+        # compatibility with sb3 for now.
         return state, reward, self.terminated, self.truncated, info
 
     def render(self, mode="rgb_array"):
