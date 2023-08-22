@@ -1,13 +1,31 @@
 import gym
 
+import numpy as np
 import torch
 import torch.multiprocessing
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.autograd as autograd
 from torch.optim import Adam
-from torch.nn.utils import spectral_norm
+from torch.nn.utils import spectral_norm, weight_norm
 from irl.utils import ResNetAIRLDisc, MiniGridCNN, AtariCNNBase
+
+
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    # torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
+
+
+def linlayer(in_dim, out_dim, bias=True, wnorm=False, snorm=False):
+    # return layer_init(nn.Linear(in_dim, out_dim, bias=bias))
+    if wnorm:
+        return weight_norm(nn.Linear(in_dim, out_dim, bias=bias), 'weight')
+    elif snorm:
+        return spectral_norm(nn.Linear(in_dim, out_dim, bias=bias), 'weight')
+    else:
+        return nn.Linear(in_dim, out_dim, bias=bias)
+
 
 class GAILDiscriminator(nn.Module):
     def __init__(self, env, opt):
@@ -25,6 +43,8 @@ class GAILDiscriminator(nn.Module):
         self.use_cnn_base = opt.use_cnn_base
         self.bias = opt.use_disc_bias
         self.is_atari = 'atari' in self.opt.exp_name
+        self.snorm = opt.use_spectral_norm
+        self.wnorm = opt.use_weight_norm
 
         if opt.disc_nonlin == 'relu':
             nonlin = nn.ReLU()
@@ -53,20 +73,24 @@ class GAILDiscriminator(nn.Module):
             if self.use_cnn_base:
                 self.base = MiniGridCNN(layer_dims, self.use_actions)
             else:
-                self.base = nn.Sequential(torch.nn.Linear(self.layer_dims[0],
-                                                        self.layer_dims[1], self.bias),
+                self.base = nn.Sequential(linlayer(self.layer_dims[0], self.layer_dims[1], 
+                                                    self.bias, self.wnorm, self.snorm),
                                         nonlin)
 
             self.discriminator_layers = []
             for i in range(2, len(layer_dims)):
-                self.discriminator_layers += [torch.nn.Linear(in_features=layer_dims[i - 1],
-                                                            out_features=layer_dims[i],
-                                                            bias=self.bias),
+                self.discriminator_layers += [linlayer(in_dim=layer_dims[i - 1],
+                                                            out_dim=layer_dims[i],
+                                                            bias=self.bias,
+                                                            wnorm=self.wnorm,
+                                                            snorm=self.snorm),
                                             nonlin]
 
-            self.discriminator_layers += [torch.nn.Linear(in_features=layer_dims[-1],
-                                                        out_features=1,
-                                                        bias=self.bias)]
+            self.discriminator_layers += [linlayer(in_dim=layer_dims[-1],
+                                                   out_dim=1,
+                                                        bias=self.bias,
+                                                        wnorm=self.wnorm,
+                                                        snorm=self.snorm)]
 
             self.discriminator = nn.Sequential(*self.discriminator_layers)
 

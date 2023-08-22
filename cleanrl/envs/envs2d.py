@@ -1,4 +1,4 @@
-from gym import Env, spaces
+from gymnasium import Env, spaces
 import numpy as np
 import cv2  
 import matplotlib.pyplot as plt
@@ -90,6 +90,8 @@ class MovePoint(Env):
         self.y_max = int (self.canvas_shape[0] * 0.9)
         self.x_max = self.canvas_shape[1]
         self.random_init = random_init
+        self.truncated = False
+        self.terminated = False
         
     def draw_elements_on_canvas(self):
         # Init the canvas 
@@ -114,7 +116,9 @@ class MovePoint(Env):
 
     def reset(self):
         # Flag that marks the termination of an episode
-        self.done = False
+        self.truncated = False
+        self.terminated = False
+
         # Reset the fuel consumed
         self.time = self.max_time
 
@@ -160,8 +164,10 @@ class MovePoint(Env):
         state = np.stack([self.agent.x, self.agent.y, curr_tgt.x, curr_tgt.y])
         
         self.needs_reset = False
+        info = {}
+
         # return the observation
-        return state
+        return state, info
     
     # TODO: expand to preferences as random process!
     def generate_random_targets(self):
@@ -209,7 +215,7 @@ class MovePoint(Env):
             if self.curr_tgt == len(self.targets)-1:
                 # task solved
                 reward += 1000
-                self.done = True
+                self.terminated = True
             else:
                 # update target
                 reward += 500
@@ -222,10 +228,10 @@ class MovePoint(Env):
                 
         # If out of fuel, end the episode.
         if self.time == 0:
-            self.done = True
+            self.truncated = True
             self.needs_reset = True
 
-        return state, reward, self.done, {}
+        return state, reward, self.terminated, self.truncated, {}
     
     def has_collided(self, elem1, elem2):
         x_col = False

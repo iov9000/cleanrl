@@ -111,10 +111,12 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     #torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
-def linlayer(in_dim, out_dim, bias=True, wnorm=False):
+def linlayer(in_dim, out_dim, bias=True, wnorm=False, snorm=False):
     #return layer_init(nn.Linear(in_dim, out_dim, bias=bias))
     if wnorm:
         return weight_norm(nn.Linear(in_dim, out_dim, bias=bias),'weight')
+    elif snorm:
+        return spectral_norm(nn.Linear(in_dim, out_dim, bias=bias), 'weight')
     else:
         return nn.Linear(in_dim, out_dim, bias=bias)
 
@@ -175,18 +177,17 @@ class SWILDiscriminator(nn.Module):
         ac_len = ac_shapes[0]
 
         if opt.gsw_df == 'nn':
-
             if use_cnn_base:
                 self.base = MiniGridCNN(self.layer_dims, self.use_actions)
             elif self.is_atari:
                 self.base = AtariCNNBase(opt, env, self.use_actions)
             elif opt.linear_proj:
-                self.base = linlayer(self.layer_dims[0], self.n_proj, bias, opt.use_weight_norm)
+                self.base = linlayer(self.layer_dims[0], self.n_proj, bias, opt.use_weight_norm, opt.use_spectral_norm)
             else:
                 #self.base = nn.Sequential(torch.nn.Linear(self.layer_dims[0],
                 #                                          self.layer_dims[1], bias), nonlin)
                 self.base = nn.Sequential(linlayer(
-                    self.layer_dims[0], self.layer_dims[1], bias, opt.use_weight_norm), nonlin)
+                    self.layer_dims[0], self.layer_dims[1], bias, opt.use_weight_norm, opt.use_spectral_norm), nonlin)
 
             if self.is_atari:
                 self.reward = nn.Linear(512,self.n_proj)
@@ -200,13 +201,13 @@ class SWILDiscriminator(nn.Module):
                         #                                     out_features=self.layer_dims[i],
                         #                                     bias=bias), nonlin]
                         self.reward_layers += [linlayer(
-                            self.layer_dims[i - 1], self.layer_dims[i], bias, opt.use_weight_norm), nonlin]
+                            self.layer_dims[i - 1], self.layer_dims[i], bias, opt.use_weight_norm, opt.use_spectral_norm), nonlin]
 
                     # self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[-1],
                     #                                     out_features=self.n_proj,
                     #                                     bias=bias)]
                     self.reward_layers += [
-                        linlayer(self.layer_dims[-1], self.n_proj, bias, opt.use_weight_norm)]
+                        linlayer(self.layer_dims[-1], self.n_proj, bias, opt.use_weight_norm, opt.use_spectral_norm)]
                     self.reward = nn.Sequential(*self.reward_layers)
                 else:
                     self.reward = nn.MultiheadAttention(embed_dim=self.layer_dims[1], num_heads = 1)
@@ -359,7 +360,7 @@ class SWILDiscriminator(nn.Module):
                     rew += w*(a_new - a_prev)
 
             rew = -rew
-
+        
         return rew
             
     def swil_reward(self, ob, ac, nob=None,d=None):
@@ -374,12 +375,15 @@ class SWILDiscriminator(nn.Module):
                     #return torch.min(self.reward(base_out),-1)[0]
             else:   
                 return torch.mean(self.reward(base_out,base_out,base_out)[0],-1)
+
         elif self.opt.swil_loss == 'approx_sw': 
             if len(ob.shape) != len(ac.shape):
                 ac = torch.unsqueeze(ac, -1)
             return approximate_sw(torch.cat([ob,ac],-1),torch.cat([self.expert_obs, self.expert_acs],-1))
+
         elif self.opt.swil_loss == 'atom_gsw': 
             return self.atom_gsw(ob, ac, self.expert_obs, self.expert_acs, random=False)
+
         else:
             # compute distance for single ob,ac and batch of experts via projections
             if self.gsw_df == 'nn':
@@ -541,8 +545,23 @@ class SWILDiscriminator(nn.Module):
 
         if self.opt.swil_loss == 'surr_loss':
             # surrogate loss from maxSWGAN paper
-            surr_loss = torch.sum(self.proj(self.policy_obs, self.policy_acs)) - torch.sum(self.proj(exp_obs,exp_acs)) 
-            d_loss = surr_loss
+            policy_out = self.proj(self.policy_obs, self.policy_acs, policy_obs_next, policy_dones)
+            expert_out = self.proj(exp_obs, exp_acs, exp_obs_next, exp_dones)
+
+            labels = torch.cat([torch.zeros(expert_out.size()),
+                                torch.ones(policy_out.size())])
+
+            # sort slices for policy repl loss
+            pi_slices_sorted = torch.sort(policy_out, dim=0)[0]
+            exp_slices_sorted = torch.sort(expert_out, dim=0)[0]
+
+            self.pi_atoms_sorted = pi_slices_sorted
+            self.exp_atoms_sorted = exp_slices_sorted
+
+            d_out = torch.cat([expert_out, policy_out])
+            bce_loss = F.binary_cross_entropy_with_logits(d_out, labels)
+            #surr_loss = torch.sum(self.proj(self.policy_obs, self.policy_acs)) - torch.sum(self.proj(exp_obs,exp_acs)) 
+            d_loss = bce_loss
         elif self.opt.swil_loss == 'approx_sw':
             obs = self.policy_obs
             acs = self.policy_acs
@@ -776,6 +795,7 @@ class SwilReward(gym.Wrapper):
         if done:
             print("episode reward gt:", np.sum(np.array(self.traj)))
             print("episode reward irl:", np.sum(np.array(self.traj_)))
+            info['episode']["ep_rew_irl"] = np.sum(np.array(self.traj_))
             self.traj=[]
             self.traj_=[]
 

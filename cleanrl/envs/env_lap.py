@@ -1,7 +1,7 @@
 import os
 import sys
 
-from gym import Env, spaces
+from gymnasium import Env, spaces
 #import open3d as o3d
 import trimesh
 
@@ -104,9 +104,11 @@ class Laparos(Env):
                  state_spec='r3', gc=True, condition_on_n_tasks_completed=True, 
                  condition_on_anatomy_distance=False, random_init=False,
                     done_on_collision=True, continuous_actions=False,
-                    plot_meshes=True, collision_loss=False, hard_collisions=False):
+                    plot_meshes=True, collision_loss=False, 
+                    hard_collisions=False):
         super(Laparos, self).__init__()
 
+        self.name = 'laparos'
         self.anatomy_list = ['DomeOfBladder.obj', 'Uterus.obj', 'CecumAppendix.obj', 'ColonRight.obj', 
                     'LiverRight.obj', 'Falciform.obj', 'LiverLeft.obj', 'GallBladder.obj', 
                     'HepatoDuodenalLigament.obj', 'Spleen.obj', 'Stomach.obj']
@@ -115,7 +117,7 @@ class Laparos(Env):
         self.meshes, self.vertices, self.waypoints = load_meshes_tri(mesh_folder, self.anatomy_list)
         self.n_tgt = len(self.waypoints)
         #self.initial_position = np.array(self.meshes['DomeOfBladder.obj'].get_center()) + np.array([0.05,0.05,0.05]) 
-        self.initial_position = np.array(self.meshes['Belly.obj'].centroid) + + np.array([0.0,10.0,0.0]) 
+        self.initial_position = np.array(self.meshes['Belly.obj'].centroid) + np.array([0.0,10.0,0.0]) 
         self.radius = step_size
         #belly_bbox = np.array(self.meshes['Belly.obj'].get_oriented_bounding_box().get_box_points())
         belly_bbox = np.array(self.meshes['Belly.obj'].bounding_box_oriented.vertices)
@@ -170,7 +172,18 @@ class Laparos(Env):
 
         self.step_size = step_size
         self.random_init = random_init
-        
+
+        self.agent = self.initial_position
+        self.terminated = False
+        self.truncated = False
+        self.time = self.max_time
+        self.curr_tgt = 0
+        self.needs_reset = False
+        self.num_tasks_completed = []
+
+        self.collisions = []
+        self.ep_collisions = []
+
     def compute_endoscope_movement(state, action):
         # rotate 
         #this.transform.Rotate(this.transform.right, rotation_output * Time.deltaTime, Space.World);
@@ -185,7 +198,8 @@ class Laparos(Env):
 
     def reset(self):
         # Flag that marks the termination of an episode
-        self.done = False
+        self.terminated = False
+        self.truncated = False        
         # Reset the fuel consumed
         self.time = self.max_time
 
@@ -218,7 +232,9 @@ class Laparos(Env):
 
         self.needs_reset = False
         # return the observation
-        return state
+        state = state.astype(np.float32)
+        info = {}
+        return state, info
     
     def clamp(self, n, minn, maxn):
         return max(min(maxn, n), minn)
@@ -270,12 +286,12 @@ class Laparos(Env):
         #dist = (self.agent-self.vertices)**2 < self.radius**2
         if self.collision_loss:
             for k,v in self.meshes.items():
-                dist = np.sum((self.agent-v.vertices)**2,-1) < self.radius
+                dist = np.sum((tentative_move-v.vertices)**2, -1) < self.radius
                 if np.any(dist):
                     print(f"Collision with {k}")
                     reward += -10000
                     if self.done_on_collision:
-                        self.done = True
+                        self.terminated = True
                         self.needs_reset = True
     
         if self.hard_collisions:
@@ -301,7 +317,7 @@ class Laparos(Env):
             if self.curr_tgt == len(self.waypoints)-1:
                 # task solved
                 reward += 1000
-                self.done = True
+                self.terminated = True
             else:
                 # update target
                 reward += 500
@@ -329,10 +345,11 @@ class Laparos(Env):
 
         # If out of fuel, end the episode.
         if self.time == 0:
-            self.done = True
+            self.truncated = True
             self.needs_reset = True
 
-        return state, reward, self.done, {"terminal_observation": state}
+        info = {"terminal_observation": state}
+        return state, reward, self.terminated, self.truncated, info
 
     def render(self, mode = "rgb_array"):
         # do 3d plot with meshes
