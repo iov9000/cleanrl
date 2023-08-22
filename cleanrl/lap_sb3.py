@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 #%matplotlib inline
 import PIL.Image as Image
-import gym
+import gymnasium as gym
 import random
 import torch 
 import torch.functional as F
@@ -332,7 +332,7 @@ if __name__ == "__main__":
     # collision classification loss wrapper
 
     # seed environment
-    env.seed(seed)
+    env.reset(seed=seed)
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
     random.seed(seed)

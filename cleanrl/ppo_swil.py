@@ -27,10 +27,11 @@ gym.envs.register(
 )
 
 import numpy as np
-import pybullet_envs  # noqa
+#import pybullet_envs  # noqa
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import ot
 
 from torch.distributions.normal import Normal
 from torch.distributions.categorical import Categorical
@@ -122,7 +123,7 @@ def parse_args():
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
     parser.add_argument("--swil_rew", type=str, default='old_swil', help="mean or replacement")
     parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
-    parser.add_argument("--swil_loss", default='gsw', type=str, required=False, help="loss_type:")
+    parser.add_argument("--swil_loss", default='maxgsw', type=str, required=False, help="loss_type:")
     parser.add_argument("--gsw_df", default='nn', type=str, required=False, help="Radon transform defining function: nn/poly/linear/circular")
     parser.add_argument('--measurable_space', default='sxa', type=str, 
         required=False, help='measurable space (s, sxs, sxa)')
@@ -166,6 +167,8 @@ def parse_args():
         action='store_false', help='use bias in disc arch')
     parser.add_argument('--use_weight_norm', default=False, required=False, 
         action='store_true', help='use weight norm')
+    parser.add_argument('--use_spectral_norm', default=False, required=False, 
+        action='store_true', help='use spectral_norm')
     parser.add_argument("--disc_nonlin", type=str, default="tanh",
         help="divergence type")
     parser.add_argument('--normalize_irl_rewards', default=True, 
@@ -400,13 +403,15 @@ if __name__ == "__main__":
                     info = [info]
 
                 for item in info:
-                    # TODO: fix this for new Gymnasium
+
                     if "final_info" in item.keys():
                         if args.verbose:
                             print(f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
                         if global_step % 10 == 0:
                             writer.add_scalar(
                                 "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                            writer.add_scalar(
+                                "charts/episodic_return_irl", item["final_info"][0]['episode']["ep_rew_irl"], global_step)
                             writer.add_scalar(
                                 "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
                         break
@@ -504,7 +509,7 @@ if __name__ == "__main__":
             print("policy done")
 
             # SWIL updates
-            if update % int(np.ceil(1/n_irl_epochs)) == 0:
+            if update % int(np.ceil(1/(n_irl_epochs+1))) == 0:
                 k = int(n_irl_epochs) if n_irl_epochs >=1 else 1
                 for epoch in range(k):            
                     # GAIL Discriminator Update 
@@ -543,11 +548,19 @@ if __name__ == "__main__":
                             + args.lip_coeff * loss_dict['lip_penalty'] + args.recon_coeff*loss_dict['recon_loss']
                         if args.irm_coeff > 1.0:
                             loss /= args.irm_coeff
-                        disc.update(loss)
+                        
+                        if args.irl_epochs > 0:
+                            disc.update(loss)
                     
                         if global_step % args.logging_interval == 0:
                             writer.add_scalar('irl/swil_d_loss', loss_dict['d_loss'], global_step)
                             writer.add_scalar('irl/swil_ae_loss', loss_dict['recon_loss'], global_step)
+
+                            # calculate reference distance using OT package
+                            ref_dist = ot.sliced_wasserstein_distance(
+                                update_dict['policy_obs'], update_dict['expert_obs'], n_projections=100, seed=args.seed)
+                            writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
+
 
                             #pyfor i,p in enumerate(disc.parameters()):
                             #    writer.add_scalar(f"irl/{i}_norm", torch.norm(p.data), global_step)

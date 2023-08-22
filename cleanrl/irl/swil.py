@@ -359,7 +359,7 @@ class SWILDiscriminator(nn.Module):
                     rew += w*(a_new - a_prev)
 
             rew = -rew
-
+        
         return rew
             
     def swil_reward(self, ob, ac, nob=None,d=None):
@@ -374,12 +374,15 @@ class SWILDiscriminator(nn.Module):
                     #return torch.min(self.reward(base_out),-1)[0]
             else:   
                 return torch.mean(self.reward(base_out,base_out,base_out)[0],-1)
+
         elif self.opt.swil_loss == 'approx_sw': 
             if len(ob.shape) != len(ac.shape):
                 ac = torch.unsqueeze(ac, -1)
             return approximate_sw(torch.cat([ob,ac],-1),torch.cat([self.expert_obs, self.expert_acs],-1))
+
         elif self.opt.swil_loss == 'atom_gsw': 
             return self.atom_gsw(ob, ac, self.expert_obs, self.expert_acs, random=False)
+
         else:
             # compute distance for single ob,ac and batch of experts via projections
             if self.gsw_df == 'nn':
@@ -541,8 +544,23 @@ class SWILDiscriminator(nn.Module):
 
         if self.opt.swil_loss == 'surr_loss':
             # surrogate loss from maxSWGAN paper
-            surr_loss = torch.sum(self.proj(self.policy_obs, self.policy_acs)) - torch.sum(self.proj(exp_obs,exp_acs)) 
-            d_loss = surr_loss
+            policy_out = self.proj(self.policy_obs, self.policy_acs, policy_obs_next, policy_dones)
+            expert_out = self.proj(exp_obs, exp_acs, exp_obs_next, exp_dones)
+
+            labels = torch.cat([torch.zeros(expert_out.size()),
+                                torch.ones(policy_out.size())])
+
+            # sort slices for policy repl loss
+            pi_slices_sorted = torch.sort(policy_out, dim=0)[0]
+            exp_slices_sorted = torch.sort(expert_out, dim=0)[0]
+
+            self.pi_atoms_sorted = pi_slices_sorted
+            self.exp_atoms_sorted = exp_slices_sorted
+
+            d_out = torch.cat([expert_out, policy_out])
+            bce_loss = F.binary_cross_entropy_with_logits(d_out, labels)
+            #surr_loss = torch.sum(self.proj(self.policy_obs, self.policy_acs)) - torch.sum(self.proj(exp_obs,exp_acs)) 
+            d_loss = bce_loss
         elif self.opt.swil_loss == 'approx_sw':
             obs = self.policy_obs
             acs = self.policy_acs
@@ -776,6 +794,7 @@ class SwilReward(gym.Wrapper):
         if done:
             print("episode reward gt:", np.sum(np.array(self.traj)))
             print("episode reward irl:", np.sum(np.array(self.traj_)))
+            info['episode']["ep_rew_irl"] = np.sum(np.array(self.traj_))
             self.traj=[]
             self.traj_=[]
 
