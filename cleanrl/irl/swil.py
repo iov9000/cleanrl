@@ -111,10 +111,12 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     #torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
-def linlayer(in_dim, out_dim, bias=True, wnorm=False):
+def linlayer(in_dim, out_dim, bias=True, wnorm=False, snorm=False):
     #return layer_init(nn.Linear(in_dim, out_dim, bias=bias))
     if wnorm:
         return weight_norm(nn.Linear(in_dim, out_dim, bias=bias),'weight')
+    elif snorm:
+        return spectral_norm(nn.Linear(in_dim, out_dim, bias=bias), 'weight')
     else:
         return nn.Linear(in_dim, out_dim, bias=bias)
 
@@ -175,18 +177,17 @@ class SWILDiscriminator(nn.Module):
         ac_len = ac_shapes[0]
 
         if opt.gsw_df == 'nn':
-
             if use_cnn_base:
                 self.base = MiniGridCNN(self.layer_dims, self.use_actions)
             elif self.is_atari:
                 self.base = AtariCNNBase(opt, env, self.use_actions)
             elif opt.linear_proj:
-                self.base = linlayer(self.layer_dims[0], self.n_proj, bias, opt.use_weight_norm)
+                self.base = linlayer(self.layer_dims[0], self.n_proj, bias, opt.use_weight_norm, opt.use_spectral_norm)
             else:
                 #self.base = nn.Sequential(torch.nn.Linear(self.layer_dims[0],
                 #                                          self.layer_dims[1], bias), nonlin)
                 self.base = nn.Sequential(linlayer(
-                    self.layer_dims[0], self.layer_dims[1], bias, opt.use_weight_norm), nonlin)
+                    self.layer_dims[0], self.layer_dims[1], bias, opt.use_weight_norm, opt.use_spectral_norm), nonlin)
 
             if self.is_atari:
                 self.reward = nn.Linear(512,self.n_proj)
@@ -200,13 +201,13 @@ class SWILDiscriminator(nn.Module):
                         #                                     out_features=self.layer_dims[i],
                         #                                     bias=bias), nonlin]
                         self.reward_layers += [linlayer(
-                            self.layer_dims[i - 1], self.layer_dims[i], bias, opt.use_weight_norm), nonlin]
+                            self.layer_dims[i - 1], self.layer_dims[i], bias, opt.use_weight_norm, opt.use_spectral_norm), nonlin]
 
                     # self.reward_layers += [torch.nn.Linear(in_features=self.layer_dims[-1],
                     #                                     out_features=self.n_proj,
                     #                                     bias=bias)]
                     self.reward_layers += [
-                        linlayer(self.layer_dims[-1], self.n_proj, bias, opt.use_weight_norm)]
+                        linlayer(self.layer_dims[-1], self.n_proj, bias, opt.use_weight_norm, opt.use_spectral_norm)]
                     self.reward = nn.Sequential(*self.reward_layers)
                 else:
                     self.reward = nn.MultiheadAttention(embed_dim=self.layer_dims[1], num_heads = 1)
