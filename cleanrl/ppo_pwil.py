@@ -110,8 +110,8 @@ def parse_args():
         action='store_true', help='use weight norm')
     parser.add_argument('--use_spectral_norm', default=False, required=False, 
         action='store_true', help='use spectral_norm')
-
-
+    parser.add_argument("--disc_nonlin", type=str, default="prelu",
+        help="divergence type")
 
     parser.add_argument('--on_policy', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
