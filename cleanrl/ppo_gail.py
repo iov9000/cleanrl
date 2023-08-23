@@ -11,7 +11,7 @@ import faulthandler; faulthandler.enable()
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pybullet_envs  # noqa
+#import pybullet_envs  # noqa
 import torch
 import torch.nn as nn
 import torch.optim as optim

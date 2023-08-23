@@ -76,25 +76,26 @@ class AIRLDiscriminator(nn.Module):
         elif self.is_atari:
             self.base = AtariCNNBase(opt,env, self.use_actions)
         else:
-            self.base = nn.Sequential(f(torch.nn.Linear(self.layer_dims[0],
-                                                    self.layer_dims[1], self.bias)),
-                                    nonlin)
+            self.base = nn.Sequential(linlayer(self.layer_dims[0],
+                                                    self.layer_dims[1], self.bias, opt.use_weight_norm,
+                                                    opt.use_spectral_norm),nonlin)
 
         if opt.airl_resnet:
             self.reward = ResNetAIRLDisc(layer_dims[1])
         elif self.is_atari:
-            self.reward = nn.Linear(512,1,bias=self.bias)
+            self.reward = linlayer(512, 1, self.bias, opt.use_weight_norm, opt.use_spectral_norm)
         else:
             self.reward_layers = []
             for i in range(2, len(self.layer_dims)):
-                self.reward_layers += [f(torch.nn.Linear(in_features=self.layer_dims[i - 1],
-                                                    out_features=self.layer_dims[i],
-                                                    bias=self.bias)),
+                self.reward_layers += [linlayer(self.layer_dims[i - 1],
+                                                    self.layer_dims[i],
+                                                    bias=self.bias,
+                                                    wnorm=opt.use_weight_norm,
+                                                    snorm=opt.use_spectral_norm),
                                                     nonlin]
 
-            self.reward_layers += [f(torch.nn.Linear(in_features=self.layer_dims[-1],
-                                                out_features=1,
-                                                bias=self.bias))]
+            self.reward_layers += [linlayer(self.layer_dims[-1], 1, self.bias, opt.use_weight_norm,
+                                            opt.use_spectral_norm)]
             self.reward = nn.Sequential(*self.reward_layers)
 
         # shaping function h_\phi
@@ -103,25 +104,27 @@ class AIRLDiscriminator(nn.Module):
         elif self.is_atari:
             self.base_v = AtariCNNBase(opt,env, use_actions=False)
         else:
-            self.base_v = nn.Sequential(f(torch.nn.Linear(ob_shapes[-1],
-                                                        self.layer_dims[1], self.bias)),
-                                        nonlin)
+            self.base_v = nn.Sequential(linlayer(ob_shapes[-1], self.layer_dims[1], self.bias, 
+                                                opt.use_weight_norm,
+                                                opt.use_spectral_norm), nonlin)
 
         if opt.airl_resnet:
             self.value = ResNetAIRLDisc(layer_dims[1])
         elif self.is_atari:
-            self.value = nn.Linear(512,1,bias=self.bias)
+            self.value = linlayer(
+                512, 1, self.bias, opt.use_weight_norm, opt.use_spectral_norm)
         else:
             self.value_layers = []
             for i in range(2, len(self.layer_dims)):
-                self.value_layers += [f(torch.nn.Linear(in_features=self.layer_dims[i - 1],
-                                                    out_features=self.layer_dims[i],
-                                                    bias=self.bias)),
+                self.value_layers += [linlayer(self.layer_dims[i - 1],
+                                               self.layer_dims[i],
+                                               bias=self.bias,
+                                               wnorm=opt.use_weight_norm,
+                                               snorm=opt.use_spectral_norm),
                                     nonlin]
 
-            self.value_layers += [f(torch.nn.Linear(in_features=self.layer_dims[-1],
-                                                out_features=1,
-                                                bias=self.bias))]
+            self.value_layers += [linlayer(self.layer_dims[-1], 1, self.bias, opt.use_weight_norm,
+                                           opt.use_spectral_norm)]
             self.value = nn.Sequential(*self.value_layers)
 
         if torch.cuda.is_available():
