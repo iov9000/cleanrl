@@ -28,7 +28,8 @@ if __name__ == '__main__':
     # irm_coeffs = [0.0, 1.0, 100.0]
     # irm_coeffs = [50.0, 100.0]
     envs = ['Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3']
-    lins = ['--linear_proj', '']
+    lins = ['--use_spectral_norm', '--use_weight_norm', '']
+    # lins = ['--use_weight_norm --linear_proj']
     usenobs = ['--use_next_obs', '', '--use_next_obs --use_dones']
     # envs = ['Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3']
     # envs = ['HalfCheetah-v3']
@@ -60,7 +61,8 @@ if __name__ == '__main__':
                                     for env_name in envs:
                                         ts = datetime.now().strftime('%Y%m%d_%H%M%S')
                                         ua_rbl = ua.replace(" ", "")
-                                        exp_id = (f"{ts}_{algo}_swil_{env_name}_seed_{seed}_{args.exp_id}_np{n_proj}_{ua_rbl}_{lin}")
+                                        lin_rbl = lin.replace(" ", "")
+                                        exp_id = (f"{ts}_{algo}_swil_{env_name}_seed_{seed}_{args.exp_id}_np{n_proj}_{ua_rbl}_{lin_rbl}")
                                         euler_slurm = (f"sbatch --mem-per-cpu={MEM_PER_CPU} {gpu_string} " 
                                                     f"-o {args.output_dir / exp_id} "
                                                     f"--time={args.time}:00:00 --wrap ")
