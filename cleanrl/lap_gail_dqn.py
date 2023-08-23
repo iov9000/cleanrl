@@ -141,7 +141,15 @@ class NumTasksDoneCallBack(BaseCallback):
 
 def load_lap_forward_demos(file_path, n_demos):
     demos = pickle.load(open(file_path, 'rb'))
-    return demos
+    for k, v in demos.items():
+        demos[k] = v[:n_demos]
+    data = {k: [] for k in demos.keys()}
+    for k, v in demos.items():
+        for i in range(len(v)):
+            data[k].extend(v[i])
+    for k, v in data.items():
+        data[k] = np.array(v)
+    return data
 
 
 def save_expert_traj(env, model, nr_trajectories=10, file_path=None,
@@ -470,8 +478,8 @@ def main():
                         help="type of demos. `fw` or `davos`.")
     parser.add_argument("--demo_path", type=str,
                         default=Path("./demos"), help="expert demo path")
-    parser.add_argument("--n_demos", type=int, default=1,
-                        help="number of demos to use")
+    parser.add_argument("--n_demos", type=int, default=None,
+                        help="number of demos to use. If None, use all demos")
     parser.add_argument('--enhance_barys', default=0, required=False,
                         type=int, help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False,

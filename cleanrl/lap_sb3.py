@@ -88,15 +88,11 @@ def save_expert_traj(env, model, nr_trajectories=10, file_path=None,
             num_steps += 1
 
         cnt += 1
-        expert_obs.extend(episode_obs)
-        expert_acs.extend(episode_acs)
-        expert_rew.extend(episode_rew)
-        expert_done.extend(episode_done)
+        expert_obs.append(episode_obs)
+        expert_acs.append(episode_acs)
+        expert_rew.append(episode_rew)
+        expert_done.append(episode_done)
 
-    expert_obs = np.stack(expert_obs)
-    expert_acs = np.stack(expert_acs)
-    expert_rew = np.stack(expert_rew)
-    expert_done = np.stack(expert_done)
     data = {'obs': expert_obs, 'acs': expert_acs, 'rew': expert_rew,
             'done': expert_done}
     if file_path is not None:
