@@ -92,7 +92,7 @@ def parse_args():
     #parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
     #    help="Toggle learning rate annealing for policy and value networks")
     parser.add_argument('--anneal_lr', default=True, 
-        action='store_true', required=False, help='normalize irl rewards')  
+        action='store_false', required=False, help='normalize irl rewards')  
     parser.add_argument("--gamma", type=float, default=0.99,
         help="the discount factor gamma")
     parser.add_argument("--gae-lambda", type=float, default=0.95,
