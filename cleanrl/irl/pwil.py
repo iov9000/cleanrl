@@ -25,6 +25,29 @@ def get_trajectory_list(demos):
         
     return trajs
 
+def get_trajectory_list_from_dict(demos):
+    done_cnt = 0
+    traj_obs = []
+    traj_acs = []
+    traj_rew = []
+
+    ep_o = []
+    ep_a = []
+    ep_r = []
+    for i, t in enumerate(demos['done']):
+        ep_o.append(demos['obs'][i])
+        ep_a.append(demos['acs'][i])
+        ep_r.append(demos['rew'][i])
+        if t == 1:
+            done_cnt += 1
+            traj_obs.append(ep_o)
+            traj_acs.append(ep_a)
+            traj_rew.append(ep_r)
+
+            ep = []
+        
+    return {'obs': traj_obs, 'acs': traj_acs, 'rew': traj_rew}
+
 class PWILRewarder(object):
     """Rewarder class to compute PWIL rewards."""
 
@@ -39,7 +62,7 @@ class PWILRewarder(object):
                  observation_only=False):
 
         if num_demonstrations == -1:
-            self.num_demonstrations = len(demonstrations)
+            self.num_demonstrations = len(demonstrations['obs'])
         else:
             self.num_demonstrations = num_demonstrations 
         self.time_horizon = time_horizon
@@ -58,37 +81,49 @@ class PWILRewarder(object):
         self.reward_scale = alpha
 
         self.observation_only = observation_only
-        self.demonstrations = self.filter_demonstrations(get_trajectory_list(demonstrations))
+        self.demonstrations = self.filter_demonstrations(get_trajectory_list_from_dict(demonstrations))
         #self.vectorized_demonstrations = self.vectorize(self.demonstrations)
         if self.observation_only:            
-            demos = np.concatenate(self.demonstrations)
-            self.vectorized_demonstrations = demos[:,:dim_obs]
+            #demos = np.concatenate(self.demonstrations)
+            demos = self.demonstrations
+            #self.vectorized_demonstrations = demos[:,:dim_obs]
+            dim_demos = dim_obs
+            self.vectorized_demonstrations = demos['obs']
         else:
-            demos = np.concatenate(self.demonstrations)
-            self.vectorized_demonstrations = demos[:,:dim_obs+dim_act]
-        
+            demos = self.demonstrations
+            dim_demos = dim_obs + dim_act
+
+            #demos = np.concatenate(self.demonstrations)
+            #self.vectorized_demonstrations = demos[:,:dim_obs+dim_act]
+            self.vectorized_demonstrations = np.concatenate([demos['obs'],demos['acs']],-1)
+
+        self.vectorized_demonstrations = np.reshape(self.vectorized_demonstrations, [-1,dim_demos])
+
         self.scaler = self.get_scaler()
         self.reset()
 
     def filter_demonstrations(self, demonstrations):
-        filtered_demonstrations = []
-        print("Number of demonstrations: ", len(demonstrations))
+        #filtered_demonstrations = []
+        filtered_demonstrations = {'obs': [], 'acs': [], 'rew': []}
+        print("Number of demonstrations: ", len(demonstrations['obs']))
         #np.random.shuffle(demonstrations)
-        for episode in demonstrations[:self.num_demonstrations]:
-            # Random episode start.
-            #random_offset = np.random.randint(0, self.subsampling)
-            random_offset = 1
-            print("Random offset: ", random_offset)
-            # Subsampling.
-            print("Full episode length", len(episode))
-            subsampled_episode = episode[random_offset::self.subsampling]
-            print("Subsampled episode length", len(subsampled_episode))
-            # Specify step types of demonstrations.
-            # for transition in subsampled_episode:
-            #     transition['step_type'] = dm_env.StepType.MID
-            # subsampled_episode[0]['step_type'] = dm_env.StepType.FIRST
-            # subsampled_episode[-1]['step_type'] = dm_env.StepType.LAST
-            filtered_demonstrations.append(subsampled_episode)
+        for k,v in demonstrations.items():
+            for episode in v[:self.num_demonstrations]:
+                # Random episode start.
+                #random_offset = np.random.randint(0, self.subsampling)
+                random_offset = 1
+                print("Random offset: ", random_offset)
+                # Subsampling.
+                print("Full episode length", len(episode))
+                subsampled_episode = episode[random_offset::self.subsampling]
+                print("Subsampled episode length", len(subsampled_episode))
+                # Specify step types of demonstrations.
+                # for transition in subsampled_episode:
+                #     transition['step_type'] = dm_env.StepType.MID
+                # subsampled_episode[0]['step_type'] = dm_env.StepType.FIRST
+                # subsampled_episode[-1]['step_type'] = dm_env.StepType.LAST
+                filtered_demonstrations[k].append(subsampled_episode)
+        
         return filtered_demonstrations
 
     def get_scaler(self):
@@ -184,7 +219,8 @@ class PWILReward(gym.Wrapper):
 
     def step(self, action):
         # also, here, WANT state before applying action
-        next_obs, gt_reward, done, info = self.env.step(action)
+        next_obs, gt_reward, term, trunc, info = self.env.step(action)
+        done = term or trunc 
         if self.obs is None:
             obs = next_obs
         else:
@@ -199,6 +235,5 @@ class PWILReward(gym.Wrapper):
 
         self.obs = next_obs
 
-        return next_obs, reward, done, info
-
+        return next_obs, reward, term, trunc, info
     

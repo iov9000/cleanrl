@@ -1,13 +1,31 @@
 import gym
 
+import numpy as np
 import torch
 import torch.multiprocessing
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.autograd as autograd
 from torch.optim import Adam
-from torch.nn.utils import spectral_norm
+from torch.nn.utils import spectral_norm, weight_norm
 from irl.utils import ResNetAIRLDisc, MiniGridCNN, AtariCNNBase
+
+
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    # torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
+
+
+def linlayer(in_dim, out_dim, bias=True, wnorm=False, snorm=False):
+    # return layer_init(nn.Linear(in_dim, out_dim, bias=bias))
+    if wnorm:
+        return weight_norm(nn.Linear(in_dim, out_dim, bias=bias), 'weight')
+    elif snorm:
+        return spectral_norm(nn.Linear(in_dim, out_dim, bias=bias), 'weight')
+    else:
+        return nn.Linear(in_dim, out_dim, bias=bias)
+
 
 class AIRLDiscriminator(nn.Module):
     def __init__(self, env, opt):
@@ -301,10 +319,13 @@ class AirlReward(gym.Wrapper):
         # self.reward_fn = make_network(**reward_fn_spec)
         self.use_actions = opt.use_actions
         self.discriminator = disc
+        self.episode_return = 0
+
         self.obs = None
 
     def step(self, action):
-        next_obs, gt_reward, done, info = self.env.step(action)
+        next_obs, gt_reward, term, trunc, info = self.env.step(action)
+        done = term or trunc        
         info['gt_reward'] = gt_reward
         if self.obs is not None:
             obs_t = torch.tensor(self.obs, dtype=torch.get_default_dtype())
@@ -320,5 +341,6 @@ class AirlReward(gym.Wrapper):
             irl_reward = self.discriminator.get_reward(obs_t, acs_t).cpu().numpy()
             #irl_reward = self.discriminator.get_reward(obs_t, acs_t, next_obs_t).cpu().numpy()
         self.obs = next_obs
+        #self.episode_return += irl_reward[0]
 
-        return next_obs, irl_reward, done, info
+        return next_obs, irl_reward[0], term, trunc, info

@@ -45,7 +45,6 @@ from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_wit
 from parse_tb import read_tb_file, create_df_from_ea
 
 
-
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
