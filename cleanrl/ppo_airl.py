@@ -146,7 +146,8 @@ def parse_args():
         action='store_true', help='use weight norm')
     parser.add_argument('--use_spectral_norm', default=False, required=False, 
         action='store_true', help='use spectral_norm')
-
+    parser.add_argument('--drop_batch', default=False, required=False, 
+        action='store_true', help='drop batch in irl epochs')   
     parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')

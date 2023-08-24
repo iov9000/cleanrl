@@ -8,7 +8,7 @@ from distutils.util import strtobool
 
 import gymnasium as gym
 import numpy as np
-import pybullet_envs  # noqa
+#import pybullet_envs  # noqa
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -17,7 +17,7 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.gail import GailReward, GAILDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -90,14 +90,27 @@ def parse_args():
         required=False, help='use IRM penalty on discriminator')
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
+    parser.add_argument('--lip_p', default=1, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
+    parser.add_argument("--irm_loss_type", type=str, default="sym", help="e1,e0,p0,p1,sym")
+
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
-    parser.add_argument("--disc_nonlin", type=str, default="prelu", help="nonlinearity for discriminator")
+    parser.add_argument("--disc_nonlin", type=str, default="tanh", help="nonlinearity for discriminator")
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
     parser.add_argument('--use_disc_bias', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
+    parser.add_argument('--use_weight_norm', default=False, required=False, 
+        action='store_true', help='use weight norm')
+    parser.add_argument('--use_spectral_norm', default=False, required=False, 
+        action='store_true', help='use spectral_norm')
 
+    parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
+    parser.add_argument("--div", type=str, default="rkl",
+        help="divergence type")
+
+    parser.add_argument('--drop_batch', default=False, required=False, 
+        action='store_true', help='drop batch in irl epochs')   
     parser.add_argument('--on_policy', default=False, required=False, 
         action='store_true', help='use bias in disc arch')
     parser.add_argument('--verbose', default=False, required=False, 
@@ -122,7 +135,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         env = GailReward(env, opt, disc)        
-        env.seed(seed)
+        #env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -272,7 +285,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
-    obs = envs.reset()
+    obs = envs.reset(seed=args.seed)[0]
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
         if global_step < args.learning_starts:
@@ -282,23 +295,32 @@ if __name__ == "__main__":
             actions = actions.detach().cpu().numpy()
 
         # TRY NOT TO MODIFY: execute the game and log data.
-        next_obs, rewards, dones, infos = envs.step(actions)
-
+        next_obs, rewards, term, trunc, infos = envs.step(actions)
+        dones = term or trunc
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        for info in infos:
-            if "episode" in info.keys():
-                print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                if global_step % args.logging_interval == 0:
-                    writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                    writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+        if not isinstance(infos, list):
+            infos = [infos]
+
+        for item in infos:
+            # TODO: fix this for new Gymnasium
+            if "final_info" in item.keys():
+                if args.verbose:
+                    print(
+                        f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
+                if global_step % 10 == 0:
+                    writer.add_scalar(
+                        "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                    writer.add_scalar(
+                        "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
                 break
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
         real_next_obs = next_obs.copy()
         for idx, d in enumerate(dones):
             if d:
-                real_next_obs[idx] = infos[idx]["terminal_observation"]
+                real_next_obs[idx] = infos[idx]["final_observation"][0]
+                # TODO: check if 0 index is always correct
         rb.add(obs, real_next_obs, actions, rewards, dones, infos)
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
@@ -371,13 +393,23 @@ if __name__ == "__main__":
             # Optimize the discriminator
             for epoch in range(args.irl_epochs):            
                 # GAIL Discriminator Update
-                gen_demos = demos_gen(demos['all'], args.batch_size)
+                gen_demos = demos_gen_dict(demos['all'], args.batch_size)
                 for d in gen_demos:
-                    if len(d) < args.batch_size:
-                        break          
+                    if len(d['obs']) < args.batch_size:
+                        if args.drop_batch:
+                            break
+                        else:
+                            obs_ = data.observations[:len(d['obs'])]
+                            actions_ = data.actions[:len(d['obs'])]
+                            dones_ = data.dones[:len(d['obs'])]
+                    else:
+                        obs_ = data.observations
+                        actions_ = data.actions
+                        dones_ = data.dones
+
                     # GAIL Discriminator Update
                     update_dict = prepare_batch_update_irl(envs, args, d, 
-                                        data.observations, data.actions, data.dones, actor)
+                                        obs_, actions_, dones_, actor)
 
                     loss_dict = disc.compute_loss(update_dict)
 
