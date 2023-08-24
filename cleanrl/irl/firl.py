@@ -304,7 +304,8 @@ class firlReward(gym.Wrapper):
         self.obs = None
 
     def step(self, action):
-        next_obs, gt_reward, done, info = self.env.step(action)
+        next_obs, gt_reward, term, trunc, info = self.env.step(action)
+        done = term or trunc
         info['gt_reward'] = gt_reward
         if self.obs is not None:
             obs_t = torch.tensor(self.obs, dtype=torch.get_default_dtype())
@@ -322,4 +323,4 @@ class firlReward(gym.Wrapper):
             #irl_reward = self.discriminator.get_reward(obs_t, acs_t, next_obs_t).cpu().numpy()
         self.obs = next_obs
 
-        return next_obs, irl_reward, done, info
+        return next_obs, irl_reward[0], term, trunc, info
