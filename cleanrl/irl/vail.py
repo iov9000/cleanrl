@@ -6,8 +6,24 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.autograd as autograd
 from torch.optim import Adam
-from torch.nn.utils import spectral_norm
+from torch.nn.utils import spectral_norm, weight_norm
 from irl.utils import ResNetAIRLDisc, MiniGridCNN
+
+
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    # torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
+
+
+def linlayer(in_dim, out_dim, bias=True, wnorm=False, snorm=False):
+    # return layer_init(nn.Linear(in_dim, out_dim, bias=bias))
+    if wnorm:
+        return weight_norm(nn.Linear(in_dim, out_dim, bias=bias), 'weight')
+    elif snorm:
+        return spectral_norm(nn.Linear(in_dim, out_dim, bias=bias), 'weight')
+    else:
+        return nn.Linear(in_dim, out_dim, bias=bias)
 
 def log_Normal_diag(x, mean, log_var, average=False, dim=None):
     log_normal = -0.5 * ( log_var + torch.pow( x - mean, 2 ) / torch.exp( log_var ) )
@@ -65,8 +81,7 @@ def gaussian_kld(mu, logvar):
 
 
 class VAILDiscriminator(nn.Module):
-    def __init__(self, env, opt, 
-                use_cnn_base=False, use_vampprior=True, vae_type='TwoLayer', 
+    def __init__(self, env, opt,  use_cnn_base=False, vae_type='TwoLayer', 
                 demos=None, alpha_beta=1e-4, bias=False):
         super(VAILDiscriminator, self).__init__()
         self.layer_dims = opt.d_layer_dims
@@ -78,7 +93,7 @@ class VAILDiscriminator(nn.Module):
         self.pseudo_inputs_grad = opt.pseudo_inputs_grad
         self.i_c = opt.i_c
         self.alpha_beta = alpha_beta
-        self.use_vampprior = use_vampprior
+        self.use_vampprior = opt.use_vampprior
         self.use_actions = opt.use_actions
         self.irm_coeff = opt.irm_coeff
         self.lip_coeff = opt.lip_coeff
@@ -99,8 +114,8 @@ class VAILDiscriminator(nn.Module):
         if use_cnn_base:
             self.base = MiniGridCNN(self.layer_dims, self.use_actions)
         else:
-            self.base = nn.Sequential(torch.nn.Linear(self.layer_dims[0],
-                                                      self.layer_dims[1], bias),
+            self.base = nn.Sequential(linlayer(self.layer_dims[0],
+                                                      self.layer_dims[1], bias, opt.use_weight_norm, opt.use_spectral_norm),
                                       torch.nn.PReLU())
 
         self.num_inputs = self.layer_dims[1]
@@ -344,7 +359,8 @@ class VailReward(gym.Wrapper):
         self.obs = None
 
     def step(self, action):
-        next_obs, gt_reward, done, info = self.env.step(action)
+        next_obs, gt_reward, term, trunc, info = self.env.step(action)
+        done = term or trunc                
         info['gt_reward'] = gt_reward
         if self.obs is not None:
             obs_t = torch.tensor(self.obs, dtype=torch.get_default_dtype())
@@ -362,4 +378,4 @@ class VailReward(gym.Wrapper):
             #irl_reward = self.discriminator.get_reward(obs_t, acs_t, next_obs_t).cpu().numpy()
         self.obs = next_obs
 
-        return next_obs, irl_reward, done, info
+        return next_obs, irl_reward, term, trunc, info

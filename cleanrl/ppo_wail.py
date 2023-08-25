@@ -13,7 +13,7 @@ module_path = os.path.abspath(os.path.join('../ccl'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 
-import pybullet_envs  # noqa
+#import pybullet_envs  # noqa
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -105,6 +105,15 @@ def parse_args():
     # WAIL specific 
     parser.add_argument("--epsilon", type=int, default=0.01, help="epsilon for WAIL regularization")
 
+    parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
+    parser.add_argument('--use_weight_norm', default=False, required=False, 
+        action='store_true', help='use weight norm')
+    parser.add_argument('--use_spectral_norm', default=False, required=False, 
+        action='store_true', help='use spectral_norm')
+
+    parser.add_argument('--drop_batch', default=False, required=False, 
+        action='store_true', help='drop batch in irl epochs')  
+
     parser.add_argument('--disc_lr', default=0.01, type=float, required=False, help='discriminator learning rate')
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
@@ -140,7 +149,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
         env = WailReward(env, opt, disc)
         env = gym.wrappers.NormalizeReward(env, gamma=gamma)
         env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-        env.seed(seed)
+        #env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -253,7 +262,7 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    next_obs = torch.Tensor(envs.reset()).to(device)
+    next_obs = torch.Tensor(envs.reset(seed=args.seed)[0]).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
 
@@ -277,17 +286,27 @@ if __name__ == "__main__":
             logprobs[step] = logprob
 
             # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, reward, done, info = envs.step(action.cpu().numpy())
+            next_obs, reward, term, trunc, info = envs.step(
+                action.cpu().numpy())
+            done = term or trunc
             rewards[step] = torch.tensor(reward).to(device).view(-1)
-            next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
+            next_obs, next_done = torch.Tensor(next_obs).to(
+                device), torch.Tensor(done).to(device)
+
+            if not isinstance(info, list):
+                info = [info]
 
             for item in info:
-                if "episode" in item.keys():
+                # TODO: fix this for new Gymnasium
+                if "final_info" in item.keys():
                     if args.verbose:
-                        print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
-                    if global_step % args.logging_interval == 0:
-                        writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
-                        writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
+                        print(
+                            f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
+                    if global_step % 10 == 0:
+                        writer.add_scalar(
+                            "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                        writer.add_scalar(
+                            "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
                     break
 
         # bootstrap value if not done
@@ -377,10 +396,22 @@ if __name__ == "__main__":
         for epoch in range(args.irl_epochs):            
             # GAIL Discriminator Update (exhaust demos)
             gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+
             for d in gen_demos:
                 if len(d['obs']) < args.batch_size:
-                    break
-                update_dict = prepare_batch_update_irl(envs, args, d, obs, actions, dones, agent)
+                    if args.drop_batch:
+                        break
+                    else:
+                        obs_ = obs[:len(d['obs'])]
+                        actions_ = actions[:len(d['obs'])]
+                        dones_ = dones[:len(d['obs'])]
+                else:
+                    obs_ = obs
+                    actions_ = actions
+                    dones_ = dones
+
+                update_dict = prepare_batch_update_irl(
+                    envs, args, d, obs_, actions_, dones_, agent)
 
                 loss_dict = disc.compute_loss(update_dict)
 
