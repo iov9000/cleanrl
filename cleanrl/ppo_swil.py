@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 from distutils.util import strtobool
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 module_path = os.path.abspath(os.path.join('../ccl'))
 if module_path not in sys.path:
@@ -509,8 +510,8 @@ if __name__ == "__main__":
 
             # SWIL updates
             if update % int(np.ceil(1/(n_irl_epochs+1))) == 0:
-                k = int(n_irl_epochs) if n_irl_epochs >=1 else 1
-                for epoch in range(k):            
+                k = int(n_irl_epochs) if n_irl_epochs >=0 else 1
+                for epoch in tqdm(range(k)):            
                     # GAIL Discriminator Update 
                     gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=False)
                     if args.env_id == "MoveP-v0":
@@ -559,7 +560,16 @@ if __name__ == "__main__":
                             ref_dist = ot.sliced_wasserstein_distance(
                                 update_dict['policy_obs'], update_dict['expert_obs'], n_projections=100, seed=args.seed)
                             writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
+                            
+                            #trajectory_weights = 1./len(update_dict['policy_obs']) * np.ones(len(update_dict['policy_obs']))
+                            #expert_weights = 1./len(update_dict['expert_obs']) * np.ones(len(update_dict['expert_obs']))
 
+                            #cost_matrix = ot.dist(
+                            #    update_dict['policy_obs'], update_dict['expert_obs'], metric='euclidean')
+
+                            #w2_dist = ot.emd2(
+                            #    trajectory_weights, expert_weights, cost_matrix.numpy())
+                            #writer.add_scalar('irl/ref_w_dist', w2_dist, global_step)
 
                             #pyfor i,p in enumerate(disc.parameters()):
                             #    writer.add_scalar(f"irl/{i}_norm", torch.norm(p.data), global_step)
@@ -571,7 +581,7 @@ if __name__ == "__main__":
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             if global_step % args.logging_interval == 0:
-                writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
+                writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step) 
                 writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
                 writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
                 writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
