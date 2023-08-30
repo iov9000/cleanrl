@@ -354,7 +354,7 @@ if __name__ == "__main__":
                     if args.verbose:
                         print(
                             f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
-                    if global_step % 10 == 0:
+                    if global_step % 1 == 0:
                         writer.add_scalar(
                             "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
                         writer.add_scalar(
