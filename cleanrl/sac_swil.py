@@ -89,7 +89,7 @@ def parse_args():
         help="automatic tuning of the entropy coefficient")
     parser.add_argument("--ent-coef", type=float, default=0.0,
         help="coefficient of the entropy")
-        
+
     # SWIL specific 
     parser.add_argument("--n_proj", type=int, default=100, help="number of projections for SWIL")
     parser.add_argument("--poly_degree", type=int, default=4, help="degree of polynomial for SWIL")
