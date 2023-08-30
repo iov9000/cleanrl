@@ -531,6 +531,16 @@ class SWILDiscriminator(nn.Module):
         
         return self.gsw(obs_pi, acs_pi, obs_exp, acs_exp,random=False)
 
+    def irm_penalty(self, logits, y):
+        scale = torch.tensor(1.).requires_grad_()
+        loss = F.binary_cross_entropy_with_logits(logits * scale, y)
+        grad = autograd.grad(loss, [scale], create_graph=True)[0]
+        #safe_norm = (torch.sum(grad ** 2, dim=-1) + 1e-8).sqrt()
+        # L1
+        #gradient_mag = torch.mean((safe_norm - 1) ** 2)
+        #return gradient_mag, grad
+        return torch.sum(grad ** 2), grad
+
     def compute_loss(self, update_dict):
         # compute sliced Wasserstein distance here 
         self.policy_obs = update_dict['policy_obs']
@@ -560,6 +570,7 @@ class SWILDiscriminator(nn.Module):
 
             d_out = torch.cat([expert_out, policy_out])
             bce_loss = F.binary_cross_entropy_with_logits(d_out, labels)
+            irm_pen, _ = self.irm_penalty(d_out, labels)
             #surr_loss = torch.sum(self.proj(self.policy_obs, self.policy_acs)) - torch.sum(self.proj(exp_obs,exp_acs)) 
             d_loss = bce_loss
         elif self.opt.swil_loss == 'approx_sw':
@@ -571,6 +582,7 @@ class SWILDiscriminator(nn.Module):
                 exp_acs = torch.unsqueeze(exp_acs, -1)
             d_loss = approximate_sw(torch.cat([obs, acs],-1), 
                                     torch.cat([exp_obs, exp_acs],-1))
+            irm_pen = 0
         else:
             if self.opt.max_gsw:
                 gsw_dist = self.max_gsw(self.policy_obs, self.policy_acs,
@@ -579,6 +591,7 @@ class SWILDiscriminator(nn.Module):
                 gsw_dist = -self.gsw_dist_nn(self.policy_obs, self.policy_acs, policy_obs_next, policy_dones,
                             exp_obs, exp_acs, exp_obs_next, exp_dones, random=False)
             d_loss = gsw_dist
+            irm_pen = 0
 
         output_dict = {}
         if self.opt.swil_ae:
@@ -595,7 +608,7 @@ class SWILDiscriminator(nn.Module):
             output_dict['recon_loss'] = 0
 
         output_dict['d_loss'] = d_loss
-        output_dict['grad_penalty'] = 0
+        output_dict['grad_penalty'] = irm_pen
         output_dict['lip_penalty'] = 0
 
         # TODO: classification or reconstruction loss for 

@@ -89,7 +89,7 @@ def parse_args():
         help="automatic tuning of the entropy coefficient")
     parser.add_argument("--ent-coef", type=float, default=0.0,
         help="coefficient of the entropy")
-        
+
     # SWIL specific 
     parser.add_argument("--n_proj", type=int, default=100, help="number of projections for SWIL")
     parser.add_argument("--poly_degree", type=int, default=4, help="degree of polynomial for SWIL")
@@ -354,7 +354,7 @@ if __name__ == "__main__":
                     if args.verbose:
                         print(
                             f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
-                    if global_step % 10 == 0:
+                    if global_step % 1 == 0:
                         writer.add_scalar(
                             "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
                         writer.add_scalar(
