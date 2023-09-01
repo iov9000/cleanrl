@@ -537,7 +537,11 @@ def save_traj_dict(opt, env_name, env, model, device, nr_trajectories=10, min_to
         episode_done = []
 
         while not done:
-            action, logprob, _, value = model.get_action_and_value(torch.Tensor(ob).to(device).unsqueeze(0))
+            with torch.no_grad():
+                if 'sac' in opt.exp_name:
+                    action, _, _ = model.get_action(torch.Tensor(ob).to(device).unsqueeze(0))
+                else:
+                    action, logprob, _, value = model.get_action_and_value(torch.Tensor(ob).to(device).unsqueeze(0))
             next_ob, reward, term, trunc, _ = env.step(action.squeeze().detach().cpu().numpy())
             done = term or trunc
             ob = next_ob
