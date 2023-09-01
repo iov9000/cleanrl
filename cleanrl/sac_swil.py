@@ -30,7 +30,7 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.swil import SwilReward, SWILDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict, MujocoTestWrapper, save_traj_dict
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -39,10 +39,14 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
+    parser.add_argument("--exp-id", type=str, default="",
+        help="additional identifier of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
     parser.add_argument("--logging_interval", type=int, default=500,
         help="logging interval")
+    parser.add_argument("--eval_interval", type=int, default=10000,
+        help="evaluation interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -55,6 +59,12 @@ def parse_args():
         help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
+
+    # environment specific arguments
+    parser.add_argument('--normalize_obs', default=False, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument('--clip_action', default=False, 
+        action='store_true', required=False, help='normalize irl rewards')  
 
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
@@ -176,6 +186,12 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+        if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
+            env = gym.wrappers.ClipAction(env)
+        if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
+            env = gym.wrappers.NormalizeObservation(env)
+            env = gym.wrappers.TransformObservation(
+                env, lambda obs: np.clip(obs, -10, 10))
         env = SwilReward(env, opt, disc)        
         #env.seed(seed)
         env.action_space.seed(seed)
@@ -244,6 +260,19 @@ class Actor(nn.Module):
         mean = torch.tanh(mean) * self.action_scale + self.action_bias
         return action, log_prob, mean
 
+def eval(args, actor, device):
+    test_env = gym.make(args.env_id)
+    if args.clip_action:
+        test_env = gym.wrappers.ClipAction(test_env)
+    if args.normalize_obs:
+        test_env = gym.wrappers.NormalizeObservation(test_env)
+        test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
+    mu, std, d = save_traj_dict(args, args.env_id, test_env, actor, device)
+
+    test_env.close()
+
+    return mu, std, d
+    
 
 if __name__ == "__main__":
     args, non_default = parse_args()
@@ -252,6 +281,8 @@ if __name__ == "__main__":
     # create output folder with non default arguments in the name
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
     run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    results_dict = {'eval_mu': [], 'eval_std': []}
+
     if args.track:
         import wandb
 
@@ -369,7 +400,6 @@ if __name__ == "__main__":
                     # TODO: check if 0 index is always correct
             rb.add(obs, real_next_obs, actions, rewards, dones, infos)
 
-
             # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
             obs = next_obs
 
@@ -472,28 +502,41 @@ if __name__ == "__main__":
 
                             if args.irm_coeff > 0:
                                 writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
+                
+                # evaluate at regular intervals and save 
+                if global_step % args.eval_interval == 0:
+                    mu, std, d = eval(args, actor, device)
+                    print(f"Evaluation at {global_step}: {mu}, {std}")
+                    writer.add_scalar('eval/mu', mu)
+                    writer.add_scalar('eval/std', std)
+                    results_dict['eval_mu'].append(mu)
+                    results_dict['eval_std'].append(std)
+
         except KeyboardInterrupt:
             break
-
-
 
     envs.close()
     writer.close()
 
+    # final eval
+    torch.save(actor.state_dict(), f"runs/{run_name}/actor.pt")
+    torch.save(qf1.state_dict(), f"runs/{run_name}/qf1.pt")
+    torch.save(qf2.state_dict(), f"runs/{run_name}/qf2.pt")
     torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
 
     ## test model and save trajectories
-    test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
-    if args.clip_action:
-        test_env = gym.wrappers.ClipAction(test_env)
-    if args.normalize_obs:
-        test_env = gym.wrappers.NormalizeObservation(test_env)
-        test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
-    mu, std = save_traj_dict(args.env_id, test_env, actor, device)
-    
+    #test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
+
+    #  XXX f"runs/{args.exp_id}_dict.pkl" append to results dict
+    mu, std, d = eval(args, actor, device)
+    results_dict['final_mu'] = mu
+    results_dict['final_std'] = std
+    writer.add_scalar('eval/mu', mu)
+    writer.add_scalar('eval/std', std)
+
     # save df for easier parsing
     ea = read_tb_file(f"runs/{run_name}")
     df = create_df_from_ea(ea, "charts/episodic_return")
-    df.to_pickle(f"results_{run_name}_df.pkl")
+    df.to_pickle(f"results_pkl/results_{run_name}_df.pkl")
 
 

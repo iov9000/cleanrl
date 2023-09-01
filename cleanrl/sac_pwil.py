@@ -56,6 +56,12 @@ def parse_args():
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
+    # environment specific arguments
+    parser.add_argument('--normalize_obs', default=False, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument('--clip_action', default=False, 
+        action='store_true', required=False, help='normalize irl rewards')  
+
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
@@ -179,6 +185,12 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, demos):
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         env = PWILReward(env, opt, demos)
+        if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
+            env = gym.wrappers.ClipAction(env)
+        if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
+            env = gym.wrappers.NormalizeObservation(env)
+            env = gym.wrappers.TransformObservation(
+                env, lambda obs: np.clip(obs, -10, 10))
         # env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
@@ -446,20 +458,30 @@ if __name__ == "__main__":
     envs.close()
     writer.close()
 
-    torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
+
+    # eval
+    torch.save(actor.state_dict(), f"runs/{run_name}/actor.pt")
+    torch.save(qf1.state_dict(), f"runs/{run_name}/qf1.pt")
+    torch.save(qf2.state_dict(), f"runs/{run_name}/qf2.pt")
 
     ## test model and save trajectories
-    test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
+    #test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
+    test_env = gym.make(args.env_id)
     if args.clip_action:
-        test_env = gym.wrappers.ClipAction(test_env)
+       test_env = gym.wrappers.ClipAction(test_env)
     if args.normalize_obs:
-        test_env = gym.wrappers.NormalizeObservation(test_env)
-        test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
-    mu, std = save_traj_dict(args.env_id, test_env, actor, device)
+       test_env = gym.wrappers.NormalizeObservation(test_env)
+       test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
+    mu, std, d = save_traj_dict(args, args.env_id, test_env, actor, device)
     
+    # write to experiment log
+
+    ### XXX 
+    #f = f"runs/{args.exp_id}_dict.pkl"
+
     # save df for easier parsing
     ea = read_tb_file(f"runs/{run_name}")
     df = create_df_from_ea(ea, "charts/episodic_return")
-    df.to_pickle(f"results_{run_name}_df.pkl")
+    df.to_pickle(f"results_pkl/results_{run_name}_df.pkl")
 
 
