@@ -515,6 +515,21 @@ class MujocoTestWrapper(gym.Wrapper):
         o = o + self.eps*np.random.randn(*o.shape)
         return o, r, d, i
 
+
+def evaluate_model(args, actor, device):
+    test_env = gym.make(args.env_id)
+    if args.clip_action:
+        test_env = gym.wrappers.ClipAction(test_env)
+    if args.normalize_obs:
+        test_env = gym.wrappers.NormalizeObservation(test_env)
+        test_env = gym.wrappers.TransformObservation(
+            test_env, lambda obs: np.clip(obs, -10, 10))
+    mu, std, d = save_traj_dict(args, args.env_id, test_env, actor, device)
+
+    test_env.close()
+
+    return mu, std, d
+
 def save_traj_dict(opt, env_name, env, model, device, nr_trajectories=10, min_total_rew=-1e6):
     num_steps = 0
     expert_obs = []

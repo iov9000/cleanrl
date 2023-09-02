@@ -17,7 +17,8 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.gail import GailReward, GAILDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict
+from irl.utils import load_hf_demos, evaluate_model, prepare_batch_update_irl,\
+     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -32,6 +33,8 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--logging_interval", type=int, default=500,
         help="logging interval")
+    parser.add_argument("--eval_interval", type=int, default=10000,
+        help="evaluation interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -225,6 +228,8 @@ if __name__ == "__main__":
     # create output folder with non default arguments in the name
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
     run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    results_dict = {'eval_mu': [], 'eval_std': []}
+    
     if args.track:
         import wandb
 
@@ -439,6 +444,16 @@ if __name__ == "__main__":
                             writer.add_scalar('irl/gail_bce_loss', loss_dict['d_loss'], global_step)
                             if args.irm_coeff > 0:
                                 writer.add_scalar('irl/gail_irm_loss', loss_dict['grad_penalty'], global_step)
+
+                #  evaluate at regular intervals and save
+                if global_step % args.eval_interval == 0:
+                    mu, std, d = evaluate_model(args, actor, device)
+                    print(f"Evaluation at {global_step}: {mu}, {std}")
+                    writer.add_scalar('eval/mu', mu)
+                    writer.add_scalar('eval/std', std)
+                    results_dict['eval_mu'].append(mu)
+                    results_dict['eval_std'].append(std)
+
         except KeyboardInterrupt:
             break
 
@@ -453,14 +468,11 @@ if __name__ == "__main__":
 
     # test model and save trajectories
     # test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
-    test_env = gym.make(args.env_id)
-    if args.clip_action:
-       test_env = gym.wrappers.ClipAction(test_env)
-    if args.normalize_obs:
-       test_env = gym.wrappers.NormalizeObservation(test_env)
-       test_env = gym.wrappers.TransformObservation(
-           test_env, lambda obs: np.clip(obs, -10, 10))
-    mu, std, d = save_traj_dict(args, args.env_id, test_env, actor, device)
+    mu, std, d = evaluate_model(args, actor, device)
+    results_dict['final_mu'] = mu
+    results_dict['final_std'] = std
+    writer.add_scalar('eval/mu', mu)
+    writer.add_scalar('eval/std', std)
 
     #  XXX f"runs/{args.exp_id}_dict.pkl" append()
 
