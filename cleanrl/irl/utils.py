@@ -542,7 +542,8 @@ def save_traj_dict(opt, env_name, env, model, device, nr_trajectories=10, min_to
                     action, _, _ = model.get_action(torch.Tensor(ob).to(device).unsqueeze(0))
                 else:
                     action, logprob, _, value = model.get_action_and_value(torch.Tensor(ob).to(device).unsqueeze(0))
-            next_ob, reward, term, trunc, _ = env.step(action.squeeze().detach().cpu().numpy())
+            action = action.squeeze().detach().cpu().numpy()
+            next_ob, reward, term, trunc, _ = env.step(action)
             done = term or trunc
             ob = next_ob
             total_reward += reward
@@ -568,6 +569,11 @@ def save_traj_dict(opt, env_name, env, model, device, nr_trajectories=10, min_to
     expert_acs = np.stack(expert_acs)
     expert_rew = np.stack(expert_rew)
     expert_done = np.stack(expert_done)
+
+    # expert_obs = expert_obs.detach().cpu().numpy()
+    # expert_acs = expert_acs.detach().cpu().numpy()
+    # expert_rew = expert_rew.detach().cpu().numpy()
+    # expert_done = expert_done.detach().cpu().numpy()
 
     ep_rew = np.array(ep_rew)
 
