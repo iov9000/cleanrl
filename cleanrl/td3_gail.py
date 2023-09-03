@@ -426,7 +426,6 @@ if __name__ == "__main__":
             break
 
     envs.close()
-    writer.close()
 
     #  eval
     torch.save(actor.state_dict(), f"runs/{run_name}/actor.pt")
@@ -443,6 +442,7 @@ if __name__ == "__main__":
     writer.add_scalar('eval/std', std)
 
     #  XXX f"runs/{args.exp_id}_dict.pkl" append()
+    writer.close()
 
     #  save df for easier parsing
     ea = read_tb_file(f"runs/{run_name}")

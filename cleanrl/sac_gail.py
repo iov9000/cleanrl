@@ -85,6 +85,8 @@ def parse_args():
             help="Entropy regularization coefficient.")
     parser.add_argument("--autotune", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
         help="automatic tuning of the entropy coefficient")
+
+    # compat
     parser.add_argument("--ent-coef", type=float, default=0.0,
         help="coefficient of the entropy")
         
@@ -463,7 +465,6 @@ if __name__ == "__main__":
             break
 
     envs.close()
-    writer.close()
 
     #  eval
     torch.save(actor.state_dict(), f"runs/{run_name}/actor.pt")
@@ -480,6 +481,7 @@ if __name__ == "__main__":
     writer.add_scalar('eval/std', std)
 
     #  XXX f"runs/{args.exp_id}_dict.pkl" append()
+    writer.close()
 
     #  save df for easier parsing
     ea = read_tb_file(f"runs/{run_name}")

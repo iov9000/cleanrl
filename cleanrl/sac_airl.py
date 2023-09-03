@@ -8,7 +8,7 @@ from distutils.util import strtobool
 
 import gymnasium as gym
 import numpy as np
-import pybullet_envs  # noqa
+#import pybullet_envs  # noqa
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -17,7 +17,8 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.airl import AirlReward, AIRLDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen
+from irl.utils import load_hf_demos, evaluate_model, prepare_batch_update_irl,\
+     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -30,6 +31,8 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--logging_interval", type=int, default=500,
         help="logging interval")
+    parser.add_argument("--eval_interval", type=int, default=10000,
+        help="evaluation interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -42,7 +45,13 @@ def parse_args():
         help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
-
+   
+    # environment specific arguments
+    parser.add_argument('--normalize_obs', default=False, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument('--clip_action', default=False, 
+        action='store_true', required=False, help='normalize irl rewards')  
+   
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
@@ -75,6 +84,10 @@ def parse_args():
     parser.add_argument("--autotune", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
         help="automatic tuning of the entropy coefficient")
 
+    # compat
+    parser.add_argument("--ent-coef", type=float, default=0.0,
+        help="coefficient of the entropy")
+        
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
@@ -92,33 +105,62 @@ def parse_args():
         required=False, help='gamma for AIRL advantage')
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
+    parser.add_argument("--irm_loss_type", type=str, default="sym", help="e1,e0,p0,p1,sym")
+
     parser.add_argument('--airl_resnet', default=False, action='store_true', help='use resnet for discriminator')
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
+    parser.add_argument("--disc_nonlin", type=str, default="tanh", help="nonlinearity for discriminator")
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
-        
+
+    parser.add_argument('--use_weight_norm', default=False, required=False, 
+        action='store_true', help='use weight norm')
+    parser.add_argument('--use_spectral_norm', default=False, required=False, 
+        action='store_true', help='use spectral_norm')
+    parser.add_argument('--use_absorb_wrapper', default=False, required=False, 
+        action='store_true', help='use_absorb_wrapper')
+
+    parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
+    parser.add_argument("--div", type=str, default="rkl", help="divergence type")
+
+    parser.add_argument('--drop_batch', default=False, required=False, 
+        action='store_true', help='drop batch in irl epochs')  
     parser.add_argument('--on_policy', default=False, required=False, 
         action='store_true', help='use bias in disc arch')
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
 
     args = parser.parse_args()
-    # fmt: on    
-    return args
+    # fmt: on
+    non_default = {
+        opt.dest: getattr(args, opt.dest)
+        for opt in parser._option_string_actions.values()
+        if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
+    }
+
+    return args, non_default
 
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
     def thunk():
         env = gym.make(env_id)
+        if opt.use_absorb_wrapper:  # DAC
+            env = AbsorbAfterDoneWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+        if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
+            env = gym.wrappers.ClipAction(env)
+        if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
+            env = gym.wrappers.NormalizeObservation(env)
+            env = gym.wrappers.TransformObservation(
+                env, lambda obs: np.clip(obs, -10, 10))
         env = AirlReward(env, opt, disc)        
-        env.seed(seed)
+        #env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -194,6 +236,8 @@ if __name__ == "__main__":
     # create output folder with non default arguments in the name
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
     run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    results_dict = {'eval_mu': [], 'eval_std': []}
+
     if args.track:
         import wandb
 
@@ -269,133 +313,180 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
-    obs = envs.reset()
+    obs = envs.reset(seed=args.seed)[0]
     for global_step in range(args.total_timesteps):
-        # ALGO LOGIC: put action logic here
-        if global_step < args.learning_starts:
-            actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
-        else:
-            actions, _, _ = actor.get_action(torch.Tensor(obs).to(device))
-            actions = actions.detach().cpu().numpy()
+        try:
+            # ALGO LOGIC: put action logic here
+            if global_step < args.learning_starts:
+                actions = np.array([envs.single_action_space.sample()
+                                   for _ in range(envs.num_envs)])
+            else:
+                actions, _, _ = actor.get_action(torch.Tensor(obs).to(device))
+                actions = actions.detach().cpu().numpy()
 
-        # TRY NOT TO MODIFY: execute the game and log data.
-        next_obs, rewards, dones, infos = envs.step(actions)
+            # TRY NOT TO MODIFY: execute the game and log data.
+            next_obs, rewards, term, trunc, infos = envs.step(actions)
+            dones = term or trunc
 
-        # TRY NOT TO MODIFY: record rewards for plotting purposes
-        for info in infos:
-            if "episode" in info.keys():
-                print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
+            # TRY NOT TO MODIFY: record rewards for plotting purposes
+            if not isinstance(infos, list):
+                infos = [infos]
+
+            for item in infos:
+                # TODO: fix this for new Gymnasium
+                if "final_info" in item.keys():
+                    if args.verbose:
+                        print(
+                            f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
+                    if global_step % 10 == 0:
+                        writer.add_scalar(
+                            "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                        writer.add_scalar(
+                            "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
+                    break
+
+            # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
+            real_next_obs = next_obs.copy()
+            for idx, d in enumerate(dones):
+                if d:
+                    real_next_obs[idx] = infos[idx]["final_observation"][0]
+                    # TODO: check if 0 index is always correct
+            rb.add(obs, real_next_obs, actions, rewards, dones, infos)
+            # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
+            obs = next_obs
+
+            # ALGO LOGIC: training.
+            if global_step > args.learning_starts:
+                data = rb.sample(args.batch_size)
+                with torch.no_grad():
+                    next_state_actions, next_state_log_pi, _ = actor.get_action(data.next_observations)
+                    qf1_next_target = qf1_target(data.next_observations, next_state_actions)
+                    qf2_next_target = qf2_target(data.next_observations, next_state_actions)
+                    min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - alpha * next_state_log_pi
+                    next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * (min_qf_next_target).view(-1)
+
+                qf1_a_values = qf1(data.observations, data.actions).view(-1)
+                qf2_a_values = qf2(data.observations, data.actions).view(-1)
+                qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
+                qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
+                qf_loss = qf1_loss + qf2_loss
+
+                q_optimizer.zero_grad()
+                qf_loss.backward()
+                q_optimizer.step()
+
+                if global_step % args.policy_frequency == 0:  # TD 3 Delayed update support
+                    for _ in range(
+                        args.policy_frequency
+                    ):  # compensate for the delay by doing 'actor_update_interval' instead of 1
+                        pi, log_pi, _ = actor.get_action(data.observations)
+                        qf1_pi = qf1(data.observations, pi)
+                        qf2_pi = qf2(data.observations, pi)
+                        min_qf_pi = torch.min(qf1_pi, qf2_pi).view(-1)
+                        actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
+
+                        actor_optimizer.zero_grad()
+                        actor_loss.backward()
+                        actor_optimizer.step()
+
+                        if args.autotune:
+                            with torch.no_grad():
+                                _, log_pi, _ = actor.get_action(data.observations)
+                            alpha_loss = (-log_alpha * (log_pi + target_entropy)).mean()
+
+                            a_optimizer.zero_grad()
+                            alpha_loss.backward()
+                            a_optimizer.step()
+                            alpha = log_alpha.exp().item()
+
+                # update the target networks
+                if global_step % args.target_network_frequency == 0:
+                    for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
+                        target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
+                    for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
+                        target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
+
                 if global_step % args.logging_interval == 0:
-                    writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                    writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
-                break
-
-        # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
-        real_next_obs = next_obs.copy()
-        for idx, d in enumerate(dones):
-            if d:
-                real_next_obs[idx] = infos[idx]["terminal_observation"]
-        rb.add(obs, real_next_obs, actions, rewards, dones, infos)
-
-        # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
-        obs = next_obs
-
-        # ALGO LOGIC: training.
-        if global_step > args.learning_starts:
-            data = rb.sample(args.batch_size)
-            with torch.no_grad():
-                next_state_actions, next_state_log_pi, _ = actor.get_action(data.next_observations)
-                qf1_next_target = qf1_target(data.next_observations, next_state_actions)
-                qf2_next_target = qf2_target(data.next_observations, next_state_actions)
-                min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - alpha * next_state_log_pi
-                next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * (min_qf_next_target).view(-1)
-
-            qf1_a_values = qf1(data.observations, data.actions).view(-1)
-            qf2_a_values = qf2(data.observations, data.actions).view(-1)
-            qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
-            qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
-            qf_loss = qf1_loss + qf2_loss
-
-            q_optimizer.zero_grad()
-            qf_loss.backward()
-            q_optimizer.step()
-
-            if global_step % args.policy_frequency == 0:  # TD 3 Delayed update support
-                for _ in range(
-                    args.policy_frequency
-                ):  # compensate for the delay by doing 'actor_update_interval' instead of 1
-                    pi, log_pi, _ = actor.get_action(data.observations)
-                    qf1_pi = qf1(data.observations, pi)
-                    qf2_pi = qf2(data.observations, pi)
-                    min_qf_pi = torch.min(qf1_pi, qf2_pi).view(-1)
-                    actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
-
-                    actor_optimizer.zero_grad()
-                    actor_loss.backward()
-                    actor_optimizer.step()
-
+                    writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), global_step)
+                    writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), global_step)
+                    writer.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)
+                    writer.add_scalar("losses/qf2_loss", qf2_loss.item(), global_step)
+                    writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, global_step)
+                    writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
+                    writer.add_scalar("losses/alpha", alpha, global_step)
+                    print("SPS:", int(global_step / (time.time() - start_time)))
+                    writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
                     if args.autotune:
-                        with torch.no_grad():
-                            _, log_pi, _ = actor.get_action(data.observations)
-                        alpha_loss = (-log_alpha * (log_pi + target_entropy)).mean()
+                        writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
 
-                        a_optimizer.zero_grad()
-                        alpha_loss.backward()
-                        a_optimizer.step()
-                        alpha = log_alpha.exp().item()
-
-            # update the target networks
-            if global_step % args.target_network_frequency == 0:
-                for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
-                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-                for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
-                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-
-            if global_step % args.logging_interval == 0:
-                writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), global_step)
-                writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), global_step)
-                writer.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)
-                writer.add_scalar("losses/qf2_loss", qf2_loss.item(), global_step)
-                writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, global_step)
-                writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
-                writer.add_scalar("losses/alpha", alpha, global_step)
-                print("SPS:", int(global_step / (time.time() - start_time)))
-                writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
-                if args.autotune:
-                    writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
-
-            # Optimize the discriminator
-            for epoch in range(args.irl_epochs):            
-                # GAIL Discriminator Update
-                            
-                gen_demos = demos_gen(demos['all'], args.batch_size)
-                for d in gen_demos:
-                    if len(d) < args.batch_size:
-                        break          
+                # Optimize the discriminator
+                for epoch in range(args.irl_epochs):            
                     # GAIL Discriminator Update
-                    update_dict = prepare_batch_update_irl(envs, args, d, 
-                                                            data.observations, data.actions, data.dones, actor)
+                                
+                    gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+                    for d in gen_demos:
+                        if len(d['obs']) < args.batch_size:
+                            if args.drop_batch:
+                                break
+                            else:
+                                obs_ = data.observations[:len(d['obs'])]
+                                actions_ = data.actions[:len(d['obs'])]
+                                dones_ = data.dones[:len(d['obs'])]
+                        else:
+                            obs_ = data.observations
+                            actions_ = data.actions
+                            dones_ = data.dones
 
-                    loss_dict = disc.compute_loss(update_dict)
+                        # GAIL Discriminator Update
+                        update_dict = prepare_batch_update_irl(envs, args, d,
+                                                               obs_, actions_, dones_, actor)
+                        loss_dict = disc.compute_loss(update_dict)
 
-                    loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + args.lip_coeff * loss_dict['lip_penalty']
-                    if args.irm_coeff > 1.0:
-                        loss /= args.irm_coeff
+                        loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + args.lip_coeff * loss_dict['lip_penalty']
+                        if args.irm_coeff > 1.0:
+                            loss /= args.irm_coeff
 
-                    disc.update(loss)
+                        disc.update(loss)
 
-                    if global_step % args.logging_interval == 0:
-                        writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
-                        if args.irm_coeff > 0:
-                            writer.add_scalar('irl/airl_irm_loss', loss_dict['grad_penalty'], global_step)
-                        writer.add_scalar('irl/airl_r_p', loss_dict['policy_reward'], global_step)
-                        writer.add_scalar('irl/airl_v_p', loss_dict['policy_value'], global_step)
-                        writer.add_scalar('irl/airl_r_e', loss_dict['expert_reward'], global_step)
-                        writer.add_scalar('irl/airl_v_e', loss_dict['expert_value'], global_step)
-                        writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
+                        if global_step % args.logging_interval == 0:
+                            writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
+                            if args.irm_coeff > 0:
+                                writer.add_scalar('irl/airl_irm_loss', loss_dict['grad_penalty'], global_step)
+                            writer.add_scalar('irl/airl_r_p', loss_dict['policy_reward'], global_step)
+                            writer.add_scalar('irl/airl_v_p', loss_dict['policy_value'], global_step)
+                            writer.add_scalar('irl/airl_r_e', loss_dict['expert_reward'], global_step)
+                            writer.add_scalar('irl/airl_v_e', loss_dict['expert_value'], global_step)
+                            writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
+
+                #  evaluate at regular intervals and save
+                if global_step % args.eval_interval == 0:
+                    mu, std, d = evaluate_model(args, actor, device)
+                    print(f"Evaluation at {global_step}: {mu}, {std}")
+                    writer.add_scalar('eval/mu', mu)
+                    writer.add_scalar('eval/std', std)
+                    results_dict['eval_mu'].append(mu)
+                    results_dict['eval_std'].append(std)
+
+        except KeyboardInterrupt:
+            break
 
 
     envs.close()
+
+    #  eval
+    torch.save(actor.state_dict(), f"runs/{run_name}/actor.pt")
+    torch.save(qf1.state_dict(), f"runs/{run_name}/qf1.pt")
+    torch.save(qf2.state_dict(), f"runs/{run_name}/qf2.pt")
+    torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
+
+    # test model and save trajectories
+    # test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
+    mu, std, d = evaluate_model(args, actor, device)
+    results_dict['final_mu'] = mu
+    results_dict['final_std'] = std
+    writer.add_scalar('eval/mu', mu)
+    writer.add_scalar('eval/std', std)
+
     writer.close()
 
     # save df for easier parsing

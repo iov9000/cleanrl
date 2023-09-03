@@ -464,7 +464,6 @@ if __name__ == "__main__":
 
 
     envs.close()
-    writer.close()
 
     #  final eval
     torch.save(actor.state_dict(), f"runs/{run_name}/actor.pt")
@@ -481,6 +480,8 @@ if __name__ == "__main__":
     results_dict['final_std'] = std
     writer.add_scalar('eval/mu', mu)
     writer.add_scalar('eval/std', std)
+
+    writer.close()
 
     #  save df for easier parsing
     ea = read_tb_file(f"runs/{run_name}")
