@@ -10,6 +10,8 @@ import pickle
 from datetime import datetime
 import matplotlib.pyplot as plt
 
+from typing import Optional
+
 def load_hf_demos(env_name, folder=None, n_demos=10, bary_enhance=False):
     if folder is None:
         folder = "demos"
@@ -553,10 +555,11 @@ def save_traj_dict(opt, env_name, env, model, device, nr_trajectories=10, min_to
 
         while not done:
             with torch.no_grad():
-                if 'sac' in opt.exp_name:
-                    action, _, _ = model.get_action(torch.Tensor(ob).to(device).unsqueeze(0))
-                else:
+                if 'ppo' in opt.exp_name:
                     action, logprob, _, value = model.get_action_and_value(torch.Tensor(ob).to(device).unsqueeze(0))
+                else:
+                    action, _, _ = model.get_action(torch.Tensor(ob).to(device).unsqueeze(0))
+
             action = action.squeeze().detach().cpu().numpy()
             next_ob, reward, term, trunc, _ = env.step(action)
             done = term or trunc
@@ -598,3 +601,82 @@ def save_traj_dict(opt, env_name, env, model, device, nr_trajectories=10, min_to
     #pickle.dump(d, open(filename, 'wb'))
 
     return np.mean(ep_rew), np.std(ep_rew), d
+
+
+class AbsorbAfterDoneWrapper(gym.Wrapper):
+    """Transition into absorbing state instead of episode termination.
+
+    When the environment being wrapped returns `terminated=True` or `truncated=True`,
+    we return an absorbing observation.
+    This wrapper always returns `terminated=False` and `truncated=False`.
+
+    A convenient way to add absorbing states to environments like MountainCar.
+    """
+
+    def __init__(
+        self,
+        env: gym.Env,
+        absorb_reward: float = 0.0,
+        n_absorbing_states: int = 1
+    ):
+        """Initialize AbsorbAfterDoneWrapper.
+
+        Args:
+          env: The wrapped Env.
+          absorb_reward: The reward returned at the absorb state.
+          absorb_obs: The observation returned at the absorb state. If None, then
+            repeat the final observation before absorb.
+        """
+        super().__init__(env)
+        self.absorb_reward = absorb_reward
+        self.absorb_obs_default = np.zeros(self.observation_space.shape)
+        self.absorb_obs_this_episode = None
+        self.at_absorb_state = None
+        self.n_absorbing_states = n_absorbing_states
+        self.cnt = 0
+
+    def reset(self, *args, **kwargs):
+        """Reset the environment."""
+        self.at_absorb_state = False
+        self.absorb_obs_this_episode = None
+        self.cnt = 0
+        return self.env.reset(*args, **kwargs)
+
+    def step(self, action):
+        """Advance the environment by one step.
+
+        This wrapped `step()` always returns terminated=False and truncated=False.
+
+        After the first time either terminated or truncated is returned by the
+        underlying Env, we enter an artificial absorb state.
+
+        In this artificial absorb state, we stop calling
+        `self.env.step(action)` (i.e. the `action` argument is entirely ignored) and
+        we return fixed values for obs, rew, terminated, truncated, and info.
+        The values of `obs` and `rew` depend on initialization arguments.
+        `info` is always an empty dictionary.
+        """
+        if not self.at_absorb_state:
+            obs, rew, terminated, truncated, info = self.env.step(action)
+            if terminated or truncated:
+                # Initialize the artificial absorb state, which we will repeatedly use
+                # starting on the next call to `step()`.
+                self.at_absorb_state = True
+
+                if self.absorb_obs_default is None:
+                    self.absorb_obs_this_episode = obs
+                else:
+                    self.absorb_obs_this_episode = self.absorb_obs_default
+        else:
+            assert self.absorb_obs_this_episode is not None
+            assert self.absorb_reward is not None
+            obs = self.absorb_obs_this_episode
+            rew = self.absorb_reward
+            info = {}
+            self.cnt += 1
+
+        if self.cnt < self.n_absorbing_states+1:
+            return obs, rew, False, False, info
+        else:
+            return obs, rew, True, True, info
+

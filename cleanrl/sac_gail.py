@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from irl.gail import GailReward, GAILDiscriminator
 from irl.utils import load_hf_demos, evaluate_model, prepare_batch_update_irl,\
-     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict
+     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -117,6 +117,9 @@ def parse_args():
         action='store_true', help='use weight norm')
     parser.add_argument('--use_spectral_norm', default=False, required=False, 
         action='store_true', help='use spectral_norm')
+    parser.add_argument('--use_absorb_wrapper', default=False, required=False, 
+        action='store_true', help='use_absorb_wrapper')
+
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
     parser.add_argument("--div", type=str, default="rkl", help="divergence type")
@@ -142,6 +145,8 @@ def parse_args():
 def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
     def thunk():
         env = gym.make(env_id)
+        if opt.use_absorb_wrapper: # DAC
+            env = AbsorbAfterDoneWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
