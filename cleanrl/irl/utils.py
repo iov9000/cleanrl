@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
 import ot
-import gym
+import gymnasium as gym
 import pickle
 from datetime import datetime
 import matplotlib.pyplot as plt

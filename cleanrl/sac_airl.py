@@ -462,8 +462,8 @@ if __name__ == "__main__":
                 if global_step % args.eval_interval == 0:
                     mu, std, d = evaluate_model(args, actor, device)
                     print(f"Evaluation at {global_step}: {mu}, {std}")
-                    writer.add_scalar('eval/mu', mu)
-                    writer.add_scalar('eval/std', std)
+                    writer.add_scalar('eval/mu', mu, global_step)
+                    writer.add_scalar('eval/std', std, global_step)
                     results_dict['eval_mu'].append(mu)
                     results_dict['eval_std'].append(std)
 
@@ -484,8 +484,8 @@ if __name__ == "__main__":
     mu, std, d = evaluate_model(args, actor, device)
     results_dict['final_mu'] = mu
     results_dict['final_std'] = std
-    writer.add_scalar('eval/mu', mu)
-    writer.add_scalar('eval/std', std)
+    writer.add_scalar('eval/mu', mu, args.total_timesteps)
+    writer.add_scalar('eval/std', std, args.total_timesteps)
 
     writer.close()
 
