@@ -142,11 +142,14 @@ def parse_args():
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--gsw_coeff', default=1.0, type=float, required=False, help='ae loss coeff')
+    parser.add_argument('--vb_coeff', default=1e-4, type=float, required=False, help='ae loss coeff')
     parser.add_argument('--recon_coeff', default=0.0, type=float, required=False, help='ae loss coeff')
     parser.add_argument('--l2_coeff', default=0.0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
     parser.add_argument("--scheduler_gamma", type=float, default=1.0,
         help="exponential decay rate of the learning rate scheduler")
+    parser.add_argument("--swil_vb", type=int, default=0,
+        help="variational bottleneck dimension")
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
     parser.add_argument('--use_disc_bias', default=True, required=False, 
@@ -479,7 +482,7 @@ if __name__ == "__main__":
 
                         loss_dict = disc.compute_loss(update_dict)
 
-                        loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
+                        loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + disc.beta * loss_dict['ib_loss'] 
                         if args.irm_coeff > 1.0:
                             loss /= args.irm_coeff
 
@@ -490,6 +493,9 @@ if __name__ == "__main__":
 
                             if args.irm_coeff > 0:
                                 writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
+                            if args.swil_vb > 0:
+                                writer.add_scalar('irl/swil_vib_loss', loss_dict['ib_loss'], global_step)
+                
                 
                 # evaluate at regular intervals and save 
                 if global_step % args.eval_interval == 0:

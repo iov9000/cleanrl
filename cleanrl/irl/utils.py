@@ -82,6 +82,9 @@ def get_trajectory_list(demos, oa_cat=False):
         
     return trajs
 
+def gaussian_kld(mu, logvar):
+    return -0.5 * torch.sum(1 + logvar - mu ** 2 - logvar.exp(), dim = 1)
+
 def compute_sw_barycenter(a,b,lr=1e3,nb_iter_max=1000,bary_size=1000,n_proj=100):
     x1_torch = torch.from_numpy(a)
     x2_torch = torch.from_numpy(b)

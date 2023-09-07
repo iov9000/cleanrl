@@ -3,9 +3,10 @@ import argparse
 import os
 import random
 import time
+from datetime import datetime
 from distutils.util import strtobool
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
@@ -60,6 +61,8 @@ def parse_args():
         help="timestep to start learning")
     parser.add_argument("--train-frequency", type=int, default=10,
         help="the frequency of training")
+    parser.add_argument('--verbose', default=False, required=False, 
+        action='store_true', help='verbose output')
     args = parser.parse_args()
     # fmt: on
     return args
@@ -72,7 +75,7 @@ def make_env(env_id, seed, idx, capture_video, run_name):
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env.seed(seed)
+        #env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -85,11 +88,11 @@ class QNetwork(nn.Module):
     def __init__(self, env):
         super().__init__()
         self.network = nn.Sequential(
-            nn.Linear(np.array(env.single_observation_space.shape).prod(), 120),
+            nn.Linear(np.array(env.single_observation_space.shape).prod(), 256),
             nn.ReLU(),
-            nn.Linear(120, 84),
+            nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Linear(84, env.single_action_space.n),
+            nn.Linear(256, env.single_action_space.n),
         )
 
     def forward(self, x):
@@ -103,7 +106,10 @@ def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
 
 if __name__ == "__main__":
     args = parse_args()
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+
+    #run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}"
     if args.track:
         import wandb
 
@@ -149,7 +155,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
-    obs = envs.reset()
+    obs = envs.reset(seed=args.seed)[0]
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
         epsilon = linear_schedule(args.start_e, args.end_e, args.exploration_fraction * args.total_timesteps, global_step)
@@ -160,22 +166,32 @@ if __name__ == "__main__":
             actions = torch.argmax(q_values, dim=1).cpu().numpy()
 
         # TRY NOT TO MODIFY: execute the game and log data.
-        next_obs, rewards, dones, infos = envs.step(actions)
-
+        next_obs, rewards, term, trunc, infos = envs.step(actions)
+        dones = term or trunc
+    
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        for info in infos:
-            if "episode" in info.keys():
-                print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
-                writer.add_scalar("charts/epsilon", epsilon, global_step)
+        if not isinstance(infos, list):
+            infos = [infos]
+
+        for item in infos:
+            # TODO: fix this for new Gymnasium
+            if "final_info" in item.keys():
+                if args.verbose:
+                    print(
+                        f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
+                if global_step % 1 == 0:
+                    writer.add_scalar(
+                        "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                    writer.add_scalar(
+                        "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
+                    writer.add_scalar("charts/epsilon", epsilon, global_step)
                 break
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
         real_next_obs = next_obs.copy()
         for idx, d in enumerate(dones):
             if d:
-                real_next_obs[idx] = infos[idx]["terminal_observation"]
+                real_next_obs[idx] = infos[idx]["final_observation"][0]
         rb.add(obs, real_next_obs, actions, rewards, dones, infos)
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook

@@ -9,7 +9,7 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ExponentialLR
 
 from torch.nn.utils import spectral_norm, weight_norm
-from irl.utils import ResNetAIRLDisc, MiniGridCNN, AtariCNNBase
+from irl.utils import ResNetAIRLDisc, MiniGridCNN, AtariCNNBase, gaussian_kld
 from irl.gsw_utils import gsw, get_slice
 from tqdm import tqdm
 
@@ -143,6 +143,10 @@ class SWILDiscriminator(nn.Module):
         self.l2_coeff = opt.l2_coeff
         self.reward_type = opt.swil_reward_type
         self.is_atari = 'atari' in self.opt.exp_name
+        self.swil_vb = opt.swil_vb
+        self.i_c = 0.1
+        self.beta = torch.tensor(1.0, dtype=torch.float)
+        self.alpha_beta = opt.vb_coeff
 
         if opt.disc_nonlin == 'relu':
             nonlin = nn.ReLU()
@@ -241,6 +245,14 @@ class SWILDiscriminator(nn.Module):
         else:
             self.gsw_module = GSW('poly', nofprojections=opt.n_proj, degree=opt.poly_degree)
 
+        if self.swil_vb > 0:
+            self.encoder_z = nn.Sequential(linlayer(self.layer_dims[1], self.swil_vb*2, 
+                                bias, opt.use_weight_norm, opt.use_spectral_norm), nonlin)
+            self.decoder_z = nn.Sequential(linlayer(self.swil_vb, 
+                                                    self.layer_dims[2], bias, 
+                                                    opt.use_weight_norm, 
+                                                    opt.use_spectral_norm), nonlin)
+
         # init sorted arrays
         self.pi_atoms_sorted = None
         self.exp_atoms_sorted = None
@@ -265,18 +277,23 @@ class SWILDiscriminator(nn.Module):
         # get random projections based on reward
         return gsw_dist
 
-    def proj(self, ob, ac, nob=None, d=None):
+    def proj(self, ob, ac, nob=None, d=None, noise=False):
         base_out = self.base_fwd(ob, ac, nob, d)
 
+        if self.swil_vb > 0:
+            vb_out, z, mu, std = self.vb(base_out, noise=noise)
+        else:
+            vb_out = base_out
+            z, mu, std = 0,0,0
         # rew, v, v_n, d_out = self.forward(ob, next_ob, ac, lprobs) TODO??
-        # potentially use more sophisticated mechanism
+        # potentially use more sophisticated mechanism with multiple projections
         if self.opt.proj_layer:
-            return self.proj_layer(self.reward(base_out))
+            return self.proj_layer(self.reward(vb_out)), z, mu, std
         else:
             # XXX: additional noise?
-            rew = self.reward(base_out)
+            rew = self.reward(vb_out)
             #out = rew/rew.norm(-1)
-            return rew# + torch.randn_like(self.reward(base_out))
+            return rew, z, mu, std  # + torch.randn_like(self.reward(base_out))
 
     def base_fwd(self, ob, ac, nob=None, d=None):
         if (self.use_cnn_base or self.is_atari):
@@ -315,11 +332,30 @@ class SWILDiscriminator(nn.Module):
         if callable(reset_parameters):
             self.reward.reset_parameters()
 
+    def vb(self, base_out, noise=True):
+        mustd = self.encoder_z(base_out)
+        mu, logvar = torch.chunk(mustd, 2, -1)
+        std = torch.exp(logvar/2)
+        eps = torch.randn_like(std)
+        if noise:
+            z = mu + std * eps 
+        else:
+            z = mu
+        
+        vb_out = self.decoder_z(z)
+
+        return vb_out, z, mu, std
+
     def compute_replacement_reward(self, ob, ac, nob=None,d=None):
-        with torch.no_grad():
+        with torch.no_grad(): 
             # project next state and rank it as part of previous evaluation
             base_out = self.base_fwd(ob,ac,nob,d)
-            obs_t_slice = self.reward(base_out).unsqueeze(0)
+            if self.swil_vb > 0:
+                vb_out, z, mu, std = self.vb(base_out, noise=False)
+            else:
+                vb_out = base_out
+
+            obs_t_slice = self.reward(vb_out).unsqueeze(0)
             sorted_proj = self.pi_atoms_sorted
             sorted_proj_tgt = self.exp_atoms_sorted
 
@@ -462,8 +498,8 @@ class SWILDiscriminator(nn.Module):
             self.reward.reset()
         
         # project slices
-        pi_slices = self.proj(obs_pi, acs_pi, nobs_pi, d_pi)
-        exp_slices = self.proj(obs_exp, acs_exp, nobs_exp, d_exp)
+        pi_slices, _, _, _ = self.proj(obs_pi, acs_pi, nobs_pi, d_pi)
+        exp_slices, _, _, _ = self.proj(obs_exp, acs_exp, nobs_exp, d_exp)
 
         # sort slices
         pi_slices_sorted = torch.sort(pi_slices, dim=0)[0]
@@ -486,8 +522,8 @@ class SWILDiscriminator(nn.Module):
             self.reward.reset()
         
         # project slices 
-        pi_slices = self.proj(obs_pi, acs_pi)
-        exp_slices = self.proj(obs_exp, acs_exp)
+        pi_slices, _, _, _ = self.proj(obs_pi, acs_pi)
+        exp_slices, _, _, _ = self.proj(obs_exp, acs_exp)
         all_slices = torch.cat([pi_slices.unsqueeze(0),exp_slices],0)
 
         # sort slices
@@ -555,8 +591,10 @@ class SWILDiscriminator(nn.Module):
 
         if self.opt.swil_loss == 'surr_loss':
             # surrogate loss from maxSWGAN paper
-            policy_out = self.proj(self.policy_obs, self.policy_acs, policy_obs_next, policy_dones)
-            expert_out = self.proj(exp_obs, exp_acs, exp_obs_next, exp_dones)
+            policy_out, _, p_mu, p_std = self.proj(self.policy_obs, self.policy_acs, 
+                                policy_obs_next, policy_dones, noise=True)
+            expert_out, _, e_mu, e_std = self.proj(exp_obs, exp_acs, 
+                                exp_obs_next, exp_dones, noise=True)
 
             labels = torch.cat([torch.zeros(expert_out.size()),
                                 torch.ones(policy_out.size())])
@@ -607,8 +645,23 @@ class SWILDiscriminator(nn.Module):
         else:
             output_dict['recon_loss'] = 0
 
+        if self.swil_vb > 0:
+            l_kld = gaussian_kld(p_mu, p_std)
+            l_kld = l_kld.mean()
+            e_kld = gaussian_kld(e_mu, e_std)
+            e_kld = e_kld.mean()
+            kld = 0.5 * (l_kld + e_kld)
+            bottleneck_loss = kld - self.i_c
+        else:
+            bottleneck_loss = 0
+
+        #with torch.no_grad():
+        #    self.beta = torch.max(torch.tensor(0.0), self.beta + self.alpha_beta * bottleneck_loss)
+
         output_dict['d_loss'] = d_loss
         output_dict['grad_penalty'] = irm_pen
+        output_dict['ib_loss'] = bottleneck_loss
+        output_dict['beta'] = self.beta
         output_dict['lip_penalty'] = 0
 
         # TODO: classification or reconstruction loss for 
