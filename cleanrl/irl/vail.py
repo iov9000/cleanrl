@@ -116,10 +116,10 @@ class VAILDiscriminator(nn.Module):
         else:
             self.base = nn.Sequential(linlayer(self.layer_dims[0],
                                                       self.layer_dims[1], bias, opt.use_weight_norm, opt.use_spectral_norm),
-                                      torch.nn.PReLU())
+                                      torch.nn.Tanh())
 
         self.num_inputs = self.layer_dims[1]
-        self.nonlinear = torch.nn.PReLU()
+        self.nonlinear = torch.nn.Tanh()
 
         self.vp_dict = {}
 

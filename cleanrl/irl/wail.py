@@ -26,11 +26,11 @@ def linlayer(in_dim, out_dim, bias=True, wnorm=False, snorm=False):
         return nn.Linear(in_dim, out_dim, bias=bias)
 
 class WAILDiscriminator(nn.Module):
-    def __init__(self, env, opt,  use_cnn_base=False, 
-                    output_nonlin=torch.nn.Tanh(), bias=False):
+    def __init__(self, opt, env, bias=False):
         super(WAILDiscriminator, self).__init__()
         # parse options
         self.env = env
+        self.opt = opt
         self.layer_dims = opt.d_layer_dims
         self.lr = opt.disc_lr
         self.use_actions = opt.use_actions
@@ -41,6 +41,7 @@ class WAILDiscriminator(nn.Module):
         self.bias = opt.use_disc_bias
         self.use_actions = opt.use_actions
         self.epsilon = opt.epsilon
+        self.is_atari = 'atari' in self.opt.exp_name
 
         ob_shapes = list(env.observation_space.shape)
         ac_shapes = list(env.action_space.shape)
@@ -52,25 +53,40 @@ class WAILDiscriminator(nn.Module):
              self.layer_dims = [ob_shapes[-1]] +  self.layer_dims
         ac_len = ac_shapes[0]
 
+        if opt.disc_nonlin == 'relu':
+            nonlin = nn.ReLU()
+        elif opt.disc_nonlin == 'tanh':
+            nonlin = nn.Tanh()
+        else:
+            nonlin = nn.PReLU()
 
-        if use_cnn_base:
+        if self.use_cnn_base:
             self.base = MiniGridCNN(self.layer_dims, self.use_actions)
         else:
-            self.base = nn.Sequential(torch.nn.Linear(self.layer_dims[0],
-                                                      self.layer_dims[1], bias),
-                                      torch.nn.LeakyReLU())
+            self.base = nn.Sequential(linlayer(self.layer_dims[0],
+                                                self.layer_dims[1], 
+                                                bias, 
+                                                self.opt.use_weight_norm, 
+                                                self.opt.use_spectral_norm),
+                                      nonlin)
 
         self.discriminator_layers = []
         for i in range(2, len(self.layer_dims)):
-            self.discriminator_layers += [torch.nn.Linear(in_features=self.layer_dims[i - 1],
-                                                          out_features=self.layer_dims[i],
-                                                          bias=bias),
-                                          torch.nn.LeakyReLU()]
+            self.discriminator_layers += [linlayer(self.layer_dims[i-1],
+                                                self.layer_dims[i], 
+                                                bias, 
+                                                self.opt.use_weight_norm, 
+                                                self.opt.use_spectral_norm),
+                                          nonlin]
 
-        self.discriminator_layers += [torch.nn.Linear(in_features=self.layer_dims[-1],
-                                                      out_features=1,
-                                                      bias=bias),
-                                        output_nonlin]
+        self.discriminator_layers += [linlayer(self.layer_dims[-1],
+                                               1,
+                                               bias,
+                                               self.opt.use_weight_norm,
+                                               self.opt.use_spectral_norm),
+                                        nonlin]
+
+        print(self.discriminator_layers)
 
         self.discriminator = nn.Sequential(*self.discriminator_layers)
 
@@ -85,16 +101,21 @@ class WAILDiscriminator(nn.Module):
         base_params.extend(d_params)
         self.d_optimizer = Adam(base_params, lr=self.lr, weight_decay=self.l2_coeff)
 
-    def forward(self, ob, ac):
-        if self.use_actions and self.use_cnn_base:
+    def base_forward(self, ob, ac):
+        if self.use_actions and (self.use_cnn_base or self.is_atari):
             base_out = self.base(ob, ac)
-        elif self.use_actions and not self.use_cnn_base:
+        elif self.use_actions and not (self.use_cnn_base or self.is_atari):
             if len(ob.shape) != len(ac.shape):
                 ac = torch.unsqueeze(ac, -1)
             base_out = self.base(torch.cat([ob, ac], axis=-1))
         else:
             base_out = self.base(ob)
 
+        return base_out
+
+    def forward(self, ob, ac):
+        base_out = self.base_forward(ob, ac)
+        
         d_out = self.discriminator(base_out)
         return d_out
 
@@ -190,8 +211,10 @@ class WAILDiscriminator(nn.Module):
         policy_out = self.forward(update_dict['policy_obs'], update_dict['policy_acs'])
 
         lip_penalty = self.compute_grad_pen(update_dict)
-        self.ot_loss = torch.sum(expert_out - policy_out -\
-            (1/(4*self.epsilon)*(expert_out - policy_out - torch.norm(expert_out - policy_out))))
+        #self.ot_loss = torch.sum(expert_out - policy_out -\
+        #    (1/(4*self.epsilon)*(expert_out - policy_out - torch.norm(expert_out - policy_out))))
+        self.ot_loss = torch.mean(expert_out) - torch.mean(torch.exp(policy_out)) + 1 
+        #self.ot_loss = torch.mean(expert_out) - torch.mean(policy_out) + 1 
 
         # self.grad_penalty = self.irm_penalty(d_out, labels)
         self.grad_penalty = self.irm_penalty(

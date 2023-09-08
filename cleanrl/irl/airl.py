@@ -144,7 +144,7 @@ class AIRLDiscriminator(nn.Module):
         # forward the nn models
         fitted_value_n = self.value(self.base_v(next_ob))
         fitted_value = self.value(self.base_v(ob))
-        reward = self.get_reward(ob, ac)
+        reward = self._get_reward(ob, ac)
 
         # calculate discriminator probability according to AIRL structure
         qfn = reward + self.gamma * fitted_value_n
@@ -160,7 +160,15 @@ class AIRLDiscriminator(nn.Module):
 
         return reward, fitted_value, fitted_value_n, d_out
 
-    def get_reward(self, ob, ac):
+    def get_reward(self, ob, next_ob, ac, lprobs):
+        reward, fitted_value, fitted_value_n, d_out = self.forward(
+            ob, next_ob, ac, lprobs)
+        
+        
+        return -torch.squeeze(torch.log(1-torch.sigmoid(d_out) + 1e-8))
+
+    # this computes the value of the reward fct instead of logD
+    def _get_reward(self, ob, ac):
         if self.use_actions and (self.use_cnn_base or self.is_atari):
             base_out = self.base(ob, ac)
         elif self.use_actions and not (self.use_cnn_base or self.is_atari):
@@ -317,13 +325,14 @@ class AIRLDiscriminator(nn.Module):
         torch.save(self.state_dict(), fname)
 
 class AirlReward(gym.Wrapper):
-    def __init__(self, env, opt, disc):
+    def __init__(self, env, opt, agent, disc):
         super().__init__(env=env)
         # self.reward_fn = make_network(**reward_fn_spec)
         self.use_actions = opt.use_actions
+        self.policy = agent
         self.discriminator = disc
         self.episode_return = 0
-
+        self.opt = opt
         self.obs = None
 
     def step(self, action):
@@ -338,12 +347,19 @@ class AirlReward(gym.Wrapper):
         acs_t = torch.tensor(action, dtype=torch.get_default_dtype())
         next_obs_t = torch.tensor(next_obs, dtype=torch.get_default_dtype())
 
+
         with torch.no_grad():
+            if 'ppo' in self.opt.exp_name:
+                _, lprobs_t, _, _ = self.policy.get_action_and_value(obs_t.unsqueeze(0), acs_t.unsqueeze(0))
+            else:
+                _, lprobs_t, _ = self.policy.get_action(obs_t.unsqueeze(0), acs_t.unsqueeze(0))
+
+            
             # get discriminator reward and train on that
             #print([p.norm(2) for p in self.discriminator.parameters()])
-            irl_reward = self.discriminator.get_reward(obs_t, acs_t).cpu().numpy()
+            irl_reward = self.discriminator.get_reward(obs_t, next_obs_t, acs_t, lprobs_t).cpu().numpy()
             #irl_reward = self.discriminator.get_reward(obs_t, acs_t, next_obs_t).cpu().numpy()
         self.obs = next_obs
         #self.episode_return += irl_reward[0]
 
-        return next_obs, irl_reward[0], term, trunc, info
+        return next_obs, irl_reward, term, trunc, info

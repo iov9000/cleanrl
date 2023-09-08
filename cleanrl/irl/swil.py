@@ -292,6 +292,10 @@ class SWILDiscriminator(nn.Module):
         else:
             # XXX: additional noise?
             rew = self.reward(vb_out)
+            # perturb with noise -> TODO: sample from stochastic (e.g. Gaussian) process?
+            if self.opt.n_proj > 1:
+                rew + torch.randn_like(rew)*0.01
+
             #out = rew/rew.norm(-1)
             return rew, z, mu, std  # + torch.randn_like(self.reward(base_out))
 

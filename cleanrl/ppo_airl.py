@@ -37,7 +37,8 @@ from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.airl import AirlReward, AIRLDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict, AntCFWrapper, MujocoTestWrapper, save_traj_dict
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
+     demos_gen_dict, AntCFWrapper, MujocoTestWrapper, save_traj_dict, evaluate_model, load_lap_demos
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -50,6 +51,8 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--logging_interval", type=int, default=128,
         help="logging interval")
+    parser.add_argument("--eval_interval", type=int, default=2048,
+        help="evaluation interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -111,6 +114,8 @@ def parse_args():
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
+    parser.add_argument("--demo_eps", type=float, default=0.0,
+        help="if > 0, load perturbed demos")    
     parser.add_argument("--n_demos", type=int, default=10,
         help="number of demos to use")
     parser.add_argument('--enhance_demos', default=False, required=False, 
@@ -126,13 +131,11 @@ def parse_args():
         required=False, help='use IRM penalty on discriminator')
     parser.add_argument("--irm_loss_type", type=str, default="sym", help="e1,e0,p0,p1,sym")
 
-    parser.add_argument('--drop_batch', default=False, required=False, 
-        action='store_true', help='drop batch in irl epochs')   
-
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
+    
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
     parser.add_argument('--use_disc_bias', default=True, required=False, 
@@ -151,7 +154,7 @@ def parse_args():
     parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
-    parser.add_argument("--disc_nonlin", type=str, default="prelu",
+    parser.add_argument("--disc_nonlin", type=str, default="tanh",
         help="divergence type")
     parser.add_argument('--normalize_irl_rewards', default=True, 
         action='store_true', required=False, help='normalize irl rewards')  
@@ -169,7 +172,7 @@ def parse_args():
     return args, non_default
 
 
-def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
+def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, agent, disc):
     def thunk():
         env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -183,7 +186,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
         if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeObservation(env)
             env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-        env = AirlReward(env, opt, disc)
+        env = AirlReward(env, opt, agent, disc)
         if opt.normalize_irl_rewards and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeReward(env, gamma=gamma)
             env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
@@ -202,7 +205,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self, envs, hidden_size=64, nonlin='tanh', discrete=False):        
+    def __init__(self, env, hidden_size=64, nonlin='tanh', discrete=False):        
         super().__init__()
 
         if nonlin == 'relu':
@@ -214,24 +217,26 @@ class Agent(nn.Module):
 
         self.discrete = discrete
         if self.discrete:
-            output_dim = int(envs.single_action_space.n)
+            output_dim = int(env.action_space.n)
         else:
-            output_dim = np.prod(envs.single_action_space.shape)
+            output_dim = np.prod(env.action_space.shape)
 
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
+            layer_init(nn.Linear(np.array(env.observation_space.shape).prod(), hidden_size)),
             nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nonlin,
             layer_init(nn.Linear(hidden_size, 1), std=1.0),
         )
+
         self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
+            layer_init(nn.Linear(np.array(env.observation_space.shape).prod(), hidden_size)),
             nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nonlin,
             layer_init(nn.Linear(hidden_size, output_dim), std=0.01),
         )
+
         if not self.discrete:
             self.actor_logstd = nn.Parameter(torch.zeros(1,output_dim))
 
@@ -301,7 +306,11 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
+    if args.env_id == 'Lap-v0':
+        demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
+    else:
+        demos = load_hf_demos(args.env_id, args.demo_dir,
+                              n_demos=args.n_demos, perturb=args.demo_eps)
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
@@ -315,15 +324,15 @@ if __name__ == "__main__":
     if args.load_disc:
         disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
 
-    # env setup
-    envs = gym.vector.SyncVectorEnv(
-        [make_env(args, args.env_id, args.seed + i, i, args.capture_video, run_name, args.gamma, disc) for i in range(args.num_envs)]
-    )
-    #assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
-
-    agent = Agent(envs, args.agent_size, discrete=discrete).to(device)
+    agent = Agent(test_env, args.agent_size, discrete=discrete).to(device)
     if args.resume:
         agent.load_state_dict(torch.load(os.path.join(args.resume, "agent.pt") , map_location=device))
+
+    # env setup
+    envs = gym.vector.SyncVectorEnv(
+        [make_env(args, args.env_id, args.seed + i, i, args.capture_video, run_name, args.gamma, agent, disc) for i in range(args.num_envs)]
+    )
+    #assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
@@ -503,7 +512,6 @@ if __name__ == "__main__":
 
                 update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
 
-
                 loss_dict = disc.compute_loss(update_dict)
 
                 loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
@@ -538,42 +546,54 @@ if __name__ == "__main__":
             if args.verbose:
                 print("SPS:", int(global_step / (time.time() - start_time)))
             writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
-
+        
+        #  evaluate at regular intervals and save
+        if global_step % args.eval_interval == 0:
+            mu, std, d = evaluate_model(args, agent, device)
+            print(f"Evaluation at {global_step}: {mu}, {std}")
+            writer.add_scalar('eval/mu', mu, global_step)
+            writer.add_scalar('eval/std', std, global_step)
+    
     envs.close()
-    writer.close()
 
     ## save model
     torch.save(agent.state_dict(), f"runs/{run_name}/agent.pt")
     torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
 
-    ## test model and save trajectories 
+    mu, std, d = evaluate_model(args, agent, device)
+    writer.add_scalar('eval/mu', mu, args.total_timesteps)
+    writer.add_scalar('eval/std', std, args.total_timesteps)
+
+    writer.close()
+
+    # test model and save trajectories
     ## if movep, save scatter plot
-    if args.env_id == "MoveP-v0":
-        test_env = gym.make(args.env_id)
-    else:
-        ## test model and save trajectories
-        test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
+    # if args.env_id == "MoveP-v0":
+    #     test_env = gym.make(args.env_id)
+    # else:
+    #     ## test model and save trajectories
+    #     test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
 
-    if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
-        test_env = gym.wrappers.ClipAction(test_env)
-    if args.normalize_obs:
-        test_env = gym.wrappers.NormalizeObservation(test_env)
-        test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
-    mu, std, d_policy = save_traj_dict(args.env_id, test_env, agent, device)
+    # if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
+    #     test_env = gym.wrappers.ClipAction(test_env)
+    # if args.normalize_obs:
+    #     test_env = gym.wrappers.NormalizeObservation(test_env)
+    #     test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
+    # mu, std, d_policy = save_traj_dict(args.env_id, test_env, agent, device)
 
-    if args.env_id == "MoveP-v0":
-        import imageio
-        images = []
-        for filename in os.listdir(f"runs/{run_name}"):
-            if '.png' in filename:
-                images.append(imageio.imread(f"runs/{run_name}/{filename}"))
-        imageio.mimsave(f"runs/{run_name}/airl_training.gif", images)
+    # if args.env_id == "MoveP-v0":
+    #     import imageio
+    #     images = []
+    #     for filename in os.listdir(f"runs/{run_name}"):
+    #         if '.png' in filename:
+    #             images.append(imageio.imread(f"runs/{run_name}/{filename}"))
+    #     imageio.mimsave(f"runs/{run_name}/airl_training.gif", images)
 
-        gen_demos = demos_gen_dict(demos['all'], args.batch_size)
-        for d in gen_demos:
-            plt.scatter(d['obs'][:,0], d['obs'][:,1], s=5, c='g', alpha=0.3)
-        plt.scatter(d_policy['obs'][:,0], d_policy['obs'][:,1], s=5, c='m', alpha=0.3)
-        plt.savefig(f"runs/{run_name}/airl_scatter.png")
+    #     gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+    #     for d in gen_demos:
+    #         plt.scatter(d['obs'][:,0], d['obs'][:,1], s=5, c='g', alpha=0.3)
+    #     plt.scatter(d_policy['obs'][:,0], d_policy['obs'][:,1], s=5, c='m', alpha=0.3)
+    #     plt.savefig(f"runs/{run_name}/airl_scatter.png")
 
     # save df for easier parsing
     if args.total_timesteps > 0:    

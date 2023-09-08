@@ -1,6 +1,7 @@
 import sys
 import os
-import gym
+import gymnasium as gym
+#import gym
 import numpy as np
 from huggingface_sb3 import load_from_hub
 from stable_baselines3 import PPO, SAC, TD3, DQN
@@ -25,14 +26,15 @@ def save_expert_traj(env_name, env, model, nr_trajectories=10, min_total_rew=100
 
     cnt = 0
     while cnt < nr_trajectories:
-        ob = env.reset()
+        ob = env.reset()[0]
         done = False
         total_reward = 0
         episode_traj = []
 
         while not done:
             ac, _states = model.predict(ob)
-            next_ob, reward, done, _ = env.step(ac)
+            next_ob, reward, term, trunc, _ = env.step(ac)
+            done = term or trunc
             ob = next_ob
             total_reward += reward
             if env_name == 'Ant-v3':
@@ -63,7 +65,7 @@ def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_re
 
     cnt = 0
     while cnt < nr_trajectories:
-        ob = env.reset()
+        ob = env.reset()[0]
         done = False
         total_reward = 0
         episode_obs = []
@@ -73,7 +75,9 @@ def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_re
 
         while not done:
             ac, _states = model.predict(ob)
-            next_ob, reward, done, _ = env.step(ac)
+            next_ob, reward, term, trunc, _ = env.step(ac)
+            done = term or trunc
+            
             ob = next_ob
             total_reward += reward
             episode_obs.append(ob)

@@ -41,7 +41,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from irl.swil import SwilReward, SWILDiscriminator
 from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
-                    demos_gen_dict, MujocoTestWrapper, save_traj_dict
+                    demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -55,6 +55,8 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--logging_interval", type=int, default=128,
         help="logging interval")
+    parser.add_argument("--eval_interval", type=int, default=8192,
+        help="evaluation interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -118,15 +120,18 @@ def parse_args():
     parser.add_argument("--agent_nonlin", type=str, default="tanh",
         help="nonlinearity type")
     # SWIL specific 
-    parser.add_argument("--n_proj", type=int, default=100, help="number of projections for SWIL")
+    parser.add_argument("--n_proj", type=int, default=1, help="number of projections for SWIL")
     parser.add_argument("--poly_degree", type=int, default=4, help="degree of polynomial for SWIL")
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
     parser.add_argument("--swil_rew", type=str, default='repl_loss', help="mean or replacement")
     parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
-    parser.add_argument("--swil_loss", default='maxgsw', type=str, required=False, help="loss_type:")
+    parser.add_argument("--swil_loss", default='surr_loss', type=str, required=False, help="loss_type:")
     parser.add_argument("--gsw_df", default='nn', type=str, required=False, help="Radon transform defining function: nn/poly/linear/circular")
     parser.add_argument('--measurable_space', default='sxa', type=str, 
         required=False, help='measurable space (s, sxs, sxa)')
+    parser.add_argument('--vb_coeff', default=1e-4, type=float, required=False, help='ae loss coeff')
+    parser.add_argument("--swil_vb", type=int, default=0,
+        help="variational bottleneck dimension")
 
     parser.add_argument("--proj_layer", default=False, required=False, action='store_true', 
                                         help="use nn instead of mean of projections")
@@ -577,7 +582,16 @@ if __name__ == "__main__":
 
                             if args.irm_coeff > 0:
                                 writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
+                            if args.swil_vb > 0:
+                                writer.add_scalar(
+                                    'irl/swil_vib_loss', loss_dict['ib_loss'], global_step)
 
+            #  evaluate at regular intervals and save
+            if global_step % args.eval_interval == 0:
+                mu, std, d = evaluate_model(args, agent, device)
+                print(f"Evaluation at {global_step}: {mu}, {std}")
+                writer.add_scalar('eval/mu', mu, global_step)
+                writer.add_scalar('eval/std', std, global_step)
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             if global_step % args.logging_interval == 0:
@@ -596,41 +610,47 @@ if __name__ == "__main__":
             break
 
     envs.close()
-    writer.close()
 
     ## save model
     torch.save(agent.state_dict(), f"runs/{run_name}/agent.pt")
     torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
 
+    mu, std, d = evaluate_model(args, agent, device)
+    writer.add_scalar('eval/mu', mu, args.total_timesteps)
+    writer.add_scalar('eval/std', std, args.total_timesteps)
+
+    writer.close()
+
+
     ## if movep, save scatter plot
-    if args.env_id == "MoveP-v0":
-        test_env = gym.make(args.env_id)
-    else:
-        ## test model and save trajectories
-        #test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
-        test_env = gym.make(args.env_id)
+    # if args.env_id == "MoveP-v0":
+    #     test_env = gym.make(args.env_id)
+    # else:
+    #     ## test model and save trajectories
+    #     #test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
+    #     test_env = gym.make(args.env_id)
 
 
-    if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
-        test_env = gym.wrappers.ClipAction(test_env)
-    if args.normalize_obs:
-        test_env = gym.wrappers.NormalizeObservation(test_env)
-        test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
-    mu, std, d_policy = save_traj_dict(args, args.env_id, test_env, agent, device)
+    # if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
+    #     test_env = gym.wrappers.ClipAction(test_env)
+    # if args.normalize_obs:
+    #     test_env = gym.wrappers.NormalizeObservation(test_env)
+    #     test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
+    # mu, std, d_policy = save_traj_dict(args, args.env_id, test_env, agent, device)
 
-    if args.env_id == "MoveP-v0":
-        import imageio
-        images = []
-        for filename in os.listdir(f"runs/{run_name}"):
-            if '.png' in filename:
-                images.append(imageio.imread(f"runs/{run_name}/{filename}"))
-        imageio.mimsave(f"runs/{run_name}/swil_training.gif", images)
-        # test policy
-        gen_demos = demos_gen_dict(demos['all'], args.batch_size)
-        for d in gen_demos:
-            plt.scatter(d['obs'][:,0], d['obs'][:,1], s=5, c='g', alpha=0.3)
-        plt.scatter(d_policy['obs'][:,0], d_policy['obs'][:,1], s=5, c='m', alpha=0.3)
-        plt.savefig(f"runs/{run_name}/swil_scatter_final.png")
+    # if args.env_id == "MoveP-v0":
+    #     import imageio
+    #     images = []
+    #     for filename in os.listdir(f"runs/{run_name}"):
+    #         if '.png' in filename:
+    #             images.append(imageio.imread(f"runs/{run_name}/{filename}"))
+    #     imageio.mimsave(f"runs/{run_name}/swil_training.gif", images)
+    #     # test policy
+    #     gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+    #     for d in gen_demos:
+    #         plt.scatter(d['obs'][:,0], d['obs'][:,1], s=5, c='g', alpha=0.3)
+    #     plt.scatter(d_policy['obs'][:,0], d_policy['obs'][:,1], s=5, c='m', alpha=0.3)
+    #     plt.savefig(f"runs/{run_name}/swil_scatter_final.png")
 
     # save df for easier parsing
     if args.total_timesteps > 0:    

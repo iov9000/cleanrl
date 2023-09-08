@@ -45,7 +45,7 @@ gym.envs.register(
 
 from irl.gail import GailReward, GAILDiscriminator
 from irl.utils import load_hf_demos, load_lap_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
-                   demos_gen_dict, MujocoTestWrapper, save_traj_dict
+                   demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -58,6 +58,8 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--logging_interval", type=int, default=128,
         help="logging interval")
+    parser.add_argument("--eval_interval", type=int, default=2048,
+        help="evaluation interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -121,6 +123,8 @@ def parse_args():
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
+    parser.add_argument("--demo_eps", type=float, default=0.0,
+        help="if > 0, load perturbed demos")    
     parser.add_argument("--n_demos", type=int, default=10,
         help="number of demos to use")
     parser.add_argument('--enhance_barys', default=0, required=False, 
@@ -314,11 +318,11 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-
     if args.env_id == 'Lap-v0':
         demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
     else:
-        demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
+        demos = load_hf_demos(args.env_id, args.demo_dir,
+                              n_demos=args.n_demos, perturb=args.demo_eps)
 
     test_env = gym.make(args.env_id)
 
@@ -568,8 +572,14 @@ if __name__ == "__main__":
                 print("SPS:", int(global_step / (time.time() - start_time)))
             writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
+        #  evaluate at regular intervals and save
+        if global_step % args.eval_interval == 0:
+            mu, std, d = evaluate_model(args, agent, device)
+            print(f"Evaluation at {global_step}: {mu}, {std}")
+            writer.add_scalar('eval/mu', mu, global_step)
+            writer.add_scalar('eval/std', std, global_step)
+
     envs.close()
-    writer.close()
 
     print("Total IRL steps:", irl_count)
 
@@ -577,35 +587,41 @@ if __name__ == "__main__":
     torch.save(agent.state_dict(), f"runs/{run_name}/agent.pt")
     torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
 
+    mu, std, d = evaluate_model(args, agent, device)
+    writer.add_scalar('eval/mu', mu, args.total_timesteps)
+    writer.add_scalar('eval/std', std, args.total_timesteps)
+
+    writer.close()
+
     ## test model and save trajectories
     ## if movep, save scatter plot
-    if args.env_id == "MoveP-v0":
-        test_env = gym.make(args.env_id)
-    else:
-        ## test model and save trajectories
-        test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
+    # if args.env_id == "MoveP-v0":
+    #     test_env = gym.make(args.env_id)
+    # else:
+    #     ## test model and save trajectories
+    #     test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
 
-    if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
-        test_env = gym.wrappers.ClipAction(test_env)
-    if args.normalize_obs:
-        test_env = gym.wrappers.NormalizeObservation(test_env)
-        test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
-    mu, std, d_policy = save_traj_dict(args.env_id, test_env, agent, device)
+    # if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
+    #     test_env = gym.wrappers.ClipAction(test_env)
+    # if args.normalize_obs:
+    #     test_env = gym.wrappers.NormalizeObservation(test_env)
+    #     test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
+    # mu, std, d_policy = save_traj_dict(args.env_id, test_env, agent, device)
 
-    if args.env_id == "MoveP-v0":
-        # convert all pngs to gif
-        import imageio
-        images = []
-        for filename in os.listdir(f"runs/{run_name}"):
-            if '.png' in filename:
-                images.append(imageio.imread(f"runs/{run_name}/{filename}"))
-        imageio.mimsave(f"runs/{run_name}/gail_training.gif", images)
+    # if args.env_id == "MoveP-v0":
+    #     # convert all pngs to gif
+    #     import imageio
+    #     images = []
+    #     for filename in os.listdir(f"runs/{run_name}"):
+    #         if '.png' in filename:
+    #             images.append(imageio.imread(f"runs/{run_name}/{filename}"))
+    #     imageio.mimsave(f"runs/{run_name}/gail_training.gif", images)
 
-        gen_demos = demos_gen_dict(demos['all'], args.batch_size)
-        for d in gen_demos:
-            plt.scatter(d['obs'][:,0], d['obs'][:,1], s=5, c='g', alpha=0.3)
-        plt.scatter(d_policy['obs'][:,0], d_policy['obs'][:,1], s=5, c='m', alpha=0.3)
-        plt.savefig(f"runs/{run_name}/gail_scatter.png")
+    #     gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+    #     for d in gen_demos:
+    #         plt.scatter(d['obs'][:,0], d['obs'][:,1], s=5, c='g', alpha=0.3)
+    #     plt.scatter(d_policy['obs'][:,0], d_policy['obs'][:,1], s=5, c='m', alpha=0.3)
+    #     plt.savefig(f"runs/{run_name}/gail_scatter.png")
 
     # save df for easier parsing
     if args.total_timesteps > 0:    
