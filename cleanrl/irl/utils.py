@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 
 from typing import Optional
 
-def load_hf_demos(env_name, folder=None, n_demos=10, bary_enhance=False, perturb=0.0):
+def load_hf_demos(env_name, folder=None, n_demos=10, bary_enhance=False, perturb=0.0, subsample=1):
     if folder is None:
         folder = "demos"
     expert_demos = {}
@@ -23,6 +23,10 @@ def load_hf_demos(env_name, folder=None, n_demos=10, bary_enhance=False, perturb
     try:
         #expert_demos['all'] = np.load(os.path.join(folder, f"demo_hf_{env_name}_{n_demos}.npy"))
         expert_demos['all'] = pickle.load(open(os.path.join(folder, fname), 'rb'))
+        expert_demos['all']['obs'] = expert_demos['all']['obs'][::subsample]
+        expert_demos['all']['acs'] = expert_demos['all']['acs'][::subsample]
+        expert_demos['all']['rew'] = expert_demos['all']['rew'][::subsample]
+        expert_demos['all']['done'] = expert_demos['all']['done'][::subsample]
     except:
         print("Generate demos from HuggingFace Hub first")
         assert False

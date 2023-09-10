@@ -21,14 +21,20 @@ import pickle
 
 
 class MujocoTestWrapper(gym.Wrapper):
-    def __init__(self, env, eps0=0.0, epsdyn=0.0):
+    def __init__(self, env, eps0=0.0, epsdyn=0.0, params=[]):
         self.env = env
         self.eps0 = eps0
         self.epsdyn = epsdyn
-        
-        self.mass = np.array(self.env.model.body_mass)
+        print(dir(self.env.model))
+        self.default_params = {}
+        # save default simulation parameters
+        for p in params:
+            self.default_params[p] = np.array(getattr(self.env.model, p))
+              
         self.perturb_init(eps0)
-        self.perturb_mass(epsdyn)
+        for p in params:
+            self.perturb_parameter(p)
+
         super().__init__(env=self.env)
 
     def perturb_init(self, eps):
@@ -42,19 +48,23 @@ class MujocoTestWrapper(gym.Wrapper):
         self.init_qpos = tuple(self.init_qpos)
         self.init_qvel = tuple(self.init_qvel)
 
-    def perturb_mass(self, eps):
-        mass = np.array(self.env.model.body_mass)
-        mass_mod = mass + np.random.randn(*mass.shape)*eps
+    def perturb_parameter(self, parameter='body_mass'):
+        param = np.array(getattr(self.env.model, parameter))
+        param_mod = param + np.random.randn(*param.shape)*self.epsdyn
 
-        self.env.model.body_mass[:] = mass_mod
+        print(f">> Perturbed parameter {parameter}, default: {self.default_params[parameter]}, changed: {param_mod}")
+        # assign new value
+        getattr(self.env.model, parameter)[:] = param_mod
 
-    def reset(self):
+    def reset(self, seed=1, options=None):
         o = self.env.reset()[0]
         # reset mass to default value otherwise accum.
-        self.env.model.body_mass[:] = self.mass
+        for k,v in self.default_params.items():
+            getattr(self.env.model, k)[:] = v
 
         self.perturb_init(self.eps0)
-        self.perturb_mass(self.epsdyn)
+        for k,v in self.default_params.items():
+            self.perturb_parameter(k)
 
         return o, {}
 
@@ -91,7 +101,7 @@ def save_expert_traj(env_name, env, model, nr_trajectories=10, min_total_rew=100
             episode_traj.append(stacked_vec)
             num_steps += 1
 
-        print("episode:", cnt, "reward:", total_reward)
+        print("** episode:", cnt, "reward:", total_reward)
         if total_reward > min_total_rew:
             cnt += 1
             expert_traj.extend(episode_traj)
@@ -134,7 +144,7 @@ def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_re
 
             num_steps += 1
 
-        print("episode:", cnt, "reward:", total_reward)
+        print("** episode:", cnt, "reward:", total_reward)
         if total_reward > min_total_rew:
             cnt += 1
             expert_obs.extend(episode_obs)
@@ -162,6 +172,8 @@ if __name__ == '__main__':
     parser.add_argument("--eps0", default=0.0, type=float, required=False, help="initial state perturbation")
     parser.add_argument("--epsdyn", default=0.0, type=float,
                         required=False, help="dynamics perturbation")
+    parser.add_argument("--perturb_parameter", default='body_mass', type=str,
+                        required=False, help="specify which sim parameter to perturb")
     parser.add_argument('--record_video', default=False, required=False, 
         action='store_true', help='record video')
 
@@ -193,10 +205,12 @@ if __name__ == '__main__':
     elif args.algo == 'tqc':
         model = TQC.load(checkpoint, custom_objects=custom_objects)
 
-
-    env = MujocoTestWrapper(gym.make(args.env_name), args.eps0, args.epsdyn)
+    env = MujocoTestWrapper(
+        gym.make(args.env_name, render_mode='rgb_array'), args.eps0, args.epsdyn, [args.perturb_parameter])
     if args.record_video:
-        env = gym.wrappers.RecordVideo(env, f"demo/test_video_{args.env_name}_{args.algo}_{args.eps0}")
+        env = gym.wrappers.RecordVideo(env, 
+            f"demo_vids/test_video_{args.env_name}_{args.algo}_initnoise_{args.eps0}__{args.perturb_parameter}_{args.epsdyn}",
+            episode_trigger = lambda x: x % 1 == 0)
     save_expert_traj_dict(args.env_name, env, model, args.nr_traj, args.min_rew, args.eps0, args.epsdyn)
 
 
