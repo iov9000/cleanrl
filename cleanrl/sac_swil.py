@@ -117,6 +117,8 @@ def parse_args():
     parser.add_argument("--linear_proj", default=False, required=False, action='store_true', 
                                         help="linear projection only")
     parser.add_argument("--swil_ae", default=False, required=False, action='store_true', help="use autoencoder")
+    parser.add_argument("--i_c", type=float, default=0.1, help="degree of polynomial for SWIL")
+    parser.add_argument("--min_beta", type=int, default=1.0, help="degree of polynomial for SWIL")
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
 

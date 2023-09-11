@@ -144,8 +144,8 @@ class SWILDiscriminator(nn.Module):
         self.reward_type = opt.swil_reward_type
         self.is_atari = 'atari' in self.opt.exp_name
         self.swil_vb = opt.swil_vb
-        self.i_c = 0.1
-        self.beta = torch.tensor(1.0, dtype=torch.float)
+        self.i_c = opt.i_c
+        self.beta = torch.tensor(opt.min_beta, dtype=torch.float)
         self.alpha_beta = opt.vb_coeff
 
         if opt.disc_nonlin == 'relu':
