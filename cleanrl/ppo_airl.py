@@ -47,6 +47,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
+    parser.add_argument("--exp_id", type=str, default='',
+        help="the id of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
     parser.add_argument("--logging_interval", type=int, default=128,
