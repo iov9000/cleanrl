@@ -529,7 +529,7 @@ class MujocoTestWrapper(gym.Wrapper):
         return o, r, d, i
 
 
-def evaluate_model(args, actor, device):
+def evaluate_model(args, actor, device, deterministic=True):
     test_env = gym.make(args.env_id)
     if args.clip_action:
         test_env = gym.wrappers.ClipAction(test_env)
@@ -543,7 +543,8 @@ def evaluate_model(args, actor, device):
 
     return mu, std, d
 
-def save_traj_dict(opt, env_name, env, model, device, nr_trajectories=10, min_total_rew=-1e6):
+def save_traj_dict(opt, env_name, env, model, device, 
+                    nr_trajectories=10, min_total_rew=-1e6, deterministic=True):
     num_steps = 0
     expert_obs = []
     expert_acs = []
@@ -567,7 +568,8 @@ def save_traj_dict(opt, env_name, env, model, device, nr_trajectories=10, min_to
         while not done:
             with torch.no_grad():
                 if 'ppo' in opt.exp_name:
-                    action, logprob, _, value = model.get_action_and_value(torch.Tensor(ob).to(device).unsqueeze(0))
+                    action, logprob, _, value = model.get_action_and_value(torch.Tensor(ob).to(device).unsqueeze(0), 
+                                                                            eval=deterministic)
                 else:
                     action, _, _ = model.get_action(torch.Tensor(ob).to(device).unsqueeze(0))
 

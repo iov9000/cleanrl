@@ -18,6 +18,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.normal import Normal
+from torch.distributions.categorical import Categorical
+
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.vail import VailReward, VAILDiscriminator
@@ -191,14 +193,32 @@ class Agent(nn.Module):
     def get_value(self, x):
         return self.critic(x)
 
-    def get_action_and_value(self, x, action=None):
+    def get_action_and_value_c(self, x, action=None, eval=False):
         action_mean = self.actor_mean(x)
         action_logstd = self.actor_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+
+        if eval:
+            return action_mean, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+        else:
+            return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+
+    def get_action_and_value_d(self, x, action=None, eval=False):
+        logits = self.actor_mean(x)
+        probs = Categorical(logits=logits)
+        if action is None:
+            action = probs.sample()
+
+        return action, probs.log_prob(action), probs.entropy(), self.critic(x)
+
+    def get_action_and_value(self, x, action=None, eval=False):
+        if self.discrete:
+            return self.get_action_and_value_d(x, action, eval)
+        else:
+            return self.get_action_and_value_c(x, action, eval)
 
 
 if __name__ == "__main__":
@@ -449,10 +469,11 @@ if __name__ == "__main__":
             writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     envs.close()
-    writer.close()
 
     torch.save(agent.state_dict(), f"runs/{run_name}/agent.pt")
     torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
+
+    writer.close()
 
     # save df for easier parsing
     ea = read_tb_file(f"runs/{run_name}")

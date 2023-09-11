@@ -156,7 +156,7 @@ def parse_args():
         action='store_true', help='verbose output')
     parser.add_argument("--disc_nonlin", type=str, default="tanh",
         help="divergence type")
-    parser.add_argument('--normalize_irl_rewards', default=True, 
+    parser.add_argument('--normalize_irl_rewards', default=False, 
         action='store_true', required=False, help='normalize irl rewards')  
         
     args = parser.parse_args()
@@ -243,27 +243,32 @@ class Agent(nn.Module):
     def get_value(self, x):
         return self.critic(x)
 
-    def get_action_and_value_c(self, x, action=None):
+    def get_action_and_value_c(self, x, action=None, eval=False):
         action_mean = self.actor_mean(x)
         action_logstd = self.actor_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
-    def get_action_and_value_d(self, x, action=None):
+        if eval:
+            return action_mean, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+        else:
+            return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+
+    def get_action_and_value_d(self, x, action=None, eval=False):
         logits = self.actor_mean(x)
         probs = Categorical(logits=logits)
         if action is None:
             action = probs.sample()
+
         return action, probs.log_prob(action), probs.entropy(), self.critic(x)
 
-    def get_action_and_value(self, x, action=None):
+    def get_action_and_value(self, x, action=None, eval=False):
         if self.discrete:
-            return self.get_action_and_value_d(x, action)
+            return self.get_action_and_value_d(x, action, eval)
         else:
-            return self.get_action_and_value_c(x, action)
+            return self.get_action_and_value_c(x, action, eval)
 
 
 
