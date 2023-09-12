@@ -19,7 +19,7 @@ if __name__ == '__main__':
     # algos = ['ppo', 'sac']
     # algos = ['ppo', 'sac']
     algos = ['ppo']
-    disc_types = ['gail', 'airl']
+    disc_types = ['gail', 'airl', 'wail', 'swil']
     # irm_coeffs = [0.0, 0.1, 1.0, 10.0, 100.0]
     # n_projs = [1,5,20,50]
     # n_projs = [1,20,100]
@@ -32,7 +32,7 @@ if __name__ == '__main__':
     # lins = ['--use_spectral_norm', '--use_weight_norm', '']
     # lins = ['--use_spectral_norm', '']
     # lins = ['--use_spectral_norm', '']
-    lins = ['', '--use_spectral_norm', '--lip_coeff=1.0', '--lip_coeff=10.0', '--irm_coeff=0.1', '--irm_coeff=1.0', '--irm_coeff=10.0']
+    lins = ['', '--use_spectral_norm', '--lip_coeff=1.0', '--lip_coeff=10.0', '--irm_coeff=50.0', '--irm_coeff=100.0', '--irm_coeff=1000.0']
     # lins = ['']
     # lins = ['--use_weight_norm --linear_proj']
     # usenobs = ['--use_next_obs', '', '--use_next_obs --use_dones']
@@ -48,8 +48,8 @@ if __name__ == '__main__':
     # n_demos = [1,4,10,25]
     n_demos = [10]
     # n_envs = [1,8,16]
-    # ent_coeffs = [0.01]
-    ent_coeffs = [0.0, 0.01]
+    ent_coeffs = [0.0]
+    # ent_coeffs = [0.0, 0.01]
     # disc_nonlins = ['tanh', 'prelu', 'relu']
     # disc_nonlins = ['tanh', 'leakyrelu']
     disc_nonlins = ['tanh']
@@ -80,7 +80,7 @@ if __name__ == '__main__':
                                                     f"--time={args.time}:00:00 --wrap ")
                                         euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
                                         # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
-                                        exp_cmd = (f"python {algo}_{disc}.py --n_demos={n_demo} --ent-coef={ec} {lin} --disc_nonlin={d_nl} --verbose --seed={seed} {ua} --env-id {env_name}")
+                                        exp_cmd = (f"python {algo}_{disc}.py --exp_id={args.exp_id} --total-timesteps 3000000 --n_demos={n_demo} --ent-coef={ec} {lin} --disc_nonlin={d_nl} --verbose --seed={seed} {ua} --env-id {env_name}")
                                         cluster_cmd = euler_slurm + exp_cmd 
                                         print("Running command: ", cluster_cmd)
                                         # subprocess.run(cluster_cmd, shell=True)
