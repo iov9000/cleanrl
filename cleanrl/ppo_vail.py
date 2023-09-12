@@ -146,7 +146,7 @@ def parse_args():
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
     def thunk():
-        env = gym.make(env_id)
+        env = gym.make(env_id, render_mode='rgb_array')
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:

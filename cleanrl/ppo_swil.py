@@ -134,12 +134,14 @@ def parse_args():
     parser.add_argument('--vb_coeff', default=1e-4, type=float, required=False, help='ae loss coeff')
     parser.add_argument("--swil_vb", type=int, default=0,
         help="variational bottleneck dimension")
-
+    parser.add_argument("--i_c", type=float, default=0.1, help="degree of polynomial for SWIL")
+    parser.add_argument("--min_beta", type=int, default=1.0, help="degree of polynomial for SWIL")
     parser.add_argument("--proj_layer", default=False, required=False, action='store_true', 
                                         help="use nn instead of mean of projections")
     parser.add_argument("--linear_proj", default=False, required=False, action='store_true', 
                                         help="linear projection only")
     parser.add_argument("--swil_ae", default=False, required=False, action='store_true', help="use autoencoder")
+    ## /SWIL
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
 
@@ -206,7 +208,7 @@ def parse_args():
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
     def thunk():
-        env = gym.make(env_id)
+        env = gym.make(env_id, render_mode='rgb_array')
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if opt.time_aware:
             env = gym.wrappers.TimeAwareObservation(env)

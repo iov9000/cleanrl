@@ -146,7 +146,7 @@ def parse_args():
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, agent, disc):
     def thunk():
-        env = gym.make(env_id)
+        env = gym.make(env_id, render_mode='rgb_array')
         if opt.use_absorb_wrapper:  # DAC
             env = AbsorbAfterDoneWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
