@@ -92,6 +92,8 @@ def parse_args():
         help="expert demo folder")
     parser.add_argument('--enhance_demos', default=False, required=False, 
         action='store_true', help='enhance demos using W2 barycenters')
+    parser.add_argument("--subsample", type=int, default=1,
+        help="number of demos to use")
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
@@ -228,7 +230,7 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    demos = load_hf_demos(args.env_id, args.demo_dir)['all']
+    demos = load_hf_demos(args, n_demos=args.n_demos)['all']
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)

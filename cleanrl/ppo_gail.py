@@ -331,7 +331,7 @@ if __name__ == "__main__":
     if args.env_id == 'Lap-v0':
         demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
     else:
-        demos = load_hf_demos(args)
+        demos = load_hf_demos(args, args.n_demos, args.demo_eps)
 
     test_env = gym.make(args.env_id)
 

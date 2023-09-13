@@ -12,11 +12,9 @@ import matplotlib.pyplot as plt
 
 from typing import Optional
 
-def load_hf_demos(args, bary_enhance=False):
+def load_hf_demos(args, n_demos, perturb=0.0, bary_enhance=False):
     folder = args.demo_dir
     env_name = args.env_id
-    n_demos = args.n_demos
-    perturb = args.demo_eps
     subsample = args.subsample
     if folder is None:
         folder = "demos"
