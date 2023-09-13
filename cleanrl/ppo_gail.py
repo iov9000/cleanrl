@@ -60,7 +60,7 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--logging_interval", type=int, default=128,
         help="logging interval")
-    parser.add_argument("--eval_interval", type=int, default=2048,
+    parser.add_argument("--eval_interval", type=int, default=8192,
         help="evaluation interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
@@ -172,7 +172,8 @@ def parse_args():
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
 
-    parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
+    parser.add_argument("--test_eps", type=float, default=0.0, help="test perturbation eps")
+    parser.add_argument("--perturbation_parameters", type=str, nargs='+', default='', help="which env parameter to perturb")
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
 
@@ -581,7 +582,7 @@ if __name__ == "__main__":
 
         #  evaluate at regular intervals and save
         if global_step % args.eval_interval == 0:
-            mu, std, d = evaluate_model(args, agent, device)
+            mu, std, d = evaluate_model(args, agent, device, wrap_mujoco=args.test_eps>0)
             print(f"Evaluation at {global_step}: {mu}, {std}")
             writer.add_scalar('eval/mu', mu, global_step)
             writer.add_scalar('eval/std', std, global_step)
@@ -594,7 +595,8 @@ if __name__ == "__main__":
     torch.save(agent.state_dict(), f"runs/{run_name}/agent.pt")
     torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
 
-    mu, std, d = evaluate_model(args, agent, device)
+    mu, std, d = evaluate_model(
+        args, agent, device, wrap_mujoco=args.test_eps > 0)
     writer.add_scalar('eval/mu', mu, args.total_timesteps)
     writer.add_scalar('eval/std', std, args.total_timesteps)
 

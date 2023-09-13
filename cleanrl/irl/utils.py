@@ -193,7 +193,7 @@ def demos_gen_dict(data, batch_size, shuffle=False):
                'rew': data['rew'][mb_inds],
                'done': data['done'][mb_inds]}
 
-def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
+def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy, compute_lprobs=False):
     if opt.use_sb_ppo:
         ac_sample = env.action_space.sample()
     else:
@@ -253,9 +253,9 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
     N = expert_obs.shape[0]
     T = 1000
 
-    policy_traj = np.empty((N, T, obs.shape[-1]), dtype=np.float32)
-    a_buffer = np.empty((N, T-1, ac_shape), dtype=np.float32)
-    expert_traj = np.empty((N, T, obs.shape[-1]), dtype=np.float32)
+    #policy_traj = np.empty((N, T, obs.shape[-1]), dtype=np.float32)
+    #a_buffer = np.empty((N, T-1, ac_shape), dtype=np.float32)
+    #expert_traj = np.empty((N, T, obs.shape[-1]), dtype=np.float32)
 
     # convert to torch tensors
     obs_t = torch.from_numpy(obs).type(torch.get_default_dtype())
@@ -263,56 +263,55 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
     expert_obs_t = torch.from_numpy(expert_obs).type(torch.get_default_dtype())
     expert_acs_t = torch.from_numpy(expert_acs).type(torch.get_default_dtype())
 
-
     # policy_ob_ac = np.concatenate([obs, acs], 1)
     # eval lprobs conditioned on obs, acs
 
     #print(expert_obs_t.shape, expert_acs_t.shape, obs_t.shape, acs_t.shape)
 
-    with torch.no_grad():
-
-        if torch.cuda.is_available():
-            if opt.on_policy:
-                if opt.use_sb_ppo:
-                    _, _, expert_lprobs_t = policy.policy.forward(expert_obs_t.cuda())
-                    _, _, policy_lprobs_t = policy.policy.forward(obs_t.cuda())
+    # only necessary for AIRL
+    if compute_lprobs: 
+        with torch.no_grad():
+            if torch.cuda.is_available():
+                if opt.on_policy:
+                    if opt.use_sb_ppo:
+                        _, _, expert_lprobs_t = policy.policy.forward(expert_obs_t.cuda())
+                        _, _, policy_lprobs_t = policy.policy.forward(obs_t.cuda())
+                    else:
+                        _, expert_lprobs_t, _, _ = policy.get_action_and_value(expert_obs_t.cuda(), expert_acs_t.cuda())
+                        _, policy_lprobs_t, _, _ = policy.get_action_and_value(obs_t.cuda(), acs_t.cuda())
                 else:
-                    _, expert_lprobs_t, _, _ = policy.get_action_and_value(expert_obs_t.cuda(), expert_acs_t.cuda())
-                    _, policy_lprobs_t, _, _ = policy.get_action_and_value(obs_t.cuda(), acs_t.cuda())
+                    _, expert_lprobs_t, _ = policy.get_action(expert_obs_t.cuda())
+                    _, policy_lprobs_t, _ = policy.get_action(obs_t.cuda())
             else:
-                _, expert_lprobs_t, _ = policy.get_action(expert_obs_t.cuda())
-                _, policy_lprobs_t, _ = policy.get_action(obs_t.cuda())
-        else:
-            if opt.on_policy:
-                if opt.use_sb_ppo:
-                    _, _, expert_lprobs_t = policy.policy.forward(expert_obs_t)
-                    _, _, policy_lprobs_t = policy.policy.forward(obs_t)
+                if opt.on_policy:
+                    if opt.use_sb_ppo:
+                        _, _, expert_lprobs_t = policy.policy.forward(expert_obs_t)
+                        _, _, policy_lprobs_t = policy.policy.forward(obs_t)
+                    else:
+                        _, expert_lprobs_t, _, _ = policy.get_action_and_value(expert_obs_t, expert_acs_t)
+                        _, policy_lprobs_t, _, _ = policy.get_action_and_value(obs_t, acs_t)
                 else:
-                    _, expert_lprobs_t, _, _ = policy.get_action_and_value(expert_obs_t, expert_acs_t)
-                    _, policy_lprobs_t, _, _ = policy.get_action_and_value(obs_t, acs_t)
-            else:
-                _, expert_lprobs_t, _ = policy.get_action(expert_obs_t)
-                _, policy_lprobs_t, _ = policy.get_action(obs_t)
+                    _, expert_lprobs_t, _ = policy.get_action(expert_obs_t)
+                    _, policy_lprobs_t, _ = policy.get_action(obs_t)
+    else:
+        policy_lprobs_t = torch.zeros_like(acs_t)
+        expert_lprobs_t = torch.zeros_like(expert_acs_t)
 
-    all_obs = np.concatenate([expert_obs, obs], axis=0)
-    all_next_obs = np.concatenate([expert_obs_next, obs_next], axis=0)
-    all_acs = np.concatenate([expert_acs, acs], axis=0)
-    lprobs = np.concatenate([expert_lprobs_t.cpu().numpy(), policy_lprobs_t.cpu().numpy()], axis=0)
-    all_dones = np.concatenate([expert_dones, dones], axis=0)
+    expert_obs_next_t = torch.from_numpy(
+        expert_obs_next).type(torch.get_default_dtype())
+    expert_dones_t = torch.from_numpy(
+        expert_dones).type(torch.get_default_dtype())
 
-    expert_obs_t = torch.from_numpy(expert_obs).type(torch.get_default_dtype())
-    expert_acs_t = torch.from_numpy(expert_acs).type(torch.get_default_dtype())
-    expert_obs_next_t = torch.from_numpy(expert_obs_next).type(torch.get_default_dtype())
-    expert_dones_t = torch.from_numpy(expert_dones).type(torch.get_default_dtype())
-    policy_obs_t = torch.from_numpy(obs).type(torch.get_default_dtype())
-    policy_acs_t = torch.from_numpy(acs).type(torch.get_default_dtype())
+    policy_obs_t = obs_t
+    policy_acs_t = acs_t
     policy_obs_next_t = torch.from_numpy(obs_next).type(torch.get_default_dtype())
     policy_dones_t = torch.from_numpy(dones).type(torch.get_default_dtype())
-    all_obs_t = torch.from_numpy(all_obs).type(torch.get_default_dtype())
-    all_obs_next_t = torch.from_numpy(all_next_obs).type(torch.get_default_dtype())
-    all_acs_t = torch.from_numpy(all_acs).type(torch.get_default_dtype())
-    all_lprobs_t = torch.from_numpy(lprobs).type(torch.get_default_dtype())
-    all_dones_t = torch.from_numpy(all_dones).type(torch.get_default_dtype())
+    all_obs_t = torch.cat([expert_obs_t, obs_t], axis=0)
+    all_obs_next_t = torch.cat([expert_obs_next_t, policy_obs_next_t], axis=0)
+    all_acs_t = torch.cat([expert_acs_t, acs_t], axis=0)
+    all_lprobs_t = torch.cat([expert_lprobs_t, policy_lprobs_t]).type(
+        torch.get_default_dtype())
+    all_dones_t = torch.cat([expert_dones_t, policy_dones_t], axis=0)
 
     if torch.cuda.is_available():
         expert_obs_t = expert_obs_t.cuda()
@@ -325,7 +324,6 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy):
         policy_acs_t = policy_acs_t.cuda()
         policy_lprobs_t = policy_lprobs_t.cuda()
         policy_dones_t = policy_dones_t.cuda()
-
         all_obs_next_t = all_obs_next_t.cuda()
         all_obs_t = all_obs_t.cuda()
         all_acs_t = all_acs_t.cuda()
@@ -501,36 +499,68 @@ class AntCFWrapper(gym.Wrapper):
         o, r, d, i = self.env.step(action)
         return o[:27], r, d, i
 
-class MujocoTestWrapper(gym.Wrapper):
-    def __init__(self, env, eps=0.1):
-        self.env = env
-        self.eps = eps
 
-        self.perturb(eps)     
+class MujocoTestWrapper(gym.Wrapper):
+    def __init__(self, env, eps0=0.0, epsdyn=0.0, params=[]):
+        self.env = env
+        self.eps0 = eps0
+        self.epsdyn = epsdyn
+        self.default_params = {}
+        # save default simulation parameters
+        for p in params:
+            self.default_params[p] = np.array(getattr(self.env.model, p))
+
+        self.perturb_init(eps0)
+        for p in params:
+            self.perturb_parameter(p)
+
         super().__init__(env=self.env)
 
-    def perturb(self, eps):
+    def perturb_init(self, eps):
+        #  perturb initial position and velocity
         self.init_qpos = np.array(self.init_qpos)
         self.init_qvel = np.array(self.init_qvel)
-        self.init_qpos = self.init_qpos * eps*np.random.randn(*self.init_qpos.shape)
-        self.init_qvel = self.init_qvel * eps*np.random.randn(*self.init_qvel.shape)
+        self.init_qpos = self.init_qpos * eps * \
+            np.random.randn(*self.init_qpos.shape)
+        # self.init_qvel = self.init_qvel * eps * \
+        #    np.random.randn(*self.init_qvel.shape)
         self.init_qpos = tuple(self.init_qpos)
-        self.init_qvel = tuple(self.init_qvel)     
+        self.init_qvel = tuple(self.init_qvel)
 
-    def reset(self):
-        o = self.env.reset()
-        self.perturb(self.eps)     
+    def perturb_parameter(self, parameter='body_mass'):
+        param = np.array(getattr(self.env.model, parameter))
+        param_mod = param + np.random.randn(*param.shape)*self.epsdyn
 
-        return o
+        #print(
+        #    f">> Perturbed parameter {parameter}, default: {self.default_params[parameter]}, changed: {param_mod}")
+        # assign new value
+        getattr(self.env.model, parameter)[:] = param_mod
+
+    def reset(self, seed=1, options=None):
+        o = self.env.reset()[0]
+        # reset mass to default value otherwise accum.
+        for k, v in self.default_params.items():
+            getattr(self.env.model, k)[:] = v
+
+        self.perturb_init(self.eps0)
+        for k, v in self.default_params.items():
+            self.perturb_parameter(k)
+
+        return o, {}
 
     def step(self, action):
-        o, r, d, i = self.env.step(action)
-        o = o + self.eps*np.random.randn(*o.shape)
-        return o, r, d, i
+        o, r, t, tr, i = self.env.step(action)
+        d = t or tr
+        # o = o + self.eps*np.random.randn(*o.shape)
+        return o, r, t, tr, i
 
 
-def evaluate_model(args, actor, device, deterministic=True):
+def evaluate_model(args, actor, device, deterministic=True, wrap_mujoco=False):
     test_env = gym.make(args.env_id)
+    if wrap_mujoco:
+        test_env = MujocoTestWrapper(test_env, eps0=args.test_eps, 
+                                    epsdyn=args.test_eps, 
+                                    params=args.perturbation_parameters)
     if args.clip_action:
         test_env = gym.wrappers.ClipAction(test_env)
     if args.normalize_obs:

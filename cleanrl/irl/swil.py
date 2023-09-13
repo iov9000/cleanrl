@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import torch.autograd as autograd
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ExponentialLR
+import time
 
 from torch.nn.utils import spectral_norm, weight_norm
 from irl.utils import ResNetAIRLDisc, MiniGridCNN, AtariCNNBase, gaussian_kld
@@ -599,7 +600,7 @@ class SWILDiscriminator(nn.Module):
                                 policy_obs_next, policy_dones, noise=True)
             expert_out, _, e_mu, e_std = self.proj(exp_obs, exp_acs, 
                                 exp_obs_next, exp_dones, noise=True)
-
+            
             labels = torch.cat([torch.zeros(expert_out.size()),
                                 torch.ones(policy_out.size())])
 
@@ -612,7 +613,10 @@ class SWILDiscriminator(nn.Module):
 
             d_out = torch.cat([expert_out, policy_out])
             bce_loss = F.binary_cross_entropy_with_logits(d_out, labels)
-            irm_pen, _ = self.irm_penalty(d_out, labels)
+            if self.opt.irm_coeff > 0:
+                irm_pen, _ = self.irm_penalty(d_out, labels)
+            else:
+                irm_pen = 0
             #surr_loss = torch.sum(self.proj(self.policy_obs, self.policy_acs)) - torch.sum(self.proj(exp_obs,exp_acs)) 
             d_loss = bce_loss
         elif self.opt.swil_loss == 'approx_sw':

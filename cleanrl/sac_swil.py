@@ -142,6 +142,8 @@ def parse_args():
     parser.add_argument('--irl_batch_size', default=64, type=int, required=False, help='batch size for discriminator updates')
     parser.add_argument('--irl_init_epochs', default=1  , type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
+    parser.add_argument('--swil_period', default=1, type=float, required=False, help='number of discriminator updates')
+
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--gsw_coeff', default=1.0, type=float, required=False, help='ae loss coeff')
     parser.add_argument('--vb_coeff', default=1e-4, type=float, required=False, help='ae loss coeff')
@@ -398,6 +400,7 @@ if __name__ == "__main__":
 
             # ALGO LOGIC: training.
             if global_step > args.learning_starts:
+                ts0 = time.time()
                 data = rb.sample(args.batch_size)
                 with torch.no_grad():
                     next_state_actions, next_state_log_pi, _ = actor.get_action(data.next_observations)
@@ -467,38 +470,37 @@ if __name__ == "__main__":
                     n_irl_epochs = args.irl_epochs
                 init = False
 
-                for epoch in range(n_irl_epochs):            
-                    # GAIL Discriminator Update 
-                    gen_demos = demos_gen_dict(demos['all'], args.batch_size)
-                    for d in gen_demos:
-                        if len(d['obs']) < args.batch_size:
-                            obs_ = data.observations[:len(d['obs'])]
-                            actions_ = data.actions[:len(d['obs'])]
-                            dones_ = data.dones[:len(d['obs'])]
-                        else:
-                            obs_ = data.observations
-                            actions_ = data.actions
-                            dones_ = data.dones
-                        # GAIL Discriminator Update
-                        update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, actor)
+                if global_step % args.swil_period==0:
+                    for epoch in range(n_irl_epochs):            
+                        # GAIL Discriminator Update 
+                        gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+                        for d in gen_demos:
+                            if len(d['obs']) < args.batch_size:
+                                obs_ = data.observations[:len(d['obs'])]
+                                actions_ = data.actions[:len(d['obs'])]
+                                dones_ = data.dones[:len(d['obs'])]
+                            else:
+                                obs_ = data.observations
+                                actions_ = data.actions
+                                dones_ = data.dones
+                            # GAIL Discriminator Update
+                            update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, actor)
+                            loss_dict = disc.compute_loss(update_dict)
 
-                        loss_dict = disc.compute_loss(update_dict)
+                            loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + disc.beta * loss_dict['ib_loss'] 
+                            if args.irm_coeff > 1.0:
+                                loss /= args.irm_coeff
 
-                        loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + disc.beta * loss_dict['ib_loss'] 
-                        if args.irm_coeff > 1.0:
-                            loss /= args.irm_coeff
+                            disc.update(loss)
+                    
+                            if global_step % args.logging_interval == 0:
+                                writer.add_scalar('irl/swil_gsw_dist', loss_dict['d_loss'], global_step)
 
-                        disc.update(loss)
-                
-                        if global_step % args.logging_interval == 0:
-                            writer.add_scalar('irl/swil_gsw_dist', loss_dict['d_loss'], global_step)
+                                if args.irm_coeff > 0:
+                                    writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
+                                if args.swil_vb > 0:
+                                    writer.add_scalar('irl/swil_vib_loss', loss_dict['ib_loss'], global_step)
 
-                            if args.irm_coeff > 0:
-                                writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
-                            if args.swil_vb > 0:
-                                writer.add_scalar('irl/swil_vib_loss', loss_dict['ib_loss'], global_step)
-                
-                
                 # evaluate at regular intervals and save 
                 if global_step % args.eval_interval == 0:
                     mu, std, d = evaluate_model(args, actor, device)

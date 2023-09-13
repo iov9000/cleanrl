@@ -165,6 +165,8 @@ def parse_args():
     parser.add_argument('--irl_batch_size', default=64, type=int, required=False, help='batch size for discriminator updates')
     parser.add_argument('--irl_init_epochs', default=1  , type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
+    parser.add_argument('--swil_period', default=1, type=float, required=False, help='number of discriminator updates')
+
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--gsw_coeff', default=1.0, type=float, required=False, help='ae loss coeff')
     parser.add_argument('--recon_coeff', default=0.0, type=float, required=False, help='ae loss coeff')
@@ -385,7 +387,7 @@ if __name__ == "__main__":
     num_updates = args.total_timesteps // args.batch_size
 
     init = True # flag for IRL discriminator pretraining
-
+    cnt_on_policy_updates = 0
     for update in range(1, num_updates + 1):
         try:
             # Annealing the rate if instructed to do so.
@@ -456,6 +458,7 @@ if __name__ == "__main__":
             # Optimizing the policy and value network
             b_inds = np.arange(args.batch_size)
             clipfracs = []
+            cnt_on_policy_updates += 1
             for epoch in range(args.update_epochs):
                 np.random.shuffle(b_inds)
                 for start in range(0, args.batch_size, args.minibatch_size):
@@ -519,80 +522,79 @@ if __name__ == "__main__":
                 n_irl_epochs = args.irl_epochs
             init = False
 
-            print("policy done")
-
             # SWIL updates
-            if update % int(np.ceil(1/(n_irl_epochs+1))) == 0:
-                k = int(n_irl_epochs) if n_irl_epochs >=0 else 1
-                for epoch in tqdm(range(k)):            
-                    # GAIL Discriminator Update 
-                    gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=False)
-                    if args.env_id == "MoveP-v0":
-                        fig = plt.figure(figsize=(10,10))
-                    for d in gen_demos:
-                        if len(d['obs']) < args.batch_size:
-                            obs_ = obs[:len(d['obs'])]
-                            actions_ = actions[:len(d['obs'])]
-                            dones_ = dones[:len(d['obs'])]
-                        else:
-                            obs_ = obs
-                            actions_ = actions
-                            dones_ = dones
+            if cnt_on_policy_updates % args.swil_period == 0:
+                if update % int(np.ceil(1/(n_irl_epochs+1))) == 0:
+                    k = int(n_irl_epochs) if n_irl_epochs >=0 else 1
+                    for epoch in tqdm(range(k)):            
+                        # GAIL Discriminator Update 
+                        gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=False)
                         if args.env_id == "MoveP-v0":
-                            plt.scatter(10, 10, s=200, c='b', marker='o',alpha=1.0)
-                            plt.scatter(190, 190, s=200, c='r', marker='*', alpha=1.0)
-                            plt.scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
-                            plt.scatter(obs[:,:,0], obs[:,:,1], s=20, c='m', alpha=0.3, label='agent')
-                            plt.axis('equal')
-                            plt.tight_layout()
-                            f = plt.gca()
-                            f.axes.get_xaxis().set_ticks([])
-                            f.axes.get_yaxis().set_ticks([])
-                            f.axes.xaxis.set_ticklabels([])
-                            f.axes.yaxis.set_ticklabels([])
-                            #plt.legend()
-                            plt.savefig(f"runs/{run_name}/swil_scatter_{global_step}.png")
+                            fig = plt.figure(figsize=(10,10))
+                        for d in gen_demos:
+                            if len(d['obs']) < args.batch_size:
+                                obs_ = obs[:len(d['obs'])]
+                                actions_ = actions[:len(d['obs'])]
+                                dones_ = dones[:len(d['obs'])]
+                            else:
+                                obs_ = obs
+                                actions_ = actions
+                                dones_ = dones
+                            if args.env_id == "MoveP-v0":
+                                plt.scatter(10, 10, s=200, c='b', marker='o',alpha=1.0)
+                                plt.scatter(190, 190, s=200, c='r', marker='*', alpha=1.0)
+                                plt.scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
+                                plt.scatter(obs[:,:,0], obs[:,:,1], s=20, c='m', alpha=0.3, label='agent')
+                                plt.axis('equal')
+                                plt.tight_layout()
+                                f = plt.gca()
+                                f.axes.get_xaxis().set_ticks([])
+                                f.axes.get_yaxis().set_ticks([])
+                                f.axes.xaxis.set_ticklabels([])
+                                f.axes.yaxis.set_ticklabels([])
+                                #plt.legend()
+                                plt.savefig(f"runs/{run_name}/swil_scatter_{global_step}.png")
 
-                        update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
+                            update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
 
-                        loss_dict = disc.compute_loss(update_dict)
+                            loss_dict = disc.compute_loss(update_dict)
 
-                        loss = args.gsw_coeff*loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']\
-                            + args.lip_coeff * loss_dict['lip_penalty'] + args.recon_coeff*loss_dict['recon_loss']
-                        if args.irm_coeff > 1.0:
-                            loss /= args.irm_coeff
-                        
-                        if args.irl_epochs > 0:
-                            disc.update(loss)
-                    
-                        if global_step % args.logging_interval == 0:
-                            writer.add_scalar('irl/swil_d_loss', loss_dict['d_loss'], global_step)
-                            writer.add_scalar('irl/swil_ae_loss', loss_dict['recon_loss'], global_step)
-
-                            # calculate reference distance using OT package
-                            ref_dist = ot.sliced_wasserstein_distance(
-                                update_dict['policy_obs'], update_dict['expert_obs'], n_projections=100, seed=args.seed)
-                            writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
+                            loss = args.gsw_coeff*loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']\
+                                + args.lip_coeff * loss_dict['lip_penalty'] + args.recon_coeff*loss_dict['recon_loss']
+                            if args.irm_coeff > 1.0:
+                                loss /= args.irm_coeff
                             
-                            #trajectory_weights = 1./len(update_dict['policy_obs']) * np.ones(len(update_dict['policy_obs']))
-                            #expert_weights = 1./len(update_dict['expert_obs']) * np.ones(len(update_dict['expert_obs']))
+                            if args.irl_epochs > 0:
+                                disc.update(loss)
+                        
+                            if global_step % args.logging_interval == 0:
+                                writer.add_scalar('irl/swil_d_loss', loss_dict['d_loss'], global_step)
+                                writer.add_scalar('irl/swil_ae_loss', loss_dict['recon_loss'], global_step)
 
-                            #cost_matrix = ot.dist(
-                            #    update_dict['policy_obs'], update_dict['expert_obs'], metric='euclidean')
+                                # calculate reference distance using OT package
+                                ref_dist = ot.sliced_wasserstein_distance(
+                                    update_dict['policy_obs'], update_dict['expert_obs'], n_projections=100, seed=args.seed)
+                                writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
+                                
+                                #trajectory_weights = 1./len(update_dict['policy_obs']) * np.ones(len(update_dict['policy_obs']))
+                                #expert_weights = 1./len(update_dict['expert_obs']) * np.ones(len(update_dict['expert_obs']))
 
-                            #w2_dist = ot.emd2(
-                            #    trajectory_weights, expert_weights, cost_matrix.numpy())
-                            #writer.add_scalar('irl/ref_w_dist', w2_dist, global_step)
+                                #cost_matrix = ot.dist(
+                                #    update_dict['policy_obs'], update_dict['expert_obs'], metric='euclidean')
 
-                            #pyfor i,p in enumerate(disc.parameters()):
-                            #    writer.add_scalar(f"irl/{i}_norm", torch.norm(p.data), global_step)
-                            #    writer.add_scalar(f"irl/{i}_gradnorm", torch.norm(p.grad), global_step)
+                                #w2_dist = ot.emd2(
+                                #    trajectory_weights, expert_weights, cost_matrix.numpy())
+                                #writer.add_scalar('irl/ref_w_dist', w2_dist, global_step)
 
-                            if args.irm_coeff > 0:
-                                writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
-                            if args.swil_vb > 0:
-                                writer.add_scalar(
-                                    'irl/swil_vib_loss', loss_dict['ib_loss'], global_step)
+                                #pyfor i,p in enumerate(disc.parameters()):
+                                #    writer.add_scalar(f"irl/{i}_norm", torch.norm(p.data), global_step)
+                                #    writer.add_scalar(f"irl/{i}_gradnorm", torch.norm(p.grad), global_step)
+
+                                if args.irm_coeff > 0:
+                                    writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
+                                if args.swil_vb > 0:
+                                    writer.add_scalar(
+                                        'irl/swil_vib_loss', loss_dict['ib_loss'], global_step)
 
             #  evaluate at regular intervals and save
             if global_step % args.eval_interval == 0:
