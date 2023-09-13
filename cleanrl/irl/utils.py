@@ -12,11 +12,15 @@ import matplotlib.pyplot as plt
 
 from typing import Optional
 
-def load_hf_demos(env_name, folder=None, n_demos=10, bary_enhance=False, perturb=0.0, subsample=1):
+def load_hf_demos(args, n_demos, perturb=0.0, bary_enhance=False):
+    folder = args.demo_dir
+    env_name = args.env_id
+    subsample = args.subsample
     if folder is None:
         folder = "demos"
     expert_demos = {}
     if perturb > 0:
+        fname = f"demo_hf_{env_name}_{n_demos}_{args.perturbation_parameters}_{0.2}_{args.demo_eps}.pkl" 
         fname = f"demo_hf_{env_name}_{n_demos}_{perturb}.pkl"
     else:
         fname = f"demo_hf_{env_name}_{n_demos}.pkl"
@@ -510,6 +514,7 @@ class MujocoTestWrapper(gym.Wrapper):
         for p in params:
             self.default_params[p] = np.array(getattr(self.env.model, p))
 
+        #print(dir(self.env.model))
         self.perturb_init(eps0)
         for p in params:
             self.perturb_parameter(p)

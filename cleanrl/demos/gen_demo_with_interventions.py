@@ -110,8 +110,9 @@ def save_expert_traj(env_name, env, model, nr_trajectories=10, min_total_rew=100
     expert_traj = np.stack(expert_traj)
     np.save(filename, expert_traj)
 
-def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_rew=100, eps=0.0, epsdyn=0.0):
+def save_expert_traj_dict(args, env, model, nr_trajectories=10, min_total_rew=100, eps=0.0, epsdyn=0.0):
     num_steps = 0
+    env_name = args.env_name
     expert_obs = []
     expert_acs = []
     expert_rew = []
@@ -152,7 +153,7 @@ def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_re
             expert_rew.extend(episode_rew)
             expert_done.extend(episode_done)
 
-    filename = f"demo_hf_{env_name}_{nr_trajectories}_{eps}.pkl" 
+    filename = f"demo_hf_{env_name}_{nr_trajectories}_{args.perturb_parameter}_{eps}_{epsdyn}.pkl" 
     expert_obs = np.stack(expert_obs)
     expert_acs = np.stack(expert_acs)
     expert_rew = np.stack(expert_rew)
@@ -211,7 +212,7 @@ if __name__ == '__main__':
         env = gym.wrappers.RecordVideo(env, 
             f"demo_vids/test_video_{args.env_name}_{args.algo}_initnoise_{args.eps0}__{args.perturb_parameter}_{args.epsdyn}",
             episode_trigger = lambda x: x % 1 == 0)
-    save_expert_traj_dict(args.env_name, env, model, args.nr_traj, args.min_rew, args.eps0, args.epsdyn)
+    save_expert_traj_dict(args, env, model, args.nr_traj, args.min_rew, args.eps0, args.epsdyn)
 
 
     

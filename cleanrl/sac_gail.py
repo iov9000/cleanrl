@@ -97,6 +97,8 @@ def parse_args():
         help="if > 0, load perturbed demos")    
     parser.add_argument("--n_demos", type=int, default=10,
         help="number of demos to use")
+    parser.add_argument("--subsample", type=int, default=1,
+        help="number of demos to use")
     parser.add_argument('--enhance_demos', default=False, required=False, 
         action='store_true', help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
@@ -270,7 +272,7 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos, perturb=args.demo_eps)
+    demos = load_hf_demos(args, n_demos=args.n_demos, perturb = args.demo_eps)
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
