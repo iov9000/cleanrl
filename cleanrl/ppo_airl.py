@@ -53,7 +53,7 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--logging_interval", type=int, default=128,
         help="logging interval")
-    parser.add_argument("--eval_interval", type=int, default=2048,
+    parser.add_argument("--eval_interval", type=int, default=8192,
         help="evaluation interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
