@@ -127,6 +127,8 @@ def parse_args():
         help="expert demo folder")
     parser.add_argument("--demo_eps", type=float, default=0.0,
         help="if > 0, load perturbed demos")    
+    parser.add_argument("--subsample", type=int, default=1,
+        help="number of demos to use")
     parser.add_argument("--n_demos", type=int, default=10,
         help="number of demos to use")
     parser.add_argument('--enhance_barys', default=0, required=False, 
@@ -329,8 +331,7 @@ if __name__ == "__main__":
     if args.env_id == 'Lap-v0':
         demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
     else:
-        demos = load_hf_demos(args.env_id, args.demo_dir,
-                              n_demos=args.n_demos, perturb=args.demo_eps)
+        demos = load_hf_demos(args)
 
     test_env = gym.make(args.env_id)
 

@@ -316,8 +316,8 @@ if __name__ == "__main__":
     if args.env_id == 'Lap-v0':
         demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
     else:
-        demos = load_hf_demos(args.env_id, args.demo_dir,
-                              n_demos=args.n_demos, perturb=args.demo_eps)
+        demos = load_hf_demos(args)
+        
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
