@@ -136,6 +136,8 @@ def parse_args():
         action='store_true', help='use bias in disc arch')
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
+    parser.add_argument("--test_eps", type=float, default=0.0, help="test perturbation eps")
+    parser.add_argument("--perturbation_parameters", type=str, nargs='+', default='', help="which env parameter to perturb")
 
     args = parser.parse_args()
     # fmt: on
@@ -446,8 +448,8 @@ if __name__ == "__main__":
                         loss_dict = disc.compute_loss(update_dict)
 
                         loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + args.lip_coeff * loss_dict['lip_penalty']
-                        if args.irm_coeff > 1.0:
-                            loss /= args.irm_coeff
+                        #if args.irm_coeff > 1.0:
+                        #    loss /= args.irm_coeff
 
                         disc.update(loss)
                 
