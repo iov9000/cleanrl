@@ -21,7 +21,6 @@ def load_hf_demos(args, n_demos, perturb=0.0, bary_enhance=False):
     expert_demos = {}
     if perturb > 0:
         fname = f"demo_hf_{env_name}_{n_demos}_{args.perturbation_parameters}_{0.2}_{args.demo_eps}.pkl" 
-        fname = f"demo_hf_{env_name}_{n_demos}_{perturb}.pkl"
     else:
         fname = f"demo_hf_{env_name}_{n_demos}.pkl"
     try:
