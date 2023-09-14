@@ -173,7 +173,7 @@ if __name__ == '__main__':
     parser.add_argument("--eps0", default=0.0, type=float, required=False, help="initial state perturbation")
     parser.add_argument("--epsdyn", default=0.0, type=float,
                         required=False, help="dynamics perturbation")
-    parser.add_argument("--perturb_parameter", default='body_mass', type=str,
+    parser.add_argument("--perturb_parameter", default='body_mass', type=str, nargs='+',
                         required=False, help="specify which sim parameter to perturb")
     parser.add_argument('--record_video', default=False, required=False, 
         action='store_true', help='record video')
