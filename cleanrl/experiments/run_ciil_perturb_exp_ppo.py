@@ -32,7 +32,7 @@ if __name__ == '__main__':
     # lins = ['--use_spectral_norm', '--use_weight_norm', '']
     # lins = ['--use_spectral_norm', '']
     # lins = ['--use_spectral_norm', '']
-    lins = ['', '--use_spectral_norm', '--lip_coeff=1.0', '--lip_coeff=10.0', '--irm_coeff=100.0']
+    lins = ['--irm_coeff=1.0', '--irm_coeff=10.0', '--irm_coeff=1000.0']
     pparams = ['body_mass', 'jnt_stiffness']
     # lins = ['']
     # lins = ['--use_weight_norm --linear_proj']
