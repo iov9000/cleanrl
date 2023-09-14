@@ -140,7 +140,7 @@ def parse_args():
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
     parser.add_argument("--irm_loss_type", type=str, default="sym", help="e1,e0,p0,p1,sym")
-    parser.add_argument('--anneal_irm', default=False, required=True, 
+    parser.add_argument('--anneal_irm', default=False, required=False, 
         action='store_true', help='use bias in disc arch')
     parser.add_argument('--drop_batch', default=False, required=False, 
         action='store_true', help='drop batch in irl epochs')   
