@@ -140,7 +140,8 @@ def parse_args():
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
     parser.add_argument("--irm_loss_type", type=str, default="sym", help="e1,e0,p0,p1,sym")
-
+    parser.add_argument('--anneal_irm', default=False, required=True, 
+        action='store_true', help='use bias in disc arch')
     parser.add_argument('--drop_batch', default=False, required=False, 
         action='store_true', help='drop batch in irl epochs')   
     
@@ -374,6 +375,7 @@ if __name__ == "__main__":
 
     # logging variables
     irl_count = 0
+    annealed_irm_coeff = args.irm_coeff
 
     for update in range(1, num_updates + 1):
         # Annealing the rate if instructed to do so.
@@ -507,6 +509,12 @@ if __name__ == "__main__":
         init = False
 
         irl_count += 1
+
+        if args.anneal_irm:
+            frac = 1.0 - (update - 1.0) / num_updates
+            coeffnow = frac * args.irm_coeff
+            annealed_irm_coeff = coeffnow
+
         for epoch in range(n_irl_epochs):            
             # GAIL Discriminator Update
             # gen_demos = demos_gen(demos['all'], args.batch_size)
@@ -550,9 +558,11 @@ if __name__ == "__main__":
 
                 loss_dict = disc.compute_loss(update_dict)
 
-                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + args.lip_coeff * loss_dict['lip_penalty']
-                if args.irm_coeff > 1.0:
-                    loss /= args.irm_coeff
+                loss = loss_dict['d_loss'] + annealed_irm_coeff * \
+                    loss_dict['grad_penalty'] + \
+                    args.lip_coeff * loss_dict['lip_penalty']
+                #if args.irm_coeff > 1.0:
+                #    loss /= args.irm_coeff
 
                 disc.update(loss)
             
