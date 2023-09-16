@@ -536,8 +536,8 @@ if __name__ == "__main__":
     writer.close()
 
     # save df for easier parsing
-    ea = read_tb_file(f"runs/{run_name}")
-    df = create_df_from_ea(ea, "charts/episodic_return")
-    df.to_pickle(f"results_pkl/results_{run_name}_df.pkl")
+    # ea = read_tb_file(f"runs/{run_name}")
+    # df = create_df_from_ea(ea, "charts/episodic_return")
+    # df.to_pickle(f"results_pkl/results_{run_name}_df.pkl")
 
 
