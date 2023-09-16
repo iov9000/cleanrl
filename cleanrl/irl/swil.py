@@ -254,7 +254,7 @@ class SWILDiscriminator(nn.Module):
                                                     opt.use_weight_norm, 
                                                     opt.use_spectral_norm), nonlin)
 
-        # init sorted arrays
+        # init sorted atom queues
         self.pi_atoms_sorted = None
         self.exp_atoms_sorted = None
 
@@ -608,6 +608,7 @@ class SWILDiscriminator(nn.Module):
             pi_slices_sorted = torch.sort(policy_out, dim=0)[0]
             exp_slices_sorted = torch.sort(expert_out, dim=0)[0]
 
+            # save to FIFO queue of sorted atoms
             self.pi_atoms_sorted = pi_slices_sorted
             self.exp_atoms_sorted = exp_slices_sorted
 
