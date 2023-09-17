@@ -38,7 +38,7 @@ if __name__ == '__main__':
     # lins = ['--use_weight_norm --linear_proj']
     # usenobs = ['--use_next_obs', '', '--use_next_obs --use_dones']
     # usenobs = ['--use_next_obs', '', '--use_next_obs --use_dones']
-    usenobs = ['']
+    usenobs = ['', '--use_actions']
     # envs = ['Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3']
     # envs = ['HalfCheetah-v3']
     # use_acs = ['', '--use_actions']
