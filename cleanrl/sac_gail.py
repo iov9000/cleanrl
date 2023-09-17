@@ -57,7 +57,7 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=3000000,
+    parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--buffer-size", type=int, default=int(1e6),
         help="the replay memory buffer size")
@@ -114,6 +114,8 @@ def parse_args():
 
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
+    parser.add_argument('--disc_update_period', default=1, type=int, required=False, help='discriminator update period')
+
     parser.add_argument("--disc_nonlin", type=str, default="tanh", help="nonlinearity for discriminator")
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
@@ -425,38 +427,39 @@ if __name__ == "__main__":
                         writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
                         
                 # Optimize the discriminator
-                for epoch in range(args.irl_epochs):            
-                    # GAIL Discriminator Update
-                    gen_demos = demos_gen_dict(demos['all'], args.batch_size)
-                    for d in gen_demos:
-                        if len(d['obs']) < args.batch_size:
-                            if args.drop_batch:
-                                break
-                            else:
-                                obs_ = data.observations[:len(d['obs'])]
-                                actions_ = data.actions[:len(d['obs'])]
-                                dones_ = data.dones[:len(d['obs'])]
-                        else:
-                            obs_ = data.observations
-                            actions_ = data.actions
-                            dones_ = data.dones
-
+                if global_step % args.disc_update_period == 0:
+                    for epoch in range(args.irl_epochs):            
                         # GAIL Discriminator Update
-                        update_dict = prepare_batch_update_irl(envs, args, d, 
-                                            obs_, actions_, dones_, actor)
+                        gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+                        for d in gen_demos:
+                            if len(d['obs']) < args.batch_size:
+                                if args.drop_batch:
+                                    break
+                                else:
+                                    obs_ = data.observations[:len(d['obs'])]
+                                    actions_ = data.actions[:len(d['obs'])]
+                                    dones_ = data.dones[:len(d['obs'])]
+                            else:
+                                obs_ = data.observations
+                                actions_ = data.actions
+                                dones_ = data.dones
 
-                        loss_dict = disc.compute_loss(update_dict)
+                            # GAIL Discriminator Update
+                            update_dict = prepare_batch_update_irl(envs, args, d, 
+                                                obs_, actions_, dones_, actor)
 
-                        loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + args.lip_coeff * loss_dict['lip_penalty']
-                        #if args.irm_coeff > 1.0:
-                        #    loss /= args.irm_coeff
+                            loss_dict = disc.compute_loss(update_dict)
 
-                        disc.update(loss)
-                
-                        if global_step % args.logging_interval == 0:
-                            writer.add_scalar('irl/gail_bce_loss', loss_dict['d_loss'], global_step)
-                            if args.irm_coeff > 0:
-                                writer.add_scalar('irl/gail_irm_loss', loss_dict['grad_penalty'], global_step)
+                            loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + args.lip_coeff * loss_dict['lip_penalty']
+                            #if args.irm_coeff > 1.0:
+                            #    loss /= args.irm_coeff
+
+                            disc.update(loss)
+                    
+                            if global_step % args.logging_interval == 0:
+                                writer.add_scalar('irl/gail_bce_loss', loss_dict['d_loss'], global_step)
+                                if args.irm_coeff > 0:
+                                    writer.add_scalar('irl/gail_irm_loss', loss_dict['grad_penalty'], global_step)
 
                 #  evaluate at regular intervals and save
                 if global_step % args.eval_interval == 0:

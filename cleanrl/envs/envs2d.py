@@ -274,7 +274,7 @@ class MovePoint(Env):
 class MoveP(Env):
     metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
 
-    def __init__(self, waypoints=[(175,175)], size=200, random_init=False, goal_conditioning=True):
+    def __init__(self, waypoints=[(175, 175)], size=200, random_init=False, goal_conditioning=True, render_mode="rgb_array"):
         super(MoveP, self).__init__()
         
         self.goal_conditioning = goal_conditioning
@@ -307,9 +307,10 @@ class MoveP(Env):
         self.x_max = self.size
         self.random_init = random_init
         
-    def reset(self):
+    def reset(self, seed=1, options=None):
         # Flag that marks the termination of an episode
-        self.done = False
+        self.term = False
+        self.trunc = False
         # Reset the fuel consumed
         self.time = self.max_time
 
@@ -332,7 +333,7 @@ class MoveP(Env):
         
         self.needs_reset = False
         # return the observation
-        return state
+        return state, {}
     
     # TODO: expand to preferences as random process!
     def generate_random_targets(self):
@@ -393,7 +394,7 @@ class MoveP(Env):
             if self.curr_tgt == len(self.waypoints)-1:
                 # task solved
                 reward += 1000
-                self.done = True
+                self.term = True
             else:
                 # update target
                 reward += 500
@@ -404,15 +405,14 @@ class MoveP(Env):
         else:
             state = self.agent
 
-        
         # If out of fuel, end the episode.
         if self.time == 0:
-            self.done = True
+            self.trunc = True
             self.needs_reset = True
 
-        return state, reward, self.done, {}
+        return state, reward, self.term, self.trunc, {}
 
-    def render(self, mode = "human"):
+    def render(self, mode = "rgb_array"):
         assert mode in ["human", "rgb_array"], "Invalid mode, must be either \"human\" or \"rgb_array\""
         fig = plt.figure(figsize=(10,10))
         plt.scatter(self.agent[0], self.agent[1], c='m',alpha=0.2)
@@ -433,7 +433,7 @@ class MoveP(Env):
 class CMoveP(Env):
     metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
 
-    def __init__(self, waypoints=[(175,175)], size=200, random_init=False):
+    def __init__(self, waypoints=[(175,175)], size=200, random_init=False, render_mode="rgb_array"):
         super(CMoveP, self).__init__()
         
         # Define a 2-D observation space (R^4)
@@ -461,9 +461,11 @@ class CMoveP(Env):
         self.x_max = self.size
         self.random_init = random_init
         
-    def reset(self):
+    def reset(self, seed=1, options=None):
         # Flag that marks the termination of an episode
-        self.done = False
+        self.term = False
+        self.trunc = False
+
         # Reset the fuel consumed
         self.time = self.max_time
 
@@ -531,7 +533,7 @@ class CMoveP(Env):
                 # task solved
                 print("Task Solved")
                 reward += 1000
-                self.done = True
+                self.term = True
             else:
                 # update target
                 reward += 500
@@ -541,10 +543,10 @@ class CMoveP(Env):
         
         # If out of fuel, end the episode.
         if self.time == 0:
-            self.done = True
+            self.trunc = True
             self.needs_reset = True
 
-        return state, reward, self.done, {}
+        return state, reward, self.term, self.trunc, {}
 
     def render(self, mode = "rgb_array"):
         assert mode in ["human", "rgb_array"], "Invalid mode, must be either \"human\" or \"rgb_array\""

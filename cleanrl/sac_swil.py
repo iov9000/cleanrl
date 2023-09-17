@@ -119,6 +119,9 @@ def parse_args():
     parser.add_argument("--swil_ae", default=False, required=False, action='store_true', help="use autoencoder")
     parser.add_argument("--i_c", type=float, default=0.1, help="degree of polynomial for SWIL")
     parser.add_argument("--min_beta", type=int, default=1.0, help="degree of polynomial for SWIL")
+    parser.add_argument("--max_q_len", type=int, default=1, help="max number of projected atom sets in queue")
+    parser.add_argument("--max_swil_step", type=int, default=100000000, help="only update projections until some timestep")
+    parser.add_argument("--replace_atoms", default=False, required=False, action='store_true', help="actually replace atoms with policy samples")
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
 
@@ -472,7 +475,7 @@ if __name__ == "__main__":
                     n_irl_epochs = args.irl_epochs
                 init = False
 
-                if global_step % args.swil_period==0:
+                if global_step % args.swil_period == 0 and global_step < args.max_swil_step:
                     for epoch in range(n_irl_epochs):            
                         # GAIL Discriminator Update 
                         gen_demos = demos_gen_dict(demos['all'], args.batch_size)
