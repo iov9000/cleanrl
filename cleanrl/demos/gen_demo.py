@@ -9,6 +9,8 @@ from sb3_contrib import TQC
 from stable_baselines3.common.evaluation import evaluate_policy
 from itertools import count
 
+import argparse
+
 import pickle
 
 # module_path = os.path.abspath(os.path.join('..'))
@@ -105,33 +107,53 @@ def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_re
     pickle.dump(d, open(filename, 'wb'))
 
 if __name__ == '__main__':
-    env_name = sys.argv[1]
-    algo = sys.argv[2]
-    nr_traj = int(sys.argv[3])
-    min_total_rew = int(sys.argv[4])
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env_name", type=str, default="HalfCheetah-v3",
+                        help="the name of the environment")
+    parser.add_argument("--algo", type=str, default="HalfCheetah-v3",
+                        help="algorithm")
+    parser.add_argument("--nr_traj", default=0, type=int,
+                        required=False, help="nr of trajectories to save")
+    parser.add_argument("--min_rew", default=0, type=float,
+                        required=False, help="minimum cum. rew. to save traj.")
+    parser.add_argument("--eps0", default=0.0, type=float,
+                        required=False, help="initial state perturbation")
+    parser.add_argument("--epsdyn", default=0.0, type=float,
+                        required=False, help="dynamics perturbation")
+    parser.add_argument("--perturb_parameter", default='body_mass', type=str, nargs='+',
+                        required=False, help="specify which sim parameter to perturb")
+    parser.add_argument('--record_video', default=False, required=False,
+                        action='store_true', help='record video')
+    parser.add_argument('--normalize_obs', default=False,
+                        action='store_true', required=False, help='normalize obs')
+
+    args = parser.parse_args()
+
 
     checkpoint = load_from_hub(
-        repo_id=f"sb3/{algo}-{env_name}",
-        filename=f"{algo}-{env_name}.zip",
+        repo_id=f"sb3/{args.algo}-{args.env_name}",
+        filename=f"{args.algo}-{args.env_name}.zip",
     )
     custom_objects = {
       "learning_rate": 0.0,
       "lr_schedule": lambda _: 0.0,
       "clip_range": lambda _: 0.0,
     }
-    if algo == 'sac':
+    if args.algo == 'sac':
         model = SAC.load(checkpoint, custom_objects=custom_objects)
-    elif algo == 'ppo':
+    elif args.algo == 'ppo':
         model = PPO.load(checkpoint, custom_objects=custom_objects)
-    elif algo == 'dqn':
+    elif args.algo == 'dqn':
         model = DQN.load(checkpoint, custom_objects=custom_objects)
-    elif algo == 'td3':
+    elif args.algo == 'td3':
         model = TD3.load(checkpoint, custom_objects=custom_objects)
-    elif algo == 'tqc':
+    elif args.algo == 'tqc':
         model = TQC.load(checkpoint, custom_objects=custom_objects)
 
-    env = gym.make(env_name)
-    save_expert_traj_dict(env_name, env, model, nr_traj, min_total_rew)
+    env = gym.make(args.env_name)
+    if args.normalize_obs:
+        env = gym.wrappers.NormalizeObservation(env)
+    save_expert_traj_dict(args.env_name, env, model, args.nr_traj, args.min_rew)
 
 
     
