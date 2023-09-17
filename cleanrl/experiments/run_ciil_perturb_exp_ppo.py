@@ -32,13 +32,14 @@ if __name__ == '__main__':
     # lins = ['--use_spectral_norm', '--use_weight_norm', '']
     # lins = ['--use_spectral_norm', '']
     # lins = ['--use_spectral_norm', '']
-    lins = ['--irm_coeff=1.0', '--irm_coeff=10.0', '--irm_coeff=1000.0']
+    lins = ['--use_spectral_norm', '--irm_coeff=1.0', '--irm_coeff=10.0', '--irm_coeff=100.0', '--irm_coeff=1000.0']
     pparams = ['body_mass', 'jnt_stiffness']
     # lins = ['']
     # lins = ['--use_weight_norm --linear_proj']
     # usenobs = ['--use_next_obs', '', '--use_next_obs --use_dones']
     # usenobs = ['--use_next_obs', '', '--use_next_obs --use_dones']
-    usenobs = ['']
+    # usenobs = ['', '--anneal_irm']
+    usenobs = ['', '--normalize_obs', '--normalize_irl_rewards', '--normalize_obs --normalize_irl_rewards']
     # envs = ['Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3']
     # envs = ['HalfCheetah-v3']
     # use_acs = ['', '--use_actions']
@@ -50,6 +51,7 @@ if __name__ == '__main__':
     n_demos = [10]
     # n_envs = [1,8,16]
     eps_coeffs = [0.1]
+    agent_sizes = [128,256,512]
     # ent_coeffs = [0.0, 0.01]
     # disc_nonlins = ['tanh', 'prelu', 'relu']
     # disc_nonlins = ['tanh', 'leakyrelu']
@@ -67,27 +69,28 @@ if __name__ == '__main__':
         for lin in lins:
             for disc in disc_types:
                 for ua in usenobs:
-                    for n_demo in n_demos:
-                        # for d_nl in disc_nonlins:
-                        for pp in pparams:
-                            for eps in eps_coeffs:
-                                for algo in algos:
-                                    for env_name in envs:
-                                        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-                                        ua_rbl = ua.replace(" ", "")
-                                        lin_rbl = lin.replace(" ", "")
-                                        exp_id = (f"{ts}_{algo}_{disc}_{env_name}_seed_{seed}_{args.exp_id}__{ua_rbl}_{lin_rbl}")
-                                        euler_slurm = (f"sbatch --mem-per-cpu={MEM_PER_CPU} {gpu_string} " 
-                                                    f"-o {args.output_dir / exp_id} "
-                                                    f"--time={args.time}:00:00 --wrap ")
-                                        euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
-                                        # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
-                                        exp_cmd = (f"python {algo}_{disc}.py --exp_id={args.exp_id} "
-                                                  f"--n_demos={n_demo} {lin} --disc_nonlin=tanh "
-                                                  f"--verbose --seed={seed} {ua} --env-id {env_name} "
-                                                  f"--demo_eps=0.2 --test_eps {eps} --perturbation_parameters {pp}")
-                                        cluster_cmd = euler_slurm + exp_cmd 
-                                        print("Running command: ", cluster_cmd)
-                                        # subprocess.run(cluster_cmd, shell=True)
-                                        subprocess.check_output(args=euler_slurm.split() + [exp_cmd])
+                    for a_s in agent_sizes:
+                        for n_demo in n_demos:
+                            # for d_nl in disc_nonlins:
+                            for pp in pparams:
+                                for eps in eps_coeffs:
+                                    for algo in algos:
+                                        for env_name in envs:
+                                            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                                            ua_rbl = ua.replace(" ", "")
+                                            lin_rbl = lin.replace(" ", "")
+                                            exp_id = (f"{ts}_{algo}_{disc}_{env_name}_seed_{seed}_{args.exp_id}__{ua_rbl}_{lin_rbl}")
+                                            euler_slurm = (f"sbatch --mem-per-cpu={MEM_PER_CPU} {gpu_string} " 
+                                                        f"-o {args.output_dir / exp_id} "
+                                                        f"--time={args.time}:00:00 --wrap ")
+                                            euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
+                                            # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
+                                            exp_cmd = (f"python {algo}_{disc}.py --exp_id={args.exp_id} "
+                                                      f"--n_demos={n_demo} {lin} --disc_nonlin=tanh "
+                                                      f"--verbose --seed={seed} --agent_size={a_s} {ua} --env-id {env_name} "
+                                                      f"--demo_eps=0.2 --test_eps {eps} --perturbation_parameters {pp}")
+                                            cluster_cmd = euler_slurm + exp_cmd 
+                                            print("Running command: ", cluster_cmd)
+                                            # subprocess.run(cluster_cmd, shell=True)
+                                            subprocess.check_output(args=euler_slurm.split() + [exp_cmd])
 

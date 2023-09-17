@@ -166,7 +166,7 @@ def parse_args():
     parser.add_argument("--disc_nonlin", type=str, default="prelu",
         help="divergence type")
     parser.add_argument('--normalize_irl_rewards', default=True, 
-        action='store_true', required=False, help='normalize irl rewards') 
+        action='store_false', required=False, help='normalize irl rewards') 
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
 
