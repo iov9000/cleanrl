@@ -606,8 +606,8 @@ def save_traj_dict(opt, env_name, env, model, device,
                                                                             eval=deterministic)
                 else:
                     action, _, mean = model.get_action(torch.Tensor(ob).to(device).unsqueeze(0))
-                    if deterministic:
-                        action = mean
+                    #if deterministic:
+                    #    action = mean
 
             action = action.squeeze().detach().cpu().numpy()
             next_ob, reward, term, trunc, _ = env.step(action)
