@@ -383,6 +383,8 @@ class SWILDiscriminator(nn.Module):
                 idx[idx==0] +=1
                 idx[idx==n] -=1
 
+                # calculate weight based on position in queue
+                weight = len(self.pi_atoms_sorted)
 
                 # TODO: what if target CDF is left or mixed?
                 for j,i in enumerate(idx):
