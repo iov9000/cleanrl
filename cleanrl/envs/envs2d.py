@@ -490,7 +490,7 @@ class CMoveP(Env):
 
         self.fig = plt.figure(figsize=(10,10))
         # return the observation
-        return state
+        return state, {}
     
     # TODO: expand to preferences as random process!
     def generate_random_targets(self):

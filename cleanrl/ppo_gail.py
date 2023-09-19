@@ -47,6 +47,8 @@ from irl.gail import GailReward, GAILDiscriminator
 from irl.utils import load_hf_demos, load_lap_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
                    demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model
 
+import ot
+
 from parse_tb import read_tb_file, create_df_from_ea
 
 def parse_args():
@@ -380,6 +382,8 @@ if __name__ == "__main__":
     irl_count = 0
     annealed_irm_coeff = args.irm_coeff
 
+    sw_dists = []
+
     for update in range(1, num_updates + 1):
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
@@ -527,7 +531,7 @@ if __name__ == "__main__":
 
             gen_demos = demos_gen_dict(demos['all'], args.batch_size)
             if args.env_id == "MoveP-v0":
-                fig = plt.figure(figsize=(10,10))
+                fig, ax = plt.subplots(1,2,figsize=(10,5))
             for d in gen_demos:
                 if len(d['obs']) < args.batch_size:
                     if args.drop_batch:
@@ -541,19 +545,33 @@ if __name__ == "__main__":
                     actions_ = actions
                     dones_ = dones
 
+
                 if args.env_id == "MoveP-v0":
                     # TODO: add second plot with W2-distance / KL-div / JS-div
-                    plt.scatter(10, 10, s=200, c='b', marker='o',alpha=1.0)
-                    plt.scatter(190, 190, s=200, c='r', marker='*', alpha=1.0)
-                    plt.scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
-                    plt.scatter(obs_[:,:,0], obs_[:,:,1], s=20, c='m', alpha=0.3, label='agent')
-                    plt.axis('equal')
+                    ax[0].scatter(10, 10, s=200, c='b', marker='o',alpha=1.0)
+                    ax[0].scatter(190, 190, s=200, c='r', marker='*', alpha=1.0)
+                    ax[0].scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
+                    ax[0].scatter(obs_[:,:,0], obs_[:,:,1], s=20, c='m', alpha=0.3, label='agent')
+                    ax[0].axis('equal')
+
                     plt.tight_layout()
                     f = plt.gca()
-                    f.axes.get_xaxis().set_ticks([])
-                    f.axes.get_yaxis().set_ticks([])
-                    f.axes.xaxis.set_ticklabels([])
-                    f.axes.yaxis.set_ticklabels([])
+                    
+                    ## calculate batch SW distance # asymmetric?
+                    dist = ot.sliced_wasserstein_distance(
+                        obs_.squeeze().detach().cpu().numpy(),d['obs'],n_projections=100, seed=args.seed)
+
+                    # turn off ticks for scatter plot
+                    ax[0].get_xaxis().set_ticks([])
+                    ax[0].get_yaxis().set_ticks([])
+                    ax[0].xaxis.set_ticklabels([])
+                    ax[0].yaxis.set_ticklabels([])
+
+                    sw_dists.append(dist)
+
+                    ax[1].plot(sw_dists)
+                    ax[1].axis('equal')
+                    ax[1].set_title('SW2 dist, 10 proj.')
                     #plt.legend()
                     plt.savefig(f"runs/{run_name}/gail_scatter_{global_step}.png")
 
@@ -596,7 +614,11 @@ if __name__ == "__main__":
 
         #  evaluate at regular intervals and save
         if global_step % args.eval_interval == 0:
-            mu, std, d = evaluate_model(args, agent, device, wrap_mujoco=args.test_eps>0)
+            if isinstance(test_env.action_space, gym.spaces.Box):
+                det = True
+            else:
+                det = False
+            mu, std, d = evaluate_model(args, agent, device, deterministic = det, wrap_mujoco=args.test_eps > 0)
             print(f"Evaluation at {global_step}: {mu}, {std}")
             writer.add_scalar('eval/mu', mu, global_step)
             writer.add_scalar('eval/std', std, global_step)
@@ -647,8 +669,8 @@ if __name__ == "__main__":
     #     plt.savefig(f"runs/{run_name}/gail_scatter.png")
 
     # save df for easier parsing
-    if args.total_timesteps > 0:    
-        ea = read_tb_file(f"runs/{run_name}")
-        df = create_df_from_ea(ea, "charts/episodic_return")
-        df["mu"] = mu
-        df.to_pickle(f"results_{run_name}_df.pkl")
+    # if args.total_timesteps > 0:    
+    #     ea = read_tb_file(f"runs/{run_name}")
+    #     df = create_df_from_ea(ea, "charts/episodic_return")
+    #     df["mu"] = mu
+    #     df.to_pickle(f"results_{run_name}_df.pkl")

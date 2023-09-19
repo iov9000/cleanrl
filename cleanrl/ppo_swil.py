@@ -141,6 +141,10 @@ def parse_args():
     parser.add_argument("--linear_proj", default=False, required=False, action='store_true', 
                                         help="linear projection only")
     parser.add_argument("--swil_ae", default=False, required=False, action='store_true', help="use autoencoder")
+    parser.add_argument('--swil_period', default=1, type=float, required=False, help='number of discriminator updates')
+    parser.add_argument("--max_q_len", type=int, default=1, help="max number of projected atom sets in queue")
+    parser.add_argument("--max_swil_step", type=int, default=100000000, help="only update projections until some timestep")
+    parser.add_argument("--replace_atoms", default=False, required=False, action='store_true', help="actually replace atoms with policy samples")
     ## /SWIL
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
@@ -167,7 +171,7 @@ def parse_args():
     parser.add_argument('--irl_batch_size', default=64, type=int, required=False, help='batch size for discriminator updates')
     parser.add_argument('--irl_init_epochs', default=1  , type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
-    parser.add_argument('--swil_period', default=1, type=float, required=False, help='number of discriminator updates')
+
 
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--gsw_coeff', default=1.0, type=float, required=False, help='ae loss coeff')
@@ -390,6 +394,7 @@ if __name__ == "__main__":
 
     init = True # flag for IRL discriminator pretraining
     cnt_on_policy_updates = 0
+    sw_dists = []
     for update in range(1, num_updates + 1):
         try:
             # Annealing the rate if instructed to do so.
@@ -525,14 +530,14 @@ if __name__ == "__main__":
             init = False
 
             # SWIL updates
-            if cnt_on_policy_updates % args.swil_period == 0:
+            if cnt_on_policy_updates % args.swil_period == 1:
                 if update % int(np.ceil(1/(n_irl_epochs+1))) == 0:
                     k = int(n_irl_epochs) if n_irl_epochs >=0 else 1
                     for epoch in tqdm(range(k)):            
                         # GAIL Discriminator Update 
                         gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=False)
-                        if args.env_id == "MoveP-v0":
-                            fig = plt.figure(figsize=(10,10))
+                        if "MoveP-v0" in args.env_id:
+                            fig, ax = plt.subplots(1,2,figsize=(10,5))
                         for d in gen_demos:
                             if len(d['obs']) < args.batch_size:
                                 obs_ = obs[:len(d['obs'])]
@@ -542,20 +547,33 @@ if __name__ == "__main__":
                                 obs_ = obs
                                 actions_ = actions
                                 dones_ = dones
-                            if args.env_id == "MoveP-v0":
-                                plt.scatter(10, 10, s=200, c='b', marker='o',alpha=1.0)
-                                plt.scatter(190, 190, s=200, c='r', marker='*', alpha=1.0)
-                                plt.scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
-                                plt.scatter(obs[:,:,0], obs[:,:,1], s=20, c='m', alpha=0.3, label='agent')
-                                plt.axis('equal')
+                            if "MoveP-v0" in args.env_id:
+                                ax[0].scatter(10, 10, s=200, c='b', marker='o',alpha=1.0)
+                                ax[0].scatter(190, 190, s=200, c='r', marker='*', alpha=1.0)
+                                ax[0].scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
+                                ax[0].scatter(obs[:,:,0], obs[:,:,1], s=20, c='m', alpha=0.3, label='agent')
+                                ax[0].axis('equal')
                                 plt.tight_layout()
                                 f = plt.gca()
-                                f.axes.get_xaxis().set_ticks([])
-                                f.axes.get_yaxis().set_ticks([])
-                                f.axes.xaxis.set_ticklabels([])
-                                f.axes.yaxis.set_ticklabels([])
-                                #plt.legend()
-                                plt.savefig(f"runs/{run_name}/swil_scatter_{global_step}.png")
+
+                                # calculate batch SW distance # asymmetric?
+                                dist = ot.sliced_wasserstein_distance(
+                                    obs_.squeeze().detach().cpu().numpy(), d['obs'], n_projections=100, seed=args.seed)
+
+                                # turn off ticks for scatter plot
+                                ax[0].get_xaxis().set_ticks([])
+                                ax[0].get_yaxis().set_ticks([])
+                                ax[0].xaxis.set_ticklabels([])
+                                ax[0].yaxis.set_ticklabels([])
+
+                                sw_dists.append(dist)
+
+                                ax[1].plot(sw_dists)
+                                ax[1].axis('equal')
+                                ax[1].set_title('SW2 dist, 10 proj.')
+                                # plt.legend()
+                                plt.savefig(
+                                    f"runs/{run_name}/swil_scatter_{global_step}.png")
 
                             update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
 

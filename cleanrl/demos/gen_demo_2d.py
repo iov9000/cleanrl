@@ -1,11 +1,12 @@
 import sys
 import os
+import argparse
 
 module_path = os.path.abspath(os.path.join('..'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 
-import gym
+import gymnasium as gym
 
 gym.envs.register(
      id='MoveP-v0',
@@ -36,31 +37,38 @@ import pickle
 #     sys.path.append(module_path)
 
 # from irl.utils import AntCFWrapper
-def train_expert(env, n_timesteps, fname, n_traj, model=None):
+def train_expert(env, algo, n_timesteps, fname, n_traj, model=None, min_total_rew=-50000):
 
-    ppo_kwargs = {
-        'learning_rate':0.0003, 
-        'n_steps': 2048, 
-        'batch_size': 64, 
-        'n_epochs': 3, 
-        'gamma': 0.99, 
-        'gae_lambda': 0.95, 
-        'clip_range': 0.2, 
-        'clip_range_vf':None, 
-        'ent_coef': 0.0, 
-        'vf_coef': 0.5, 
-        #'max_grad_norm':0.5
-    }
+    if algo == 'ppo':
+        ppo_kwargs = {
+            'learning_rate':0.0003, 
+            'n_steps': 2048, 
+            'batch_size': 64, 
+            'n_epochs': 3, 
+            'gamma': 0.99, 
+            'gae_lambda': 0.95, 
+            'clip_range': 0.2, 
+            'clip_range_vf':None, 
+            'ent_coef': 0.0, 
+            'vf_coef': 0.5, 
+            #'max_grad_norm':0.5
+        }
 
 
-    if model is None:
-        model = PPO('MlpPolicy', env, verbose=1, **ppo_kwargs)
-        model.learn(total_timesteps=n_timesteps)
-    else:
-        model = PPO.load(model)
+        if model is None:
+            model = PPO('MlpPolicy', env, verbose=1, **ppo_kwargs)
+            model.learn(total_timesteps=n_timesteps)
+        else:
+            model = PPO.load(model)
+    elif algo == 'sac':
+        if model is None:
+            model = SAC('MlpPolicy', env, verbose=1)
+            model.learn(total_timesteps=n_timesteps)
+        else:
+            model = SAC.load(model)
 
     model.save('model_' + fname + str(n_timesteps))
-    save_expert_traj_dict('CMoveP-v0', env, model, nr_trajectories=n_traj, min_total_rew=-50000)
+    save_expert_traj_dict('CMoveP-v0', env, model, nr_trajectories=n_traj, min_total_rew=min_total_rew)
     
     return model
 
@@ -76,7 +84,7 @@ def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_re
 
     cnt = 0
     while cnt < nr_trajectories:
-        ob = env.reset()
+        ob, _ = env.reset()
         done = False
         total_reward = 0
         episode_obs = []
@@ -86,7 +94,8 @@ def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_re
 
         while not done:
             ac, _states = model.predict(ob)
-            next_ob, reward, done, _ = env.step(ac)
+            next_ob, reward, term, trunc, _ = env.step(ac)
+            done = term or trunc
             ob = next_ob
             total_reward += reward
             episode_obs.append(ob)
@@ -114,14 +123,37 @@ def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_re
     pickle.dump(d, open(filename, 'wb'))
 
 if __name__ == '__main__':
-    env_name = sys.argv[1]
-    algo = sys.argv[2]
-    nr_traj = int(sys.argv[3])
-    min_total_rew = int(sys.argv[4])
-    model = sys.argv[5] 
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env_name", type=str, default="CMoveP-v0",
+                        help="the name of the environment")
+    parser.add_argument("--algo", type=str, default="ppo",
+                        help="algorithm")
+    parser.add_argument("--nr_traj", default=1, type=int,
+                        required=False, help="nr of trajectories to save")
+    parser.add_argument("--min_rew", default=0, type=float,
+                        required=False, help="minimum cum. rew. to save traj.")
+    parser.add_argument("--eps0", default=0.0, type=float,
+                        required=False, help="initial state perturbation")
+    parser.add_argument("--epsdyn", default=0.0, type=float,
+                        required=False, help="dynamics perturbation")
+    parser.add_argument("--perturb_parameter", default='body_mass', type=str, nargs='+',
+                        required=False, help="specify which sim parameter to perturb")
+    parser.add_argument('--record_video', default=False, required=False,
+                        action='store_true', help='record video')
+    parser.add_argument('--normalize_obs', default=False,
+                        action='store_true', required=False, help='normalize obs')
+    parser.add_argument("--n_timesteps", default=1000000, type=int,
+                        required=False, help="nr of timesteps to train")
+    parser.add_argument("--model", default=None, type=str,
+                        required=False, help="(optional) use pretrained model")
+    args = parser.parse_args()
 
-    env = gym.make(env_name, waypoints=[(175, 175)])
-    train_expert(env, n_timesteps=1000000, fname='mp', n_traj=nr_traj, model=model)
+    env = gym.make(args.env_name, waypoints=[(175, 175)])
+    train_expert(env, args.algo, n_timesteps=args.n_timesteps, 
+                                fname=args.env_name, 
+                                n_traj=args.nr_traj, 
+                                model=args.model,
+                                min_total_rew=args.min_rew)
 
 
     

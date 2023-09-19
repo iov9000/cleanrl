@@ -1,6 +1,7 @@
 import sys
 import os
 import gymnasium as gym
+import pybullet
 #import gym
 import numpy as np
 from huggingface_sb3 import load_from_hub

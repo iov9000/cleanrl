@@ -79,11 +79,17 @@ def save_expert_traj_dict(args, env, model, nr_trajectories=10, min_total_rew=10
         while not done:
             ac, _states = model.predict(ob)
             next_ob, reward, term, trunc, _ = env.step(ac)
+            
+            ob = next_ob.copy()
+
+            # if np.random.randn() < 0:
+            #     next_ob[1] += 4
+            #     next_ob[9] += 4
+
             done = term or trunc
             
-            ob = next_ob
             total_reward += reward
-            episode_obs.append(ob)
+            episode_obs.append(next_ob)
             episode_acs.append(ac)
             episode_rew.append(reward)
             episode_done.append(done)

@@ -565,7 +565,7 @@ def evaluate_model(args, actor, device, deterministic=True, wrap_mujoco=False):
         test_env = MujocoTestWrapper(test_env, eps0=args.test_eps, 
                                     epsdyn=args.test_eps, 
                                     params=args.perturbation_parameters)
-    if args.clip_action:
+    if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
         test_env = gym.wrappers.ClipAction(test_env)
     if args.normalize_obs:
         test_env = gym.wrappers.NormalizeObservation(test_env)
