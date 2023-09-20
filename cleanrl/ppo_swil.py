@@ -683,9 +683,9 @@ if __name__ == "__main__":
     #     plt.savefig(f"runs/{run_name}/swil_scatter_final.png")
 
     # save df for easier parsing
-    if args.total_timesteps > 0:    
-        ea = read_tb_file(f"runs/{run_name}")
-        df = create_df_from_ea(ea, "charts/episodic_return")
-        df["mu"] = mu
-        df.to_pickle(f"results_{run_name}_df.pkl")
+    # if args.total_timesteps > 0:    
+    #     ea = read_tb_file(f"runs/{run_name}")
+    #     df = create_df_from_ea(ea, "charts/episodic_return")
+    #     df["mu"] = mu
+    #     df.to_pickle(f"results_{run_name}_df.pkl")
 

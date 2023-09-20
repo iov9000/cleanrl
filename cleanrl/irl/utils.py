@@ -571,7 +571,8 @@ def evaluate_model(args, actor, device, deterministic=True, wrap_mujoco=False):
         test_env = gym.wrappers.NormalizeObservation(test_env)
         test_env = gym.wrappers.TransformObservation(
             test_env, lambda obs: np.clip(obs, -10, 10))
-    mu, std, d = save_traj_dict(args, args.env_id, test_env, actor, device)
+    mu, std, d = save_traj_dict(args, args.env_id, test_env, 
+                                actor, device, deterministic=deterministic)
 
     test_env.close()
 
