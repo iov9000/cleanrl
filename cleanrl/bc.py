@@ -12,9 +12,10 @@ module_path = os.path.abspath(os.path.join('../ccl'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 
-import gym
+import gymnasium as gym
+
 import numpy as np
-import pybullet_envs  # noqa
+#import pybullet_envs  # noqa
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -23,7 +24,8 @@ from torch.distributions.categorical import Categorical
 
 from torch.utils.tensorboard import SummaryWriter
 
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict, AntCFWrapper, MujocoTestWrapper, save_traj_dict
+from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
+                    demos_gen_dict, AntCFWrapper, MujocoTestWrapper, save_traj_dict, evaluate_model
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -36,6 +38,8 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--logging_interval", type=int, default=500,
         help="logging interval")
+    parser.add_argument("--eval_interval", type=int, default=10000,
+        help="evaluation interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -96,6 +100,8 @@ def parse_args():
         help="expert demo folder")
     parser.add_argument("--n_demos", type=int, default=10,
         help="number of demos to use")
+    parser.add_argument("--subsample", type=int, default=1,
+        help="number of demos to use")
     parser.add_argument('--enhance_demos', default=False, required=False, 
         action='store_true', help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
@@ -125,7 +131,10 @@ def parse_args():
         help="divergence type")
     parser.add_argument('--normalize_irl_rewards', default=True, 
         action='store_true', required=False, help='normalize irl rewards')  
-        
+
+    parser.add_argument("--test_eps", type=float, default=0.0, help="test perturbation eps")
+    parser.add_argument("--perturbation_parameters", type=str, nargs='+', default='', help="which env parameter to perturb")
+
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -157,7 +166,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma):
             env = gym.wrappers.NormalizeReward(env, gamma=gamma)
             env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
-        env.seed(seed)
+        #env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -172,7 +181,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self, envs, hidden_size=64, nonlin='tanh', discrete=False):        
+    def __init__(self, envs, hidden_size=64, nonlin='tanh', discrete=False):
         super().__init__()
 
         if nonlin == 'relu':
@@ -189,47 +198,53 @@ class Agent(nn.Module):
             output_dim = np.prod(envs.single_action_space.shape)
 
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
+            layer_init(
+                nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
             nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nonlin,
             layer_init(nn.Linear(hidden_size, 1), std=1.0),
         )
         self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
+            layer_init(
+                nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
             nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nonlin,
             layer_init(nn.Linear(hidden_size, output_dim), std=0.01),
         )
         if not self.discrete:
-            self.actor_logstd = nn.Parameter(torch.zeros(1,output_dim))
+            self.actor_logstd = nn.Parameter(torch.zeros(1, output_dim))
 
     def get_value(self, x):
         return self.critic(x)
 
-    def get_action_and_value_c(self, x, action=None):
+    def get_action_and_value_c(self, x, action=None, eval=False):
         action_mean = self.actor_mean(x)
         action_logstd = self.actor_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
-    def get_action_and_value_d(self, x, action=None):
+        if eval:
+            return action_mean, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+        else:
+            return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+
+    def get_action_and_value_d(self, x, action=None, eval=False):
         logits = self.actor_mean(x)
         probs = Categorical(logits=logits)
         if action is None:
             action = probs.sample()
+
         return action, probs.log_prob(action), probs.entropy(), self.critic(x)
 
-    def get_action_and_value(self, x, action=None):
+    def get_action_and_value(self, x, action=None, eval=False):
         if self.discrete:
-            return self.get_action_and_value_d(x, action)
+            return self.get_action_and_value_d(x, action, eval)
         else:
-            return self.get_action_and_value_c(x, action)
-
+            return self.get_action_and_value_c(x, action, eval)
 
 
 if __name__ == "__main__":
@@ -271,7 +286,7 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
+    demos = load_hf_demos(args, args.n_demos)
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
@@ -308,7 +323,7 @@ if __name__ == "__main__":
 
     for epoch in tqdm(range(args.update_epochs)):            
         # GAIL Discriminator Update (exhaust demos)
-        gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+        gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=True)
         for d in gen_demos:
             if len(d['obs']) < args.batch_size:
                 break
@@ -334,9 +349,19 @@ if __name__ == "__main__":
 
             if global_step % args.logging_interval == 0:
                 writer.add_scalar("BC loss", loss, global_step)
+        
+                #  evaluate at regular intervals and save
+            if global_step % args.eval_interval == 0:
+                if isinstance(test_env.action_space, gym.spaces.Box):
+                    det = True
+                else:
+                    det = False
+                mu, std, d = evaluate_model(args, agent, device, deterministic = det, wrap_mujoco=args.test_eps > 0)
+                print(f"Evaluation at {global_step}: {mu}, {std}")
+                writer.add_scalar('eval/mu', mu, global_step)
+                writer.add_scalar('eval/std', std, global_step)
 
     envs.close()
-    writer.close()
 
     ## save model
     torch.save(agent.state_dict(), f"runs/{run_name}/agent.pt")
@@ -350,8 +375,10 @@ if __name__ == "__main__":
         test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
     save_traj_dict(args.env_id, test_env, agent, device)
 
+    writer.close()
+
     # save df for easier parsing
-    if args.total_timesteps > 0:    
-        ea = read_tb_file(f"runs/{run_name}")
-        df = create_df_from_ea(ea, "charts/episodic_return")
-        df.to_pickle(f"results_{run_name}_df.pkl")
+    # if args.total_timesteps > 0:    
+    #     ea = read_tb_file(f"runs/{run_name}")
+    #     df = create_df_from_ea(ea, "charts/episodic_return")
+    #     df.to_pickle(f"results_{run_name}_df.pkl")

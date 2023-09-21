@@ -30,7 +30,7 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.pwil import PWILReward
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict, MujocoTestWrapper, save_traj_dict
+from irl.utils import load_hf_demos, prepare_batch_update_irl, evaluate_model, enhance_demos_with_barycenters, demos_gen_dict, MujocoTestWrapper, save_traj_dict
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -43,6 +43,8 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--logging_interval", type=int, default=500,
         help="logging interval")
+    parser.add_argument("--eval_interval", type=int, default=10000,
+        help="evaluation interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -384,7 +386,6 @@ if __name__ == "__main__":
                     # TODO: check if 0 index is always correct
             rb.add(obs, real_next_obs, actions, rewards, dones, infos)
 
-
             # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
             obs = next_obs
 
@@ -452,30 +453,33 @@ if __name__ == "__main__":
                     if args.autotune:
                         writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
 
+                #  evaluate at regular intervals and save
+                if global_step % args.eval_interval == 0:
+                    mu, std, d = evaluate_model(args, actor, device)
+                    print(f"Evaluation at {global_step}: {mu}, {std}")
+                    writer.add_scalar('eval/mu', mu, global_step)
+                    writer.add_scalar('eval/std', std, global_step)
+
         except KeyboardInterrupt:
             break
 
 
-
     envs.close()
-    writer.close()
 
-
-    # eval
+    #  eval
     torch.save(actor.state_dict(), f"runs/{run_name}/actor.pt")
     torch.save(qf1.state_dict(), f"runs/{run_name}/qf1.pt")
     torch.save(qf2.state_dict(), f"runs/{run_name}/qf2.pt")
 
-    ## test model and save trajectories
-    #test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
-    test_env = gym.make(args.env_id)
-    if args.clip_action:
-       test_env = gym.wrappers.ClipAction(test_env)
-    if args.normalize_obs:
-       test_env = gym.wrappers.NormalizeObservation(test_env)
-       test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
-    mu, std, d = save_traj_dict(args, args.env_id, test_env, actor, device)
-    
+    # test model and save trajectories
+    # test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
+    mu, std, d = evaluate_model(args, actor, device)
+    writer.add_scalar('eval/mu', mu, args.total_timesteps)
+    writer.add_scalar('eval/std', std, args.total_timesteps)
+
+    #  XXX f"runs/{args.exp_id}_dict.pkl" append()
+    writer.close()
+
     # write to experiment log
 
     ### XXX 

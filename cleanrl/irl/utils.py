@@ -602,7 +602,7 @@ def save_traj_dict(opt, env_name, env, model, device,
 
         while not done:
             with torch.no_grad():
-                if 'ppo' in opt.exp_name:
+                if 'ppo' in opt.exp_name or 'bc' in opt.exp_name:
                     action, logprob, _, value = model.get_action_and_value(torch.Tensor(ob).to(device).unsqueeze(0), 
                                                                             eval=deterministic)
                 else:

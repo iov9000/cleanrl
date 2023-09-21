@@ -337,6 +337,7 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     obs = envs.reset(seed=args.seed)[0]
     for global_step in range(args.total_timesteps):
+        irl_trigger = False
         try:
             # ALGO LOGIC: put action logic here
             if global_step < args.learning_starts:
@@ -356,10 +357,11 @@ if __name__ == "__main__":
             for item in infos:
                 # TODO: fix this for new Gymnasium
                 if "final_info" in item.keys():
+                    irl_trigger = True
                     if args.verbose:
                         print(
                             f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
-                    if global_step % 10 == 0:
+                    if global_step % 1 == 0:
                         writer.add_scalar(
                             "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
                         writer.add_scalar(
@@ -442,7 +444,11 @@ if __name__ == "__main__":
                         writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
                         
                 # Optimize the discriminator
-                if global_step % args.disc_update_period == 0:
+                irl_condition = global_step % args.disc_update_period == 0
+                if args.disc_update_period == -1:
+                    irl_condition = irl_trigger
+                    
+                if irl_condition:                    
                     for epoch in range(args.irl_epochs):            
                         # GAIL Discriminator Update
                         gen_demos = demos_gen_dict(demos['all'], args.batch_size)
