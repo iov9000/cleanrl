@@ -54,7 +54,7 @@ if __name__ == '__main__':
     # n_envs = [1,8,16]
     ent_coeffs = [0.0]
     # ent_coeffs = [0.0, 0.01]
-    disc_nonlins = ['tanh', 'prelu', 'relu']
+    disc_nonlins = ['tanh']
     # disc_nonlins = ['tanh', 'leakyrelu']
     # disc_nonlins = ['tanh']
     # lip_coeffs = [1.0]
