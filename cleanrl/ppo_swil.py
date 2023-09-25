@@ -591,11 +591,6 @@ if __name__ == "__main__":
                                 writer.add_scalar('irl/swil_d_loss', loss_dict['d_loss'], global_step)
                                 writer.add_scalar('irl/swil_ae_loss', loss_dict['recon_loss'], global_step)
 
-                                # calculate reference distance using OT package
-                                ref_dist = ot.sliced_wasserstein_distance(
-                                    update_dict['policy_obs'], update_dict['expert_obs'], n_projections=100, seed=args.seed)
-                                writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
-                                
                                 #trajectory_weights = 1./len(update_dict['policy_obs']) * np.ones(len(update_dict['policy_obs']))
                                 #expert_weights = 1./len(update_dict['expert_obs']) * np.ones(len(update_dict['expert_obs']))
 
@@ -622,6 +617,10 @@ if __name__ == "__main__":
                 print(f"Evaluation at {global_step}: {mu}, {std}")
                 writer.add_scalar('eval/mu', mu, global_step)
                 writer.add_scalar('eval/std', std, global_step)
+                # calculate reference distance using OT package
+                ref_dist = ot.sliced_wasserstein_distance(
+                    d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
+                writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             if global_step % args.logging_interval == 0:

@@ -29,6 +29,8 @@ import torch.optim as optim
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
+import ot 
+
 from irl.swil import SwilReward, SWILDiscriminator
 from irl.utils import load_hf_demos, evaluate_model, prepare_batch_update_irl,\
      enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict
@@ -214,6 +216,32 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
     return thunk
 
 
+class GumbelSoftmax(torch.distributions.RelaxedOneHotCategorical):
+    '''
+    A differentiable Categorical distribution using reparametrization trick with Gumbel-Softmax
+    Explanation http://amid.fish/assets/gumbel.html
+    NOTE: use this in place PyTorch's RelaxedOneHotCategorical distribution since its log_prob 
+    is not working right (returns positive values)
+    Papers:
+    [1] The Concrete Distribution: A Continuous Relaxation of Discrete Random Variables (Maddison et al, 2017)
+    [2] Categorical Reparametrization with Gumbel-Softmax (Jang et al, 2017)
+    '''
+
+    def sample(self, sample_shape=torch.Size()):
+        '''Gumbel-softmax sampling. Note rsample is inherited from RelaxedOneHotCategorical'''
+        u = torch.empty(self.logits.size(), device=self.logits.device,
+                        dtype=self.logits.dtype).uniform_(0, 1)
+        noisy_logits = self.logits - torch.log(-torch.log(u))
+        return torch.argmax(noisy_logits, dim=-1)
+
+    def log_prob(self, value):
+        '''value is one-hot or relaxed'''
+        if value.shape != self.logits.shape:
+            value = F.one_hot(value.long(), self.logits.shape[-1]).float()
+            assert value.shape == self.logits.shape
+        return - torch.sum(- value * F.log_softmax(self.logits, -1), -1)
+
+
 # ALGO LOGIC: initialize agent here:
 class SoftQNetwork(nn.Module):
     def __init__(self, env):
@@ -235,8 +263,11 @@ LOG_STD_MIN = -5
 
 
 class Actor(nn.Module):
-    def __init__(self, env):
+    def __init__(self, env, discrete=False):
         super().__init__()
+        
+        self.discrete = discrete
+
         self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc_mean = nn.Linear(256, np.prod(env.single_action_space.shape))
@@ -263,6 +294,7 @@ class Actor(nn.Module):
         mean, log_std = self(x)
         std = log_std.exp()
         normal = torch.distributions.Normal(mean, std)
+        #gb_sm = GumbelSoftmax()
         x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
         y_t = torch.tanh(x_t)
         action = y_t * self.action_scale + self.action_bias
@@ -393,6 +425,8 @@ if __name__ == "__main__":
                         writer.add_scalar(
                             "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
                         writer.add_scalar(
+                            "charts/episodic_return_irl", item["final_info"][0]['episode']["ep_rew_irl"], global_step)
+                        writer.add_scalar(
                             "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
                     break
 
@@ -520,6 +554,10 @@ if __name__ == "__main__":
                     print(f"Evaluation at {global_step}: {mu}, {std}")
                     writer.add_scalar('eval/mu', mu, global_step)
                     writer.add_scalar('eval/std', std, global_step)
+                    ref_dist = ot.sliced_wasserstein_distance(
+                        d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
+                    writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
+
                     results_dict['eval_mu'].append(mu)
                     results_dict['eval_std'].append(std)
 

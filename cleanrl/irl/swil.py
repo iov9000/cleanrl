@@ -303,34 +303,25 @@ class SWILDiscriminator(nn.Module):
             return rew, z, mu, std  # + torch.randn_like(self.reward(base_out))
 
     def base_fwd(self, ob, ac, nob=None, d=None):
-        if (self.use_cnn_base or self.is_atari):
-            if self.use_actions and self.use_next_obs and self.use_dones:
-                base_out = self.base(ob, ac, nob, d)
-            elif self.use_actions and self.use_dones and not self.use_next_obs:
-                base_out = self.base(ob, ac, d)
-            elif self.use_actions and not self.use_dones and self.use_next_obs:
-                base_out = self.base(ob, ac, nob)
-            elif self.use_actions and not self.use_dones and not self.use_next_obs:
-                base_out = self.base(ob, ac)
-            else:
-                base_out = self.base(ob)
-        else:
-            # match tensor sizes
-            if len(ob.shape) != len(ac.shape):
-                ac = torch.unsqueeze(ac, -1)
-            if len(ob.shape) != len(d.shape):
-                d = torch.unsqueeze(d, -1)
+        #  match tensor sizes
+        if len(ob.shape) != len(ac.shape):
+            ac = torch.unsqueeze(ac, -1)
+        if len(ob.shape) != len(d.shape):
+            d = torch.unsqueeze(d, -1)
 
-            if self.use_actions and self.use_next_obs and self.use_dones:
-                base_out = self.base(torch.cat([ob, ac, nob, d], axis=-1))
-            elif self.use_actions and self.use_dones and not self.use_next_obs:
-                base_out = self.base(torch.cat([ob, ac, d], axis=-1))
-            elif self.use_actions and not self.use_dones and self.use_next_obs:
-                base_out = self.base(torch.cat([ob, ac, nob], axis=-1))
-            elif self.use_actions and not self.use_dones and not self.use_next_obs:
-                base_out = self.base(torch.cat([ob, ac], axis=-1))
-            else:
-                base_out = self.base(ob)
+        input_ = [ob]
+        if self.use_actions:
+            input_.append(ac)
+        if self.use_next_obs:
+            input_.append(nob)
+        if self.use_dones:
+            input_.append(d)
+
+        if (self.use_cnn_base or self.is_atari):
+            base_out = self.base(*input_)
+
+        else:
+            base_out = self.base(torch.cat(input_, axis=-1))
 
         return base_out
 

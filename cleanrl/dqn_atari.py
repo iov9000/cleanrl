@@ -5,7 +5,7 @@ import random
 import time
 from distutils.util import strtobool
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
@@ -171,7 +171,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
-    obs = envs.reset()
+    obs, _ = envs.reset(seed=args.seed)
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
         epsilon = linear_schedule(args.start_e, args.end_e, args.exploration_fraction * args.total_timesteps, global_step)
@@ -182,22 +182,27 @@ if __name__ == "__main__":
             actions = torch.argmax(q_values, dim=1).cpu().numpy()
 
         # TRY NOT TO MODIFY: execute the game and log data.
-        next_obs, rewards, dones, infos = envs.step(actions)
+        next_obs, rewards, term, trunc, infos = envs.step(actions)
+        dones = term or trunc
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         for info in infos:
-            if "episode" in info.keys():
-                print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+            if "final_info" in info.keys():
+                print(
+                    f"global_step={global_step}, episodic_return={info['final_info'][0]['episode']['r']}")
+                writer.add_scalar(
+                    "charts/episodic_return", info['final_info'][0]["episode"]["r"], global_step)
+                writer.add_scalar(
+                    "charts/episodic_length", info['final_info'][0]["episode"]["l"], global_step)
                 writer.add_scalar("charts/epsilon", epsilon, global_step)
                 break
+
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
         real_next_obs = next_obs.copy()
         for idx, d in enumerate(dones):
             if d:
-                real_next_obs[idx] = infos[idx]["terminal_observation"]
+                real_next_obs[idx] = infos[idx]["final_observation"][0]
         rb.add(obs, real_next_obs, actions, rewards, dones, infos)
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook

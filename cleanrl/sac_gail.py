@@ -6,6 +6,8 @@ import time
 from datetime import datetime
 from distutils.util import strtobool
 
+import ot
+
 import gymnasium as gym
 
 gym.envs.register(
@@ -116,6 +118,10 @@ def parse_args():
         action='store_true', help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
+    parser.add_argument('--use_dones', default=False, required=False, 
+        action='store_true', help='use actions in discriminator')
+    parser.add_argument('--use_next_obs', default=False, required=False, 
+        action='store_true', help='use actions in discriminator')
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
                    help='discriminator MLP layer dimensions')
     parser.add_argument('--irm_coeff', default=0, type=float, 
@@ -490,6 +496,10 @@ if __name__ == "__main__":
                     writer.add_scalar('eval/std', std, global_step)
                     results_dict['eval_mu'].append(mu)
                     results_dict['eval_std'].append(std)
+                    ref_dist = ot.sliced_wasserstein_distance(
+                        d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
+                    writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
+
 
         except KeyboardInterrupt:
             break

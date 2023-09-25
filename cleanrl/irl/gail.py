@@ -37,6 +37,8 @@ class GAILDiscriminator(nn.Module):
         self.layer_dims = opt.d_layer_dims
         self.lr = opt.disc_lr
         self.use_actions = opt.use_actions
+        self.use_dones = opt.use_dones
+        self.use_next_obs = opt.use_next_obs        
         self.irm_coeff = opt.irm_coeff
         self.l2_coeff = opt.l2_coeff
         self.lip_coeff = opt.lip_coeff
@@ -58,10 +60,16 @@ class GAILDiscriminator(nn.Module):
 
         if not ac_shapes:
             ac_shapes = [1]
+
+        dim0 = ob_shapes[-1]
         if self.use_actions:
-            self.layer_dims = [ob_shapes[-1] + ac_shapes[-1]] + self.layer_dims
-        else:
-            self.layer_dims = [ob_shapes[-1]] + self.layer_dims
+            dim0 = dim0 + ac_shapes[-1]
+        if opt.use_dones:
+            dim0 = dim0 + 1
+        if opt.use_next_obs:
+            dim0 = dim0 + ob_shapes[-1]
+
+        self.layer_dims = [dim0] + self.layer_dims
         ac_len = ac_shapes[0]
 
         layer_dims = self.layer_dims
@@ -117,8 +125,31 @@ class GAILDiscriminator(nn.Module):
         
         return base_out
 
-    def forward(self, ob, ac):
-        base_out = self.base_forward(ob, ac)
+    def base_fwd(self, ob, ac, nob=None, d=None):
+        #  match tensor sizes
+        if len(ob.shape) != len(ac.shape):
+            ac = torch.unsqueeze(ac, -1)
+        if d is not None and len(ob.shape) != len(d.shape):
+            d = torch.unsqueeze(d, -1)
+
+        input_ = [ob]
+        if self.use_actions:
+            input_.append(ac)
+        if self.use_next_obs:
+            input_.append(nob)
+        if self.use_dones:
+            input_.append(d)
+
+        if (self.use_cnn_base or self.is_atari):
+            base_out = self.base(*input_)
+
+        else:
+            base_out = self.base(torch.cat(input_, axis=-1))
+
+        return base_out
+
+    def forward(self, ob, ac, nob=None, d=None):
+        base_out = self.base_fwd(ob, ac, nob, d)
 
         d_out = self.discriminator(base_out)
 
@@ -131,10 +162,18 @@ class GAILDiscriminator(nn.Module):
 
         return d_out_
 
-    def get_reward(self, ob, ac):
-        base_out = self.base_forward(ob, ac)
+    def get_reward(self, ob, ac, nob=None, d=None):
+        base_out = self.base_fwd(ob, ac, nob, d)
 
         d_out = self.discriminator(base_out)
+
+        if self.opt.div == 'fkl':
+            d_out_ = torch.exp(d_out)  # (N*T,) p/q TODO: clip
+        elif self.opt.div == 'rkl':
+            d_out_ = d_out  # (N*T,) log (p/q)
+        elif self.opt.div == 'js':  # https://pytorch.org/docs/master/generated/torch.nn.Softplus.html
+            d_out_ = F.softplus(d_out)  # (N*T,) log (1 + p/q)
+
         # XXX: log D vs log(1-D)!!!!
         self.reward = - torch.squeeze(torch.log(torch.sigmoid(d_out) + 1e-8))
         return self.reward
@@ -157,27 +196,51 @@ class GAILDiscriminator(nn.Module):
         return (g1 * g2).sum()
 
     def lip_penalty(self, update_dict, p=1):
-        obs_epsilon = torch.rand(update_dict['policy_obs'].shape)
-        interp_obs = obs_epsilon * update_dict['policy_obs'] + (1 - obs_epsilon) * update_dict['expert_obs']
+        policy_obs = update_dict['policy_obs']
+        policy_acs = update_dict['policy_acs']
+        policy_obs_next = update_dict['policy_obs_next']
+        policy_dones = update_dict['policy_dones']
+        exp_obs = update_dict['expert_obs']
+        exp_acs = update_dict['expert_acs']
+        exp_obs_next = update_dict['expert_obs_next']
+        exp_dones = update_dict['expert_dones']
+
+        if len(exp_obs.shape) != len(exp_dones.shape):
+            exp_dones = torch.unsqueeze(exp_dones, -1)
+
+        if len(policy_obs.shape) != len(policy_dones.shape):
+            policy_dones = torch.unsqueeze(policy_dones, -1)
+
+        obs_epsilon = torch.rand(policy_obs.shape)
+        interp_obs = obs_epsilon * policy_obs + (1 - obs_epsilon) * exp_obs
         interp_obs.requires_grad = True  # For gradient calculation
-
+        
+        input_ = [interp_obs]
         if self.use_actions:
-            action_epsilon = torch.rand(update_dict['policy_acs'].shape)
-            interp_acs = action_epsilon * update_dict['policy_acs'] + (1 - action_epsilon) * update_dict['expert_acs']
-            interp_acs.requires_grad = True
-            encoder_input = [interp_obs, interp_acs]
+            acs_epsilon = torch.rand(policy_acs.shape)
+            interp_acs = acs_epsilon * policy_acs + (1 - acs_epsilon) * exp_acs
+            interp_acs.requires_grad = True  # For gradient calculation
+            input_.append(interp_acs)
 
-            estimate = self.forward(interp_obs, interp_acs)
-        else:            
-            encoder_input = [interp_obs]
-            estimate = self.forward(interp_obs, ac=None)
+        if self.use_next_obs:
+            nobs_epsilon = torch.rand(policy_obs_next.shape)
+            interp_next_obs = nobs_epsilon * policy_obs_next + (1 - nobs_epsilon) * exp_obs_next
+            interp_next_obs.requires_grad = True  # For gradient calculation
+            input_.append(interp_next_obs)
+        if self.use_dones:
+            d_epsilon = torch.rand(policy_dones.shape)
+            interp_d = d_epsilon * policy_dones + (1 - d_epsilon) * exp_dones
+            interp_d.requires_grad = True  # For gradient calculation
+            input_.append(interp_d)
+
+        estimate = self.forward(*input_)
 
         # policy_obs = update_dict['policy_obs']
         # expert_obs = update_dict['expert_obs']
         # policy_obs.requires_grad = True
         # expert_obs.requires_grad = True
 
-        gradient_mix = torch.autograd.grad(estimate.sum(), encoder_input, create_graph=True)[0]
+        gradient_mix = torch.autograd.grad(estimate.sum(), input_, create_graph=True)[0]
         # gradient_p = torch.autograd.grad(
         #     estimate.sum(), policy_obs, create_graph=True)[0]
         # gradient_e = torch.autograd.grad(
@@ -215,8 +278,19 @@ class GAILDiscriminator(nn.Module):
     #     return grad_pen
 
     def compute_loss(self, update_dict):
-        d_out = self.forward(update_dict['all_obs'], update_dict['all_acs'])
-        expert_out, policy_out = torch.chunk(d_out, chunks=2, dim=0)
+        self.policy_obs = update_dict['policy_obs']
+        self.policy_acs = update_dict['policy_acs']
+        policy_obs_next = update_dict['policy_obs_next']
+        policy_dones = update_dict['policy_dones']
+        exp_obs = update_dict['expert_obs']
+        exp_acs = update_dict['expert_acs']
+        exp_obs_next = update_dict['expert_obs_next']
+        exp_dones = update_dict['expert_dones']
+
+        policy_out = self.forward(self.policy_obs, self.policy_acs, policy_obs_next, policy_dones)
+        expert_out = self.forward(exp_obs, exp_acs, exp_obs_next, exp_dones)
+
+        d_out = torch.cat([expert_out, policy_out])
 
         expert_loss = F.binary_cross_entropy_with_logits(
             expert_out,
@@ -296,16 +370,20 @@ class GailReward(gym.Wrapper):
 
         acs_t = torch.tensor(action, dtype=torch.get_default_dtype())
         next_obs_t = torch.tensor(next_obs, dtype=torch.get_default_dtype())
+        done_t = torch.tensor(done, dtype=torch.get_default_dtype())
 
         with torch.no_grad():
             # get discriminator reward and train on that
             #print([p.norm(2) for p in self.discriminator.parameters()])
             irl_reward = self.discriminator.get_reward(
-                obs_t, acs_t).cpu().numpy()
+                obs_t, acs_t, next_obs_t, done_t).cpu().numpy()
             
             #irl_reward = self.discriminator.get_reward(obs_t, acs_t, next_obs_t).cpu().numpy()
 
         self.episode_return += irl_reward
+        if done:
+            info['episode']["ep_rew_irl"] = self.episode_return
+            self.episode_return = 0
 
         self.obs = next_obs
 

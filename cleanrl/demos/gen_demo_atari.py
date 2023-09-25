@@ -1,5 +1,6 @@
 import sys
 import os
+# import gymnasium as gym
 import gym
 import numpy as np
 from huggingface_sb3 import load_from_hub
@@ -30,6 +31,7 @@ def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_re
 
     cnt = 0
     while cnt < nr_trajectories:
+        # ob, _ = env.reset(seed=1)
         ob = env.reset()
         done = False
         total_reward = 0
