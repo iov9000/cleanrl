@@ -399,7 +399,11 @@ class SWILDiscriminator(nn.Module):
                         #w = 1/ (n + a_prev) # more reward if closer
 
                         rew_j = a_new - a_prev
-                        rew += w*(a_new - a_prev)
+                        if self.opt.repl_loss_type == 'diff':
+                            rew += w*(a_new - a_prev)
+                        else:
+                            rew += w*(a_new)
+
 
                     # replace stored atoms in queue if we're getting closer
                     if self.opt.replace_atoms and rew_j < 0:

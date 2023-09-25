@@ -201,7 +201,7 @@ def demos_sample_batch(data, batch_size, shuffle=False):
     if batch_size <= 0:
        return
     
-    i = np.random.randint(0,len(data['obs']-batch_size))
+    i = np.random.randint(0,len(data['obs'])-batch_size)
     end = i + batch_size
     return {'obs': data['obs'][i:end], 
             'acs': data['acs'][i:end],
@@ -633,7 +633,7 @@ def save_traj_dict(opt, env_name, env, model, device,
     cnt = 0
     ep_rew = []
     while cnt < nr_trajectories:
-        ob, _ = env.reset(seed=opt.seed)
+        ob, _ = env.reset(seed=opt.seed + np.random.randint(0,1000))
         done = False
         total_reward = 0
         episode_obs = []

@@ -413,7 +413,6 @@ if __name__ == "__main__":
                 ######
                 # IQ-Learn minimal implementation with X^2 divergence (~15 lines)
                 # Calculate 1st term of loss: -E_(ρ_expert)[Q(s, a) - γV(s')]
-                # ->> TODO: join obs with expert_batch
                 current_Q = qf1(all_obs, all_actions)
                 y = (1 - all_dones) * args.gamma * getV(actor, qf1, alpha, all_obs_next)
                 #if args.train.use_target:

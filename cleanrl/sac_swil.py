@@ -108,6 +108,7 @@ def parse_args():
     parser.add_argument("--poly_degree", type=int, default=4, help="degree of polynomial for SWIL")
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
     parser.add_argument("--swil_rew", type=str, default='repl_loss', help="mean or replacement")
+    parser.add_argument("--repl_loss_type", type=str, default='diff', help="replacement type: diff or a")
     parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
     parser.add_argument("--swil_loss", default='surr_loss', type=str, required=False, help="loss_type:")
     parser.add_argument("--gsw_df", default='nn', type=str, required=False, help="Radon transform defining function: nn/poly/linear/circular")
@@ -178,7 +179,7 @@ def parse_args():
         action='store_true', help='use bias in disc arch')
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
-    parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
+    parser.add_argument("--eval_test_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
     parser.add_argument('--drop_batch', default=False, required=False, 
@@ -550,7 +551,7 @@ if __name__ == "__main__":
 
                 # evaluate at regular intervals and save 
                 if global_step % args.eval_interval == 0:
-                    mu, std, d = evaluate_model(args, actor, device)
+                    mu, std, d = evaluate_model(args, actor, device, wrap_mujoco=args.eval_test_eps>0)
                     print(f"Evaluation at {global_step}: {mu}, {std}")
                     writer.add_scalar('eval/mu', mu, global_step)
                     writer.add_scalar('eval/std', std, global_step)
