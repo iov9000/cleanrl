@@ -196,6 +196,47 @@ def demos_gen_dict(data, batch_size, shuffle=False):
                'rew': data['rew'][mb_inds],
                'done': data['done'][mb_inds]}
 
+def demos_sample_batch(data, batch_size, shuffle=False):
+    """  Yields batch of specified size """
+    if batch_size <= 0:
+       return
+    
+    i = np.random.randint(0,len(data['obs']-batch_size))
+    end = i + batch_size
+    return {'obs': data['obs'][i:end], 
+            'acs': data['acs'][i:end],
+            'rew': data['rew'][i:end],
+            'done': data['done'][i:end]}
+
+def get_concat_samples(policy_batch, expert_batch):
+    policy_obs = policy_batch.observations
+    policy_acs = policy_batch.actions
+    policy_obs_next = policy_batch.next_observations
+    policy_rew = torch.squeeze(policy_batch.rewards)
+    policy_dones = torch.squeeze(policy_batch.dones)
+
+    if isinstance(expert_batch, dict):
+        expert_rew = torch.from_numpy(expert_batch['rew']).type(torch.get_default_dtype())
+        expert_obs = torch.from_numpy(expert_batch['obs']).type(torch.get_default_dtype())
+        expert_acs = torch.from_numpy(expert_batch['acs']).type(torch.get_default_dtype())
+        expert_dones = torch.from_numpy(np.squeeze(expert_batch['done'])).type(torch.get_default_dtype())
+
+    expert_obs_next = np.concatenate([expert_batch['obs'][1:], np.expand_dims(expert_batch['obs'][-1], 0)],
+                                     axis=0)  # repeat last observation
+    expert_obs_next = torch.from_numpy(expert_obs_next).type(torch.get_default_dtype())
+
+    batch_state = torch.cat([policy_obs, expert_obs], dim=0)
+    batch_next_state = torch.cat([policy_obs_next, expert_obs_next], dim=0)
+    batch_action = torch.cat([policy_acs, expert_acs], dim=0)
+    batch_reward = torch.cat([policy_rew, expert_rew], dim=0)
+    batch_done = torch.cat([policy_dones, expert_dones], dim=0)
+    is_expert = torch.cat([torch.zeros_like(policy_rew, dtype=torch.bool),
+                           torch.ones_like(expert_rew, dtype=torch.bool)], dim=0)
+
+    return batch_state, batch_next_state, batch_action, batch_reward, batch_done, is_expert
+
+
+
 def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy, compute_lprobs=False):
     if opt.use_sb_ppo:
         ac_sample = env.action_space.sample()
