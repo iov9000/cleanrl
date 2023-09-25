@@ -133,7 +133,7 @@ def parse_args():
 
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
-    parser.add_argument('--disc_update_period', default=1, type=int, required=False, help='discriminator update period')
+    parser.add_argument('--disc_update_period', default=-1, type=int, required=False, help='discriminator update period')
 
     parser.add_argument("--disc_nonlin", type=str, default="tanh", help="nonlinearity for discriminator")
     parser.add_argument('--use_cnn_base', default=False, required=False, 
@@ -370,6 +370,8 @@ if __name__ == "__main__":
                     if global_step % 1 == 0:
                         writer.add_scalar(
                             "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                        writer.add_scalar(
+                            "charts/episodic_return_irl", item["final_info"][0]['episode']["ep_rew_irl"], global_step)
                         writer.add_scalar(
                             "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
                     break

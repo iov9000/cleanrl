@@ -211,6 +211,7 @@ class PWILReward(gym.Wrapper):
         self.n_demos = opt.n_demos
         self.subsampling=opt.subsampling
         self.use_actions = opt.use_actions
+        self.episode_return = 0
         self.demos = demos
         self.obs = None
         self.pwil = PWILRewarder(demos, subsampling=self.subsampling, env=env, 
@@ -234,6 +235,10 @@ class PWILReward(gym.Wrapper):
             reward = self.pwil.compute_reward(obs, action=None)
 
         self.obs = next_obs
-
+        self.episode_return += reward
+        if done:
+            info['episode']["ep_rew_irl"] = self.episode_return
+            self.episode_return = 0
+            
         return next_obs, reward, term, trunc, info
     

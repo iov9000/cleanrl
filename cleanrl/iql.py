@@ -413,26 +413,44 @@ if __name__ == "__main__":
                 ######
                 # IQ-Learn minimal implementation with X^2 divergence (~15 lines)
                 # Calculate 1st term of loss: -E_(ρ_expert)[Q(s, a) - γV(s')]
-                current_Q = qf1(all_obs, all_actions)
+                current_Q1 = qf1(all_obs, all_actions)
                 y = (1 - all_dones) * args.gamma * getV(actor, qf1, alpha, all_obs_next)
                 #if args.train.use_target:
                 with torch.no_grad():
-                    y = (1 - all_dones) * args.gamma * get_targetV(actor, qf2, alpha, all_obs_next)
+                    y = (1 - all_dones) * args.gamma * get_targetV(actor, qf1_target, alpha, all_obs_next)
 
-                reward = (current_Q - y)[is_expert]
-                iql_loss = -(reward).mean()
+                reward = (current_Q1 - y)[is_expert]
+                iql_loss_1 = -(reward).mean()
 
                 # 2nd term for our loss (use expert and policy states): E_(ρ)[Q(s,a) - γV(s')]
                 value_loss = (getV(actor, qf1, alpha, all_obs) - y).mean()
-                iql_loss += value_loss
+                iql_loss_1 += value_loss
 
                 # Use χ2 divergence (adds a extra term to the loss)
                 chi2_loss = 1/(2) * (reward**2).mean()
-                iql_loss += chi2_loss
+                iql_loss_1 += chi2_loss
+
+                # double Q repetition
+                current_Q2 = qf2(all_obs, all_actions)
+                y = (1 - all_dones) * args.gamma * getV(actor, qf2, alpha, all_obs_next)
+                #if args.train.use_target:
+                with torch.no_grad():
+                    y = (1 - all_dones) * args.gamma * get_targetV(actor, qf2_target, alpha, all_obs_next)
+
+                reward = (current_Q2 - y)[is_expert]
+                iql_loss_2 = -(reward).mean()
+
+                # 2nd term for our loss (use expert and policy states): E_(ρ)[Q(s,a) - γV(s')]
+                value_loss = (getV(actor, qf1, alpha, all_obs) - y).mean()
+                iql_loss_2 += value_loss
+
+                # Use χ2 divergence (adds a extra term to the loss)
+                chi2_loss = 1/(2) * (reward**2).mean()
+                iql_loss_2 += chi2_loss
                     
                 #qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
                 #qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
-                #qf_loss = qf1_loss + qf2_loss
+                iql_loss = iql_loss_1 + iql_loss_2
 
                 q_optimizer.zero_grad()
                 iql_loss.backward()
@@ -470,8 +488,10 @@ if __name__ == "__main__":
                         target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
 
                 if global_step % args.logging_interval == 0:
-                    writer.add_scalar("losses/qf1_values", current_Q.mean().item(), global_step)
-                    writer.add_scalar("losses/qf1_loss", iql_loss.item(), global_step)
+                    writer.add_scalar("losses/qf1_values", current_Q1.mean().item(), global_step)
+                    writer.add_scalar("losses/qf2_values", current_Q2.mean().item(), global_step)
+
+                    writer.add_scalar("losses/iql_loss", iql_loss.item(), global_step)
                     writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
                     writer.add_scalar("losses/alpha", alpha, global_step)
                     print("SPS:", int(global_step / (time.time() - start_time)))

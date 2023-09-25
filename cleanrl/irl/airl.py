@@ -360,6 +360,9 @@ class AirlReward(gym.Wrapper):
             irl_reward = self.discriminator.get_reward(obs_t, next_obs_t, acs_t, lprobs_t).cpu().numpy()
             #irl_reward = self.discriminator.get_reward(obs_t, acs_t, next_obs_t).cpu().numpy()
         self.obs = next_obs
-        #self.episode_return += irl_reward[0]
+        self.episode_return += irl_reward
+        if done:
+            info['episode']["ep_rew_irl"] = self.episode_return
+            self.episode_return = 0
 
         return next_obs, irl_reward, term, trunc, info
