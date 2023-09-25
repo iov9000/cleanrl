@@ -6,7 +6,7 @@ from pathlib import Path
 if __name__ == '__main__':
     p = argparse.ArgumentParser()
     p.add_argument('--output_dir', type=Path, default=Path('/cluster/project/jbuhmann/oivan/cleanrl/cleanrl/slurm_out'), required=False, help='output dir path')
-    p.add_argument('--time', default=72, required=False, help='which algorithms to use')
+    p.add_argument('--time', default=24, required=False, help='which algorithms to use')
     p.add_argument('--exp_id', default='', required=False, help='which algorithms to use')
     p.add_argument('--gpu', default=False, required=False, action='store_true', help='use subproc for parallel envs')
     p.add_argument('--test_run', default=False, required=False, action='store_true', help='use subproc for parallel envs')
@@ -33,7 +33,7 @@ if __name__ == '__main__':
     # lins = ['--use_spectral_norm', '--use_weight_norm', '']
     # lins = ['--use_spectral_norm', '']
     # lins = ['--use_spectral_norm', '']
-    lins = ['--lip_coeff=1.0', '--use_spectral_norm', '--use_absorb_wrapper']
+    lins = ['', '--irm_coeff=1.0', '--lip_coeff=1.0', '--use_spectral_norm', '--use_absorb_wrapper']
     # lins = ['']
     # lins = ['--use_weight_norm --linear_proj']
     # usenobs = ['--use_next_obs', '', '--use_next_obs --use_dones']
@@ -48,18 +48,19 @@ if __name__ == '__main__':
     # n_demos = [1,4,10]
     n_demos = [1,4,10]
     subsamplings = [1,20,100]
-    periods = [100]
+    periods = [-1]
     # n_demos = [10]
     # n_envs = [1,8,16]
     ent_coeffs = [0.0]
     # ent_coeffs = [0.0, 0.01]
-    disc_nonlins = ['tanh', 'prelu', 'relu']
+    # disc_nonlins = ['tanh', 'prelu', 'relu']
+    disc_nonlins = ['tanh']
     # disc_nonlins = ['tanh', 'leakyrelu']
     # disc_nonlins = ['tanh']
     # lip_coeffs = [1.0]
     # lip_coeffs = [0.0, 1.0]
     # lip_coeff = ['--use_actions']
-    MEM_PER_CPU = 16000
+    MEM_PER_CPU = 8000
     GPU_PER_CPU = 1
     # gpu_string = f"--gpus={GPU_PER_CPU} " if args.gpu else ""
     gpu_string = f"--gpus={GPU_PER_CPU} " if args.gpu else ""
@@ -75,7 +76,7 @@ if __name__ == '__main__':
                                 for algo in algos:
                                     for ss in subsamplings:
                                         for env_name in envs:
-                                            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                                            ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
                                             ua_rbl = ua.replace(" ", "")
                                             lin_rbl = lin.replace(" ", "")
                                             exp_id = (f"{ts}_{algo}_{disc}_{env_name}_seed_{seed}_{args.exp_id}__{ua_rbl}_{lin_rbl}")
