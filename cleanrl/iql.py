@@ -95,7 +95,7 @@ def parse_args():
         help="the frequency of updates for the target nerworks")
     parser.add_argument("--noise-clip", type=float, default=0.5,
         help="noise clip parameter of the Target Policy Smoothing Regularization")
-    parser.add_argument("--alpha", type=float, default=1,
+    parser.add_argument("--alpha", type=float, default=0.2,
             help="Entropy regularization coefficient.")
     parser.add_argument("--autotune", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
         help="automatic tuning of the entropy coefficient")

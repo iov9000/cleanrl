@@ -30,7 +30,7 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.pwil import PWILReward
-from irl.utils import load_hf_demos, prepare_batch_update_irl, evaluate_model, enhance_demos_with_barycenters, demos_gen_dict, MujocoTestWrapper, save_traj_dict
+from irl.utils import load_hf_demos, evaluate_model, enhance_demos_with_barycenters, MujocoTestWrapper, save_traj_dict
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -69,7 +69,7 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=3000000,
+    parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--buffer-size", type=int, default=int(1e6),
         help="the replay memory buffer size")

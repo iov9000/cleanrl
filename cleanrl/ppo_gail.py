@@ -534,7 +534,7 @@ if __name__ == "__main__":
             #         break
 
             gen_demos = demos_gen_dict(demos['all'], args.batch_size)
-            if args.env_id == "MoveP-v0":
+            if "MoveP-v0" in args.env_id:
                 fig, ax = plt.subplots(1,2,figsize=(10,5))
             for d in gen_demos:
                 if len(d['obs']) < args.batch_size:
@@ -550,7 +550,7 @@ if __name__ == "__main__":
                     dones_ = dones
 
 
-                if args.env_id == "MoveP-v0":
+                if "MoveP-v0" in args.env_id:
                     # TODO: add second plot with W2-distance / KL-div / JS-div
                     ax[0].scatter(10, 10, s=200, c='b', marker='o',alpha=1.0)
                     ax[0].scatter(190, 190, s=200, c='r', marker='*', alpha=1.0)

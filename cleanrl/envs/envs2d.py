@@ -428,23 +428,29 @@ class MoveP(Env):
             data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
             data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
             return data
-    
+
 # continuous movepoint
 class CMoveP(Env):
     metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
 
-    def __init__(self, waypoints=[(175,175)], size=200, random_init=False, render_mode="rgb_array"):
+    def __init__(self, waypoints=[(175, 175)], size=200, random_init=False, goal_conditioning=True, render_mode="rgb_array"):
         super(CMoveP, self).__init__()
         
+        self.goal_conditioning = goal_conditioning
+        if goal_conditioning:
+            dim = 4
+        else:
+            dim = 2
+
         # Define a 2-D observation space (R^4)
         self.size = size
-        self.observation_shape = (4)
+        self.observation_shape = (dim)
         self.observation_space = spaces.Box(low = np.zeros(self.observation_shape), 
                                             high = np.ones(self.observation_shape)*self.size,
                                             dtype = np.float32)
     
-        self.action_space = spaces.Box(low = -np.ones((2,)), 
-                                            high = np.ones((2,)),
+        self.action_space = spaces.Box(low = -3*np.ones((2,)), 
+                                            high = 3*np.ones((2,)),
                                             dtype = np.float32)
         
         # Add targets
@@ -465,7 +471,6 @@ class CMoveP(Env):
         # Flag that marks the termination of an episode
         self.term = False
         self.trunc = False
-
         # Reset the fuel consumed
         self.time = self.max_time
 
@@ -487,8 +492,6 @@ class CMoveP(Env):
         state = np.concatenate([self.agent, curr_tgt],0)
         
         self.needs_reset = False
-
-        self.fig = plt.figure(figsize=(10,10))
         # return the observation
         return state, {}
     
@@ -508,6 +511,13 @@ class CMoveP(Env):
     def clamp(self, n, minn, maxn):
         return max(min(maxn, n), minn)
 
+    def get_reward(self, state, tgt = (175,175)):
+        curr_tgt = np.array(tgt)
+        # l2 distance as reward
+        reward = -(np.sqrt((state[0] - curr_tgt[0])**2 + (state[1]-curr_tgt[1])**2))
+        
+        return reward
+
     def step(self, action):
         # Assert that it is a valid action 
         assert self.action_space.contains(action), "Invalid Action"
@@ -516,8 +526,10 @@ class CMoveP(Env):
         self.time -= 1 
 
         # apply the action to the agent
-        self.agent[0] = self.clamp(self.agent[0] + action[0], self.x_min, self.x_max)
-        self.agent[1] = self.clamp(self.agent[1] + action[1], self.y_min, self.y_max)
+        move = action
+
+        self.agent[0] = self.clamp(self.agent[0] + move[0], self.x_min, self.x_max)
+        self.agent[1] = self.clamp(self.agent[1] + move[1], self.y_min, self.y_max)
 
         # REMOVE NOOP
         #elif action == 4:
@@ -527,20 +539,22 @@ class CMoveP(Env):
         # l2 distance as reward
         reward = -(np.sqrt((self.agent[0] - curr_tgt[0])**2 + (self.agent[1]-curr_tgt[1])**2))
         
-        if np.linalg.norm(self.agent - curr_tgt) < 1e-1:
+        if np.linalg.norm(self.agent - curr_tgt) < 3:
             #reward += 5
             if self.curr_tgt == len(self.waypoints)-1:
                 # task solved
-                print("Task Solved")
                 reward += 1000
                 self.term = True
             else:
                 # update target
                 reward += 500
                 self.curr_tgt+=1
-
-        state = np.stack([self.agent[0], self.agent[1], curr_tgt[0], curr_tgt[1]])
         
+        if self.goal_conditioning:
+            state = np.stack([self.agent[0], self.agent[1], curr_tgt[0], curr_tgt[1]])
+        else:
+            state = self.agent
+
         # If out of fuel, end the episode.
         if self.time == 0:
             self.trunc = True
@@ -550,8 +564,8 @@ class CMoveP(Env):
 
     def render(self, mode = "rgb_array"):
         assert mode in ["human", "rgb_array"], "Invalid mode, must be either \"human\" or \"rgb_array\""
-        plt.gcf()
-        plt.scatter(self.agent[0], self.agent[1], c='m', s=2, alpha=0.2)
+        fig = plt.figure(figsize=(10,10))
+        plt.scatter(self.agent[0], self.agent[1], c='m',alpha=0.2)
         curr_tgt = self.waypoints[self.curr_tgt]
         plt.scatter(curr_tgt[0], curr_tgt[1], c='r')
         plt.axis('equal')
@@ -559,11 +573,149 @@ class CMoveP(Env):
             plt.show()
 
         elif mode == "rgb_array":
-            self.fig.canvas.draw()
-
-            data = np.frombuffer(self.fig.canvas.tostring_rgb(), dtype=np.uint8)
-            data = data.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
+            #return fig
+            fig.canvas.draw()
+            data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
             return data
+
+
+# # continuous movepoint
+# class CMoveP(Env):
+#     metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
+
+#     def __init__(self, waypoints=[(175,175)], size=200, random_init=False, render_mode="rgb_array"):
+#         super(CMoveP, self).__init__()
+        
+#         # Define a 2-D observation space (R^4)
+#         self.size = size
+#         self.observation_shape = (4)
+#         self.observation_space = spaces.Box(low = np.zeros(self.observation_shape), 
+#                                             high = np.ones(self.observation_shape)*self.size,
+#                                             dtype = np.float32)
+    
+#         self.action_space = spaces.Box(low = -np.ones((2,)), 
+#                                             high = np.ones((2,)),
+#                                             dtype = np.float32)
+        
+#         # Add targets
+#         self.n_tgt = len(waypoints)
+#         self.waypoints = waypoints
+        
+#         # Maximum episode length
+#         self.max_time = 1000
+
+#         # Permissible area of helicper to be 
+#         self.y_min = 0
+#         self.x_min = 0
+#         self.y_max = self.size
+#         self.x_max = self.size
+#         self.random_init = random_init
+        
+#     def reset(self, seed=1, options=None):
+#         # Flag that marks the termination of an episode
+#         self.term = False
+#         self.trunc = False
+
+#         # Reset the fuel consumed
+#         self.time = self.max_time
+
+#         # Reset the reward
+#         self.curr_tgt = 0
+
+#         # Determine a place to intialise the agent in
+#         if self.random_init:
+#             x = random.randrange(int(self.size * 0.05), int(self.size * 0.10))
+#             y = random.randrange(int(self.size * 0.15), int(self.size * 0.20))
+#         else:
+#             x = 10
+#             y = 10
+
+#         # Intialise the agent
+#         self.agent = np.array([x,y])
+        
+#         curr_tgt = np.array(self.waypoints[self.curr_tgt])
+#         state = np.concatenate([self.agent, curr_tgt],0)
+        
+#         self.needs_reset = False
+
+#         self.fig = plt.figure(figsize=(10,10))
+#         # return the observation
+#         return state, {}
+    
+#     # TODO: expand to preferences as random process!
+#     def generate_random_targets(self):
+#         tgts = []
+#         for i in range(self.n_tgt):
+#             tgt = Target("tgt_{}".format(i), self.x_max, self.x_min, self.y_max, self.y_min)
+
+#             tgt_x = random.randrange(self.y_min+int(self.y_max/4), self.y_max-int(self.y_max/4))
+#             tgt_y = random.randrange(self.y_min+int(self.y_max/4), self.y_max-int(self.y_max/4))
+#             tgt.set_position(tgt_x, tgt_y)
+#             tgts.append(tgt)
+        
+#         return tgts
+    
+#     def clamp(self, n, minn, maxn):
+#         return max(min(maxn, n), minn)
+
+#     def step(self, action):
+#         # Assert that it is a valid action 
+#         assert self.action_space.contains(action), "Invalid Action"
+
+#         # Decrease the time counter 
+#         self.time -= 1 
+
+#         # apply the action to the agent
+#         self.agent[0] = self.clamp(self.agent[0] + action[0], self.x_min, self.x_max)
+#         self.agent[1] = self.clamp(self.agent[1] + action[1], self.y_min, self.y_max)
+
+
+#         # REMOVE NOOP
+#         #elif action == 4:
+#         #    self.agent.move(0,0)
+            
+#         curr_tgt = np.array(self.waypoints[self.curr_tgt])
+#         # l2 distance as reward
+#         reward = -(np.sqrt((self.agent[0] - curr_tgt[0])**2 + (self.agent[1]-curr_tgt[1])**2))
+        
+#         if np.linalg.norm(self.agent - curr_tgt) < 1e-1:
+#             #reward += 5
+#             if self.curr_tgt == len(self.waypoints)-1:
+#                 # task solved
+#                 print("Task Solved")
+#                 reward += 1000
+#                 self.term = True
+#             else:
+#                 # update target
+#                 reward += 500
+#                 self.curr_tgt+=1
+
+#         state = np.stack([self.agent[0], self.agent[1], curr_tgt[0], curr_tgt[1]])
+        
+#         # If out of fuel, end the episode.
+#         if self.time == 0:
+#             self.trunc = True
+#             self.needs_reset = True
+
+#         return state, reward, self.term, self.trunc, {}
+
+#     def render(self, mode = "rgb_array"):
+#         assert mode in ["human", "rgb_array"], "Invalid mode, must be either \"human\" or \"rgb_array\""
+#         plt.gcf()
+#         plt.scatter(self.agent[0], self.agent[1], c='m', s=2, alpha=0.2)
+#         curr_tgt = self.waypoints[self.curr_tgt]
+#         plt.scatter(curr_tgt[0], curr_tgt[1], c='r')
+#         plt.axis('equal')
+#         if mode == "human":
+#             plt.show()
+
+#         elif mode == "rgb_array":
+#             self.fig.canvas.draw()
+
+#             data = np.frombuffer(self.fig.canvas.tostring_rgb(), dtype=np.uint8)
+#             data = data.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
+#             return data
 
 
     
