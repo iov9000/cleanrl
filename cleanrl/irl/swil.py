@@ -214,7 +214,7 @@ class SWILDiscriminator(nn.Module):
                     #                                     out_features=self.n_proj,
                     #                                     bias=bias)]
                     self.reward_layers += [
-                        linlayer(self.layer_dims[-1], self.n_proj, bias, opt.use_weight_norm, opt.use_spectral_norm)]
+                        linlayer(self.layer_dims[-1], self.n_proj, bias, opt.use_ll_weight_norm, opt.use_spectral_norm)]
                     self.reward = nn.Sequential(*self.reward_layers)
                 else:
                     self.reward = nn.MultiheadAttention(embed_dim=self.layer_dims[1], num_heads = 1)
@@ -329,6 +329,25 @@ class SWILDiscriminator(nn.Module):
         reset_parameters = getattr(self.reward, "reset_parameters", None)
         if callable(reset_parameters):
             self.reward.reset_parameters()
+
+    def reset_all_weights(self):
+        """
+        refs:
+            - https://discuss.pytorch.org/t/how-to-re-set-alll-parameters-in-a-network/20819/6
+            - https://stackoverflow.com/questions/63627997/reset-parameters-of-a-neural-network-in-pytorch
+            - https://pytorch.org/docs/stable/generated/torch.nn.Module.html
+        """
+
+        @torch.no_grad()
+        def weight_reset(m: nn.Module):
+            # - check if the current module has reset_parameters & if it's callabed called it on m
+            reset_parameters = getattr(m, "reset_parameters", None)
+            if callable(reset_parameters):
+                m.reset_parameters()
+
+        # Applies fn recursively to every submodule see: https://pytorch.org/docs/stable/generated/torch.nn.Module.html
+        self.base.apply(fn=weight_reset)
+        self.reward.apply(fn=weight_reset)
 
     def vb(self, base_out, noise=True):
         mustd = self.encoder_z(base_out)
@@ -509,6 +528,7 @@ class SWILDiscriminator(nn.Module):
         # assert dn==dm and M==N
         
         if random:
+            self.base.reset()
             self.reward.reset()
         
         # project slices
@@ -519,8 +539,8 @@ class SWILDiscriminator(nn.Module):
         pi_slices_sorted = torch.sort(pi_slices, dim=0)[0]
         exp_slices_sorted = torch.sort(exp_slices, dim=0)[0]
         
-        self.pi_atoms_sorted = pi_slices_sorted
-        self.exp_atoms_sorted = exp_slices_sorted
+        self.pi_atoms_sorted.append(pi_slices_sorted)
+        self.exp_atoms_sorted.append(exp_slices_sorted)
 
         return torch.sqrt(torch.sum((pi_slices_sorted-exp_slices_sorted)**2))
 
@@ -568,7 +588,7 @@ class SWILDiscriminator(nn.Module):
         # M,dm = Y.shape
         # assert dn==dm and M==N
 
-        #self.weight_reset()
+        self.weight_reset()
 
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         total_loss = np.zeros((iterations,))
@@ -579,7 +599,7 @@ class SWILDiscriminator(nn.Module):
             loss.backward(retain_graph=True)
             optimizer.step()
         
-        return self.gsw(obs_pi, acs_pi, obs_exp, acs_exp,random=False)
+        return self.gsw_dist_nn(obs_pi, acs_pi, obs_exp, acs_exp,random=False)
 
     def irm_penalty(self, logits, y):
         scale = torch.tensor(1.).requires_grad_()

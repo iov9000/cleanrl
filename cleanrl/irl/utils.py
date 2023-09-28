@@ -600,7 +600,7 @@ class MujocoTestWrapper(gym.Wrapper):
         return o, r, t, tr, i
 
 
-def evaluate_model(args, actor, device, deterministic=True, wrap_mujoco=False):
+def evaluate_model(args, actor, device, deterministic=False, wrap_mujoco=False):
     test_env = gym.make(args.env_id)
     if wrap_mujoco:
         test_env = MujocoTestWrapper(test_env, eps0=args.test_eps, 
@@ -648,8 +648,8 @@ def save_traj_dict(opt, env_name, env, model, device,
                                                                             eval=deterministic)
                 else:
                     action, _, mean = model.get_action(torch.Tensor(ob).to(device).unsqueeze(0))
-                    #if deterministic:
-                    #    action = mean
+                    if deterministic:
+                        action = mean
 
             action = action.squeeze().detach().cpu().numpy()
             next_ob, reward, term, trunc, _ = env.step(action)

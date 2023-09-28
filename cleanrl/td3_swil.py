@@ -27,6 +27,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
+    parser.add_argument("--exp-id", type=str, default="",
+        help="additional identifier of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
     parser.add_argument("--logging_interval", type=int, default=500,
@@ -82,11 +84,12 @@ def parse_args():
     parser.add_argument("--ent-coef", type=float, default=0.0,
         help="coefficient of the entropy")
 
-    # SWIL specific 
+   # SWIL specific 
     parser.add_argument("--n_proj", type=int, default=1, help="number of projections for SWIL")
     parser.add_argument("--poly_degree", type=int, default=4, help="degree of polynomial for SWIL")
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
     parser.add_argument("--swil_rew", type=str, default='repl_loss', help="mean or replacement")
+    parser.add_argument("--repl_loss_type", type=str, default='diff', help="replacement type: diff or a")
     parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
     parser.add_argument("--swil_loss", default='surr_loss', type=str, required=False, help="loss_type:")
     parser.add_argument("--gsw_df", default='nn', type=str, required=False, help="Radon transform defining function: nn/poly/linear/circular")
@@ -98,6 +101,11 @@ def parse_args():
     parser.add_argument("--linear_proj", default=False, required=False, action='store_true', 
                                         help="linear projection only")
     parser.add_argument("--swil_ae", default=False, required=False, action='store_true', help="use autoencoder")
+    parser.add_argument("--i_c", type=float, default=0.1, help="degree of polynomial for SWIL")
+    parser.add_argument("--min_beta", type=int, default=1.0, help="degree of polynomial for SWIL")
+    parser.add_argument("--max_q_len", type=int, default=1, help="max number of projected atom sets in queue")
+    parser.add_argument("--max_swil_step", type=int, default=100000000, help="only update projections until some timestep")
+    parser.add_argument("--replace_atoms", default=False, required=False, action='store_true', help="actually replace atoms with policy samples")
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
 
@@ -125,17 +133,22 @@ def parse_args():
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--gsw_coeff', default=1.0, type=float, required=False, help='ae loss coeff')
+    parser.add_argument('--vb_coeff', default=1e-4, type=float, required=False, help='ae loss coeff')
     parser.add_argument('--recon_coeff', default=0.0, type=float, required=False, help='ae loss coeff')
     parser.add_argument('--l2_coeff', default=0.0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
     parser.add_argument("--scheduler_gamma", type=float, default=1.0,
         help="exponential decay rate of the learning rate scheduler")
+    parser.add_argument("--swil_vb", type=int, default=0,
+        help="variational bottleneck dimension")
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
     parser.add_argument('--use_disc_bias', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
     parser.add_argument('--use_weight_norm', default=False, required=False, 
         action='store_true', help='use weight norm')
+    parser.add_argument('--use_ll_weight_norm', default=False, required=False, 
+        action='store_true', help='use weight norm only in last layer')
     parser.add_argument('--use_spectral_norm', default=False, required=False, 
         action='store_true', help='use spectral_norm')
     parser.add_argument("--disc_nonlin", type=str, default="tanh",
@@ -313,7 +326,45 @@ if __name__ == "__main__":
 
     # TRY NOT TO MODIFY: start the game
     init = True # flag for IRL discriminator pretraining
+    ######## gather a batch to define a SWIL distance so we don't lose initial samples
+    obs = envs.reset(seed=args.seed)[0]
+    b_obs, b_acs, b_dones = [], [], [] 
+    #b_obs.append(torch.from_numpy(obs).type(torch.get_default_dtype()))
+    for i in range(args.batch_size):
+        actions = np.array([envs.single_action_space.sample()
+                            for _ in range(envs.num_envs)])
+        next_obs, rewards, term, trunc, infos = envs.step(actions)
+        dones = term or trunc
+        b_obs.append(torch.from_numpy(next_obs).type(torch.get_default_dtype()))
+        b_acs.append(torch.from_numpy(actions).type(torch.get_default_dtype()))
+        b_dones.append(torch.from_numpy(dones).type(torch.get_default_dtype()))
 
+    b_obs = torch.stack(b_obs)
+    b_acs = torch.stack(b_acs)
+    b_dones = torch.stack(b_dones)
+
+    gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+
+    for d in gen_demos:
+        if len(d['obs']) < args.batch_size:
+            obs_ = b_obs[:len(d['obs'])]
+            actions_ = b_acs[:len(d['obs'])]
+            dones_ = b_dones[:len(d['obs'])]
+        else:
+            obs_ = b_obs
+            actions_ = b_acs
+            dones_ = b_dones
+        # GAIL Discriminator Update
+        update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, actor)
+        loss_dict = disc.compute_loss(update_dict)
+
+        loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + disc.beta * loss_dict['ib_loss'] 
+        if args.irm_coeff > 1.0:
+            loss /= args.irm_coeff
+
+        disc.update(loss)
+
+    #####
     obs = envs.reset(seed=args.seed)[0]
     for global_step in range(args.total_timesteps):
         try:

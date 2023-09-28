@@ -168,6 +168,8 @@ def parse_args():
         action='store_false', help='use bias in disc arch')
     parser.add_argument('--use_weight_norm', default=False, required=False, 
         action='store_true', help='use weight norm')
+    parser.add_argument('--use_ll_weight_norm', default=False, required=False, 
+        action='store_true', help='use weight norm only in last layer')
     parser.add_argument('--use_spectral_norm', default=False, required=False, 
         action='store_true', help='use spectral_norm')
     parser.add_argument("--disc_nonlin", type=str, default="tanh",
@@ -395,7 +397,48 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     init = True # flag for IRL discriminator pretraining
 
+    
+    ######## gather a batch to define a SWIL distance so we don't lose initial samples
     obs = envs.reset(seed=args.seed)[0]
+    b_obs, b_acs, b_dones = [], [], [] 
+    #b_obs.append(torch.from_numpy(obs).type(torch.get_default_dtype()))
+    for i in range(args.batch_size):
+        actions = np.array([envs.single_action_space.sample()
+                            for _ in range(envs.num_envs)])
+        next_obs, rewards, term, trunc, infos = envs.step(actions)
+        dones = term or trunc
+        b_obs.append(torch.from_numpy(next_obs).type(torch.get_default_dtype()))
+        b_acs.append(torch.from_numpy(actions).type(torch.get_default_dtype()))
+        b_dones.append(torch.from_numpy(dones).type(torch.get_default_dtype()))
+
+    b_obs = torch.stack(b_obs)
+    b_acs = torch.stack(b_acs)
+    b_dones = torch.stack(b_dones)
+
+    gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+
+    for d in gen_demos:
+        if len(d['obs']) < args.batch_size:
+            obs_ = b_obs[:len(d['obs'])]
+            actions_ = b_acs[:len(d['obs'])]
+            dones_ = b_dones[:len(d['obs'])]
+        else:
+            obs_ = b_obs
+            actions_ = b_acs
+            dones_ = b_dones
+        # GAIL Discriminator Update
+        update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, actor)
+        loss_dict = disc.compute_loss(update_dict)
+
+        loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + disc.beta * loss_dict['ib_loss'] 
+        if args.irm_coeff > 1.0:
+            loss /= args.irm_coeff
+
+        disc.update(loss)
+
+    #####
+    obs = envs.reset(seed=args.seed)[0]
+
     for global_step in range(args.total_timesteps):
         irl_trigger = False
         try:

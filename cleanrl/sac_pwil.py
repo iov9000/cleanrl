@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 from distutils.util import strtobool
 
+import ot
 import gymnasium as gym
 
 gym.envs.register(
@@ -461,6 +462,9 @@ if __name__ == "__main__":
                 if global_step % args.eval_interval == 0:
                     mu, std, d = evaluate_model(args, actor, device)
                     print(f"Evaluation at {global_step}: {mu}, {std}")
+                    ref_dist = ot.sliced_wasserstein_distance(
+                        d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
+                    writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
                     writer.add_scalar('eval/mu', mu, global_step)
                     writer.add_scalar('eval/std', std, global_step)
 
