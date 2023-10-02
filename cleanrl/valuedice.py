@@ -97,8 +97,8 @@ def parse_args():
         help="noise clip parameter of the Target Policy Smoothing Regularization")
     parser.add_argument("--alpha", type=float, default=0.2,
             help="Entropy regularization coefficient.")
-    parser.add_argument('--autotune', default=False, required=False, 
-        action='store_true', help='enhance demos using W2 barycenters')
+    parser.add_argument('--autotune', default=True, required=False, 
+        action='store_false', help='enhance demos using W2 barycenters')
     # compat
     parser.add_argument("--ent-coef", type=float, default=0.0,
         help="coefficient of the entropy")
@@ -194,6 +194,13 @@ def weighted_softmax(x, weights, dim=0):
   x = x - torch.max(x, dim=dim)[0]
   return weights * torch.exp(x) / torch.sum(weights * torch.exp(x), axis=dim, keepdim=True)
 
+def orthogonal_init_(m):
+    """Custom weight init for Conv2D and Linear layers."""
+    if isinstance(m, nn.Linear):
+        nn.init.orthogonal_(m.weight.data)
+        if hasattr(m.bias, 'data'):
+            m.bias.data.fill_(0.0)
+
 # ALGO LOGIC: initialize agent here:
 class SoftQNetwork(nn.Module):
     def __init__(self, env):
@@ -201,6 +208,7 @@ class SoftQNetwork(nn.Module):
         self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape), 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, 1)
+        self.apply(orthogonal_init_)
 
     def forward(self, x, a):
         x = torch.cat([x, a], 1)
@@ -213,12 +221,7 @@ class SoftQNetwork(nn.Module):
 LOG_STD_MAX = 2
 LOG_STD_MIN = -5
 
-def orthogonal_init_(m):
-    """Custom weight init for Conv2D and Linear layers."""
-    if isinstance(m, nn.Linear):
-        nn.init.orthogonal_(m.weight.data)
-        if hasattr(m.bias, 'data'):
-            m.bias.data.fill_(0.0)
+
 
 class Actor(nn.Module):
     def __init__(self, env):
@@ -234,7 +237,7 @@ class Actor(nn.Module):
         self.register_buffer(
             "action_bias", torch.tensor((env.single_action_space.high + env.single_action_space.low) / 2.0, dtype=torch.float32)
         )
-        self.apply(orthogonal_init_)
+        #self.apply(orthogonal_init_)
 
 
     def forward(self, x):
@@ -524,11 +527,11 @@ if __name__ == "__main__":
                             alpha = log_alpha.exp().item()
 
                 # update the target networks
-                if global_step % args.target_network_frequency == 0:
-                    for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
-                        target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-                    for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
-                        target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
+                # if global_step % args.target_network_frequency == 0:
+                #     for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
+                #         target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
+                #     for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
+                #         target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
 
                 if global_step % args.logging_interval == 0:
                     writer.add_scalar("losses/valuedice_loss", loss.mean().item(), global_step)

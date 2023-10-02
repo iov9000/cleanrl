@@ -130,6 +130,7 @@ def parse_args():
 
     parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
     parser.add_argument("--swil_loss", default='surr_loss', type=str, required=False, help="loss_type:")
+
     parser.add_argument("--gsw_df", default='nn', type=str, required=False, help="Radon transform defining function: nn/poly/linear/circular")
     parser.add_argument('--measurable_space', default='sxa', type=str, 
         required=False, help='measurable space (s, sxs, sxa)')
@@ -186,6 +187,9 @@ def parse_args():
         action='store_false', help='use bias in disc arch')
     parser.add_argument('--use_weight_norm', default=False, required=False, 
         action='store_true', help='use weight norm')
+    parser.add_argument('--use_ll_weight_norm', default=False, required=False, 
+        action='store_true', help='use weight norm')
+
     parser.add_argument('--use_spectral_norm', default=False, required=False, 
         action='store_true', help='use spectral_norm')
     parser.add_argument("--disc_nonlin", type=str, default="tanh",
