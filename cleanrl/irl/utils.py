@@ -37,6 +37,30 @@ def load_hf_demos(args, n_demos, perturb=0.0, bary_enhance=False):
     return expert_demos
 
 
+def load_fast_demos(args, filename, n_demos=1, bary_enhance=False, offset=100, obs_shape=3):
+    expert_demos = {}
+    folder = args.demo_dir
+    subsample = args.subsample
+
+    if folder is None:
+        folder = "demos"
+    expert_demos = {}
+    expert_demos['all'] = pickle.load(open(os.path.join(folder, filename), 'rb'))
+
+    try:
+        #expert_demos['all'] = np.load(os.path.join(folder, f"demo_hf_{env_name}_{n_demos}.npy"))
+        expert_demos['all'] = pickle.load(open(os.path.join(folder, filename), 'rb'))
+        expert_demos['all']['obs'] = expert_demos['all']['obs'][::subsample]
+        expert_demos['all']['acs'] = expert_demos['all']['acs'][::subsample]
+        expert_demos['all']['rew'] = expert_demos['all']['rew'][::subsample]
+        expert_demos['all']['done'] = expert_demos['all']['done'][::subsample]
+    except:
+        print(f"No FAST demo found for {filename}, go find it!")
+        assert False
+
+    return {'all': expert_demos}
+
+
 def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, offset=100, obs_shape=3):
     expert_demos = {}
     obs = []
@@ -352,9 +376,16 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy, co
     policy_dones_t = torch.from_numpy(dones).type(torch.get_default_dtype())
     all_obs_t = torch.cat([expert_obs_t, obs_t], axis=0)
     all_obs_next_t = torch.cat([expert_obs_next_t, policy_obs_next_t], axis=0)
-    all_acs_t = torch.cat([expert_acs_t, acs_t], axis=0)
-    all_lprobs_t = torch.cat([expert_lprobs_t, policy_lprobs_t]).type(
-        torch.get_default_dtype())
+    if expert_acs_t.shape[-1] == acs_t.shape[-1]:
+        all_acs_t = torch.cat([expert_acs_t, acs_t], axis=0)
+        all_lprobs_t = torch.cat([expert_lprobs_t, policy_lprobs_t]).type(
+            torch.get_default_dtype())
+    else:
+        all_lprobs_t = torch.cat([torch.zeros_like(policy_lprobs_t), policy_lprobs_t]).type(
+            torch.get_default_dtype())        
+        all_acs_t = torch.cat([torch.zeros_like(acs_t), acs_t], axis=0)
+
+
     all_dones_t = torch.cat([expert_dones_t, policy_dones_t], axis=0)
 
     if torch.cuda.is_available():
@@ -600,12 +631,13 @@ class MujocoTestWrapper(gym.Wrapper):
         return o, r, t, tr, i
 
 
-def evaluate_model(args, actor, device, deterministic=False, wrap_mujoco=False):
-    test_env = gym.make(args.env_id)
-    if wrap_mujoco:
-        test_env = MujocoTestWrapper(test_env, eps0=args.test_eps, 
-                                    epsdyn=args.test_eps, 
-                                    params=args.perturbation_parameters)
+def evaluate_model(args, actor, device, test_env=None, deterministic=False, wrap_mujoco=False):
+    if test_env is None:
+        test_env = gym.make(args.env_id)
+        if wrap_mujoco:
+            test_env = MujocoTestWrapper(test_env, eps0=args.test_eps, 
+                                        epsdyn=args.test_eps, 
+                                        params=args.perturbation_parameters)
     if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
         test_env = gym.wrappers.ClipAction(test_env)
     if args.normalize_obs:

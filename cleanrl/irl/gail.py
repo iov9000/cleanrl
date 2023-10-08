@@ -127,8 +127,9 @@ class GAILDiscriminator(nn.Module):
 
     def base_fwd(self, ob, ac, nob=None, d=None):
         #  match tensor sizes
-        if len(ob.shape) != len(ac.shape):
-            ac = torch.unsqueeze(ac, -1)
+        if ac is not None:
+            if len(ob.shape) != len(ac.shape):
+                ac = torch.unsqueeze(ac, -1)
         if d is not None and len(ob.shape) != len(d.shape):
             d = torch.unsqueeze(d, -1)
 
@@ -148,7 +149,7 @@ class GAILDiscriminator(nn.Module):
 
         return base_out
 
-    def forward(self, ob, ac, nob=None, d=None):
+    def forward(self, ob, ac=None, nob=None, d=None):
         base_out = self.base_fwd(ob, ac, nob, d)
 
         d_out = self.discriminator(base_out)
