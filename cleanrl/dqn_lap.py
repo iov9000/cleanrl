@@ -5,12 +5,14 @@ import random
 import time
 from distutils.util import strtobool
 
+from datetime import datetime
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import gym
+import gymnasium as gym
 
 gym.envs.register(
     id='MoveP-v0',
@@ -26,7 +28,7 @@ gym.envs.register(
 
 gym.envs.register(
     id='Lap-v0',
-    entry_point='envs.env_lap:Laparos',
+    entry_point='envs.env_lap_new:Laparos',
     max_episode_steps=10000,
 )
 
@@ -55,11 +57,13 @@ def parse_args():
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="Lap-v0",
+    parser.add_argument("--env_id", type=str, default="Lap-v0",
         help="the id of the environment")
+    parser.add_argument("--num_envs", type=int, default=1,
+        help="number of parallel environments")
     parser.add_argument("--total-timesteps", type=int, default=10000000,
         help="total timesteps of the experiments")
-    parser.add_argument("--learning-rate", type=float, default=3e-4,
+    parser.add_argument("--learning-rate", type=float, default=1e-4,
         help="the learning rate of the optimizer")
     parser.add_argument("--buffer-size", type=int, default=1000000,
         help="the replay memory buffer size")
@@ -79,19 +83,63 @@ def parse_args():
         help="timestep to start learning")
     parser.add_argument("--train-frequency", type=int, default=4,
         help="the frequency of training")
+
+    # environment specific arguments
+    parser.add_argument('--goal_conditioning', default=True, 
+        action='store_false', required=False, help='normalize irl rewards')  
+    parser.add_argument('--condition_on_n_tasks_completed', default=True, 
+        action='store_false', required=False, help='normalize irl rewards')  
+    parser.add_argument('--done_on_collision', default=True, 
+        action='store_false', required=False, help='normalize irl rewards') 
+    parser.add_argument('--collision_loss', default=False, 
+        action='store_true', required=False, help='end episode on collision')  
+    parser.add_argument('--hard_collisions', default=True, 
+        action='store_false', required=False, help='dont progress on collision')  
+    parser.add_argument('--continuous_actions', default=False, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument('--render_meshes', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument("--step_size", type=float, default=0.3,
+        help="step magnitude")
+    parser.add_argument("--state_spec", type=str, default="r3",
+        help="state spec (r3/r3so3)")
+
+    # environment specific arguments
+    parser.add_argument('--normalize_obs', default=True, 
+        action='store_true', required=False, help='normalize observations')  
+    parser.add_argument('--normalize_rewards', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument('--clip_action', default=True, 
+        action='store_true', required=False, help='clip actions')
+
+    parser.add_argument('--verbose', default=False, required=False, 
+        action='store_true', help='verbose output')
     args = parser.parse_args()
+
+    non_default = {
+        opt.dest: getattr(args, opt.dest)
+        for opt in parser._option_string_actions.values()
+        if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
+    }
+
     # fmt: on
-    return args
+    return args, non_default
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
+def make_env(args, env_id, seed, idx, capture_video, run_name):
     def thunk():
-        env = gym.make(env_id)
+        env = gym.make(env_id, gc=args.goal_conditioning, 
+                             state_spec=args.state_spec, 
+                             step_size=args.step_size,
+                             done_on_collision=args.done_on_collision,
+                             hard_collisions=args.hard_collisions,
+                             plot_meshes=args.render_meshes,
+                             collision_loss=args.collision_loss)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env.seed(seed)
+        #env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -121,8 +169,13 @@ def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    args, non_default = parse_args()
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+    # create output folder with non default arguments in the name
+    id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
+    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_{id_string}"
+    if len(run_name) > 220:
+        run_name = run_name[:220]
     if args.track:
         import wandb
 
@@ -150,7 +203,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    envs = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed, 0, args.capture_video, run_name)])
+    envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name)])
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     q_network = QNetwork(envs).to(device)
@@ -168,7 +221,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
-    obs = envs.reset()
+    obs = envs.reset(seed=args.seed)[0]
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
         epsilon = linear_schedule(args.start_e, args.end_e, args.exploration_fraction * args.total_timesteps, global_step)
@@ -179,22 +232,30 @@ if __name__ == "__main__":
             actions = torch.argmax(q_values, dim=1).cpu().numpy()
 
         # TRY NOT TO MODIFY: execute the game and log data.
-        next_obs, rewards, dones, infos = envs.step(actions)
+        next_obs, rewards, term, trunc, infos = envs.step(actions)
+        dones = term or trunc
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        for info in infos:
-            if "episode" in info.keys():
-                print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
-                writer.add_scalar("charts/epsilon", epsilon, global_step)
+        if not isinstance(infos, list):
+            infos = [infos]
+
+        for item in infos:
+            # TODO: fix this for new Gymnasium
+            if "final_info" in item.keys():
+                irl_trigger = True
+                if args.verbose:
+                    print(f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
+                if global_step % 1 == 0:
+                    writer.add_scalar("charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                    writer.add_scalar("charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
+                    writer.add_scalar("charts/epsilon", epsilon, global_step)
                 break
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
         real_next_obs = next_obs.copy()
         for idx, d in enumerate(dones):
             if d:
-                real_next_obs[idx] = infos[idx]["terminal_observation"]
+                real_next_obs[idx] = infos[idx]["final_observation"][0]
         rb.add(obs, real_next_obs, actions, rewards, dones, infos)
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook

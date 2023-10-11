@@ -50,10 +50,10 @@ def load_fast_demos(args, filename, n_demos=1, bary_enhance=False, offset=100, o
     try:
         #expert_demos['all'] = np.load(os.path.join(folder, f"demo_hf_{env_name}_{n_demos}.npy"))
         expert_demos['all'] = pickle.load(open(os.path.join(folder, filename), 'rb'))
-        expert_demos['all']['obs'] = expert_demos['all']['obs'][::subsample]
-        expert_demos['all']['acs'] = expert_demos['all']['acs'][::subsample]
-        expert_demos['all']['rew'] = expert_demos['all']['rew'][::subsample]
-        expert_demos['all']['done'] = expert_demos['all']['done'][::subsample]
+        expert_demos['all']['obs'] = expert_demos['all']['obs'][10::subsample]
+        expert_demos['all']['acs'] = expert_demos['all']['acs'][10::subsample]
+        expert_demos['all']['rew'] = expert_demos['all']['rew'][10::subsample]
+        expert_demos['all']['done'] = expert_demos['all']['done'][10::subsample]
     except:
         print(f"No FAST demo found for {filename}, go find it!")
         assert False

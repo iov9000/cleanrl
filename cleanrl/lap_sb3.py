@@ -43,7 +43,7 @@ from stable_baselines3 import DQN as DQNSB
 
 gym.envs.register(
      id='Lap-v0',
-     entry_point='envs.env_lap:Laparos',
+     entry_point='envs.env_lap_new:Laparos',
      max_episode_steps=10000,
 )
 
