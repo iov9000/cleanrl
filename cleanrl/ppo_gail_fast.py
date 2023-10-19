@@ -65,6 +65,9 @@ def parse_args():
         help="the name of this experiment")
     parser.add_argument("--executable_name", type=str, default='envs/fast/fast_ic_ca.app',
         help="the Unity executable")
+    parser.add_argument("--port_offset", type=int, default=10,
+        help="number of demos to use")
+
     parser.add_argument("--exp_id", type=str, default='',
         help="the id of this experiment")
     parser.add_argument("--seed", type=int, default=1,
@@ -209,7 +212,7 @@ def parse_args():
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
     def thunk():
-        env = gym.make(env_id, args=opt)
+        env = gym.make(env_id, args=opt, port_offset=opt.port_offset)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if opt.time_aware:
             env = gym.wrappers.TimeAwareObservation(env)
@@ -357,7 +360,7 @@ if __name__ == "__main__":
     else:
         demos = load_hf_demos(args, args.n_demos, args.demo_eps)
 
-    test_env = gym.make(args.env_id, args=args)
+    test_env = gym.make(args.env_id, args=args, no_graphics=False, time_scale=1, port_offset=args.port_offset+1)
 
     if args.enhance_barys > 0:
         print("Enhancing demos by computing Wasserstein barycenters")

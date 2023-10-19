@@ -631,7 +631,7 @@ class MujocoTestWrapper(gym.Wrapper):
         return o, r, t, tr, i
 
 
-def evaluate_model(args, actor, device, test_env=None, deterministic=False, wrap_mujoco=False):
+def evaluate_model(args, actor, device, test_env=None, deterministic=False, wrap_mujoco=False, n_traj=10):
     if test_env is None:
         test_env = gym.make(args.env_id)
         if wrap_mujoco:
@@ -645,7 +645,7 @@ def evaluate_model(args, actor, device, test_env=None, deterministic=False, wrap
         test_env = gym.wrappers.TransformObservation(
             test_env, lambda obs: np.clip(obs, -10, 10))
     mu, std, d = save_traj_dict(args, args.env_id, test_env, 
-                                actor, device, deterministic=deterministic)
+                                actor, device, deterministic=deterministic, nr_trajectories=n_traj)
 
     test_env.close()
 
@@ -678,6 +678,8 @@ def save_traj_dict(opt, env_name, env, model, device,
                 if 'ppo' in opt.exp_name or 'bc' in opt.exp_name:
                     action, logprob, _, value = model.get_action_and_value(torch.Tensor(ob).to(device).unsqueeze(0), 
                                                                             eval=deterministic)
+                elif 'softq' in opt.exp_name:
+                    action, softmax = model[0].choose_action(torch.Tensor(ob).to(device).unsqueeze(0), model[1])
                 else:
                     action, _, mean = model.get_action(torch.Tensor(ob).to(device).unsqueeze(0))
                     if deterministic:
@@ -803,3 +805,60 @@ class AbsorbAfterDoneWrapper(gym.Wrapper):
         else:
             return obs, rew, True, True, info
 
+class DemoStateSeqWrapper(gym.Wrapper):
+    def __init__(self, env, opt, demos):
+        super().__init__(env=env)
+        # self.reward_fn = make_network(**reward_fn_spec)
+        self.use_actions = opt.use_actions
+        self.n_demos = opt.n_demos
+        self.use_actions = opt.use_actions
+        self.episode_return = 0
+        self.demos = demos
+        self.obs = None
+        self.curr_tgt = 0
+        self.epsilon = 1e-3
+        obs_space = self.env.observation_space
+        # stack shapes 
+        self.env.observation_space = type(obs_space)(shape = np.tile(obs_space.low,2).shape,
+                                                     low = np.tile(obs_space.low,2),
+                                                     high = np.tile(obs_space.high,2))
+
+    def reset(self, seed=1, options=None):
+        obs, info = self.env.reset()
+        exp_obs_0 = self.demos['obs'][0]
+        o = np.concatenate([obs, exp_obs_0], -1)
+
+        print("Previously reached target: ", self.curr_tgt)
+        self.curr_tgt = 0
+
+        return o, info
+
+    def compute_distance(self, obs, tgt):
+        # TODO: add other distances! Currently only L2
+        # Extend to learnable distances?
+        return np.sqrt(np.sum((obs-tgt)**2))
+
+    def step(self, action):
+        # also, here, WANT state before applying action
+        next_obs, gt_reward, term, trunc, info = self.env.step(action)
+        done = term or trunc 
+
+        info['gt_reward'] = gt_reward
+        # reset the pwil because the atoms are exhausted
+        reward = -self.compute_distance(next_obs, self.demos['obs'][self.curr_tgt])
+
+        next_obs = np.concatenate([next_obs, self.demos['obs'][self.curr_tgt]], -1)
+        self.obs = next_obs
+
+        # update sequential target if reached
+        if np.abs(reward) < self.epsilon:
+            self.curr_tgt += 1
+        self.episode_return += reward
+        if done:
+            if 'episode' not in info.keys():
+                info['episode'] = {}
+            info['episode']["ep_rew_irl"] = self.episode_return
+            self.episode_return = 0
+            
+        return next_obs, reward, term, trunc, info
+    

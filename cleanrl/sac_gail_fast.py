@@ -51,6 +51,9 @@ def parse_args():
         help="the name of this experiment")
     parser.add_argument("--executable_name", type=str, default='envs/fast/fast_ic_ca.app',
         help="the Unity executable")
+    parser.add_argument("--port_offset", type=int, default=10,
+        help="number of demos to use")
+
     parser.add_argument("--exp-id", type=str, default="",
         help="additional identifier of this experiment")
     parser.add_argument("--seed", type=int, default=1,
@@ -107,8 +110,8 @@ def parse_args():
         help="noise clip parameter of the Target Policy Smoothing Regularization")
     parser.add_argument("--alpha", type=float, default=0.2,
             help="Entropy regularization coefficient.")
-    parser.add_argument("--autotune", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="automatic tuning of the entropy coefficient")
+    parser.add_argument('--autotune', default=True, required=False, 
+        action='store_false', help='use actions in discriminator')
 
     # compat
     parser.add_argument("--ent-coef", type=float, default=0.0,
@@ -155,7 +158,8 @@ def parse_args():
         action='store_true', help='use spectral_norm')
     parser.add_argument('--use_absorb_wrapper', default=False, required=False, 
         action='store_true', help='use_absorb_wrapper')
-
+    parser.add_argument('--use_curr_traj_only', default=False, required=False, 
+        action='store_true', help='only used last sampled trajectory to do matching')
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
     parser.add_argument("--div", type=str, default="rkl", help="divergence type")
@@ -184,7 +188,7 @@ def parse_args():
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
     def thunk():
-        env = gym.make(env_id, args=opt)
+        env = gym.make(env_id, args=opt, port_offset=opt.port_offset)
         if opt.use_absorb_wrapper: # DAC
             env = AbsorbAfterDoneWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -320,7 +324,7 @@ if __name__ == "__main__":
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
-    test_env = gym.make(args.env_id, args=args, no_graphics=False)
+    test_env = gym.make(args.env_id, args=args, no_graphics=False, time_scale=1, port_offset=args.port_offset+1)
     disc = GAILDiscriminator(test_env, args)
 
     # env setup
@@ -366,7 +370,8 @@ if __name__ == "__main__":
 
     # TRY NOT TO MODIFY: start the game
     obs = envs.reset(seed=args.seed)[0]
-    best_rew = -10000
+    best_len = 10000
+    traj = {'obs': [], 'acs': [], 'done': []} # traj_only IRL
     if args.mode == 'training':
         for global_step in range(args.total_timesteps):
             irl_trigger = False
@@ -380,7 +385,14 @@ if __name__ == "__main__":
 
                 # TRY NOT TO MODIFY: execute the game and log data.
                 next_obs, rewards, term, trunc, infos = envs.step(actions)
+                #if global_step > args.learning_starts:
+                #    print(next_obs)
                 dones = term or trunc
+
+                # traj_only IRL
+                traj['obs'].append(obs)
+                traj['acs'].append(actions)
+                traj['done'].append(dones)
 
                 # TRY NOT TO MODIFY: record rewards for plotting purposes
                 if not isinstance(infos, list):
@@ -390,8 +402,8 @@ if __name__ == "__main__":
                     # TODO: fix this for new Gymnasium
                     if "final_info" in item.keys():
                         irl_trigger = True
-                        if item["final_info"][0]['episode']["r"] > best_rew:
-                            best_rew = item["final_info"][0]['episode']["r"]
+                        if item["final_info"][0]['episode']["l"] < best_len:
+                            best_len = item["final_info"][0]['episode']["l"]
                             torch.save(actor.state_dict(), f"runs/{run_name}/best_actor.pt")
                             torch.save(qf1.state_dict(), f"runs/{run_name}/best_qf1.pt")
                             torch.save(qf2.state_dict(), f"runs/{run_name}/best_qf2.pt")
@@ -489,11 +501,12 @@ if __name__ == "__main__":
                     if args.disc_update_period == -1:
                         irl_condition = irl_trigger
                         
+                    use_curr_traj_only = args.use_curr_traj_only
                     if irl_condition:                    
                         for epoch in range(args.irl_epochs):            
                             # GAIL Discriminator Update
                             gen_demos = demos_gen_dict(demos['all'], args.batch_size)
-                            for d in gen_demos:
+                            for i, d in enumerate(gen_demos):
                                 if len(d['obs']) < args.batch_size:
                                     if args.drop_batch:
                                         break
@@ -505,6 +518,18 @@ if __name__ == "__main__":
                                     obs_ = data.observations
                                     actions_ = data.actions
                                     dones_ = data.dones
+
+                                if use_curr_traj_only:
+                                    obs_ = np.concatenate(traj['obs'])[i*args.batch_size:(i+1)*args.batch_size]
+                                    actions_ = np.concatenate(traj['acs'])[i*args.batch_size:(i+1)*args.batch_size]
+                                    dones_ = np.concatenate(traj['acs'])[i*args.batch_size:(i+1)*args.batch_size]
+                                    if len(d['obs']) < args.batch_size:
+                                        if args.drop_batch:
+                                            break
+                                        else:
+                                            obs_ = obs_[:len(d['obs'])]
+                                            actions_ = actions_[:len(d['obs'])]
+                                            dones_ = dones_[:len(d['obs'])]
 
                                 # GAIL Discriminator Update
                                 update_dict = prepare_batch_update_irl(envs, args, d, 
@@ -522,10 +547,12 @@ if __name__ == "__main__":
                                     writer.add_scalar('irl/gail_bce_loss', loss_dict['d_loss'], global_step)
                                     if args.irm_coeff > 0:
                                         writer.add_scalar('irl/gail_irm_loss', loss_dict['grad_penalty'], global_step)
+                            
+                            traj = {'obs': [], 'acs': [], 'done': []}
 
                     #  evaluate at regular intervals and save
                     if global_step % args.eval_interval == 0:
-                        mu, std, d = evaluate_model(args, actor, device, test_env)
+                        mu, std, d = evaluate_model(args, actor, device, test_env, deterministic=True, n_traj=1)
                         print(f"Evaluation at {global_step}: {mu}, {std}")
                         writer.add_scalar('eval/mu', mu, global_step)
                         writer.add_scalar('eval/std', std, global_step)
@@ -564,7 +591,7 @@ if __name__ == "__main__":
         # df.to_pickle(f"results_pkl/results_{run_name}_df.pkl")
     else:
         # perform inference
-        mu, std, d = evaluate_model(args, actor, device, test_env)
+        mu, std, d = evaluate_model(args, actor, device, test_env, deterministic=True)
 
 
 

@@ -126,7 +126,7 @@ def parse_args():
                    help='discriminator MLP layer dimensions')
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
-    parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
+    parser.add_argument('--irl_epochs', default=1, type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--lip_p', default=1, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument("--irm_loss_type", type=str, default="sym", help="e1,e0,p0,p1,sym")
@@ -150,6 +150,7 @@ def parse_args():
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
     parser.add_argument("--div", type=str, default="rkl", help="divergence type")
+    parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
 
     parser.add_argument('--drop_batch', default=False, required=False, 
         action='store_true', help='drop batch in irl epochs')   
@@ -304,6 +305,8 @@ if __name__ == "__main__":
     # get env specs
     test_env = gym.make(args.env_id)
     disc = MEIRLDiscriminator(test_env, args)
+    if args.resume is not None:
+        disc.load_state_dict(torch.load(os.path.join(args.resume, "disc.pt") , map_location=device))
 
     # env setup
     envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, disc)])

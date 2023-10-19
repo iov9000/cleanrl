@@ -141,6 +141,8 @@ def parse_args():
         action='store_true', help='use spectral_norm')
     parser.add_argument('--use_absorb_wrapper', default=False, required=False, 
         action='store_true', help='use_absorb_wrapper')
+    parser.add_argument('--inf_bootstrap', default=True, required=False, 
+        action='store_false', help='infinite bootstrap (only use true terminations as done, ignore truncations)')
 
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
@@ -413,7 +415,10 @@ if __name__ == "__main__":
 
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, rewards, term, trunc, infos = envs.step(actions)
-            dones = term or trunc
+            if args.inf_bootstrap:
+                dones = term
+            else:
+                dones = term or trunc
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             if not isinstance(infos, list):

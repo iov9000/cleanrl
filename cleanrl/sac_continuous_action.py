@@ -5,9 +5,11 @@ import random
 import time
 from distutils.util import strtobool
 
+from datetime import datetime
+
 import gymnasium as gym
 import numpy as np
-import pybullet_envs  # noqa
+#import pybullet_envs  # noqa
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -67,9 +69,18 @@ def parse_args():
             help="Entropy regularization coefficient.")
     parser.add_argument("--autotune", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
         help="automatic tuning of the entropy coefficient")
+    parser.add_argument('--verbose', default=False, required=False, 
+        action='store_true', help='verbose output')
+
     args = parser.parse_args()
-    # fmt: on
-    return args
+
+    non_default = {
+        opt.dest: getattr(args, opt.dest)
+        for opt in parser._option_string_actions.values()
+        if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
+    }
+
+    return args, non_default
 
 
 def make_env(env_id, seed, idx, capture_video, run_name):
@@ -79,7 +90,7 @@ def make_env(env_id, seed, idx, capture_video, run_name):
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env.seed(seed)
+        #env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -148,8 +159,13 @@ class Actor(nn.Module):
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    args, non_default = parse_args()
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+    # create output folder with non default arguments in the name
+    id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
+    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_{id_string}"
+    if len(run_name) > 220:
+        run_name = run_name[:220]
     if args.track:
         import wandb
 
@@ -212,7 +228,8 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
-    obs = envs.reset()
+    obs = envs.reset(seed=args.seed)[0]
+    best_rew = -100000
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
         if global_step < args.learning_starts:
@@ -222,21 +239,39 @@ if __name__ == "__main__":
             actions = actions.detach().cpu().numpy()
 
         # TRY NOT TO MODIFY: execute the game and log data.
-        next_obs, rewards, dones, infos = envs.step(actions)
+        next_obs, rewards, term, trunc, infos = envs.step(actions)
+        dones = term or trunc
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        for info in infos:
-            if "episode" in info.keys():
-                print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+        if not isinstance(infos, list):
+            infos = [infos]
+
+        # TRY NOT TO MODIFY: record rewards for plotting purposes
+        for item in infos:
+            if "final_info" in item.keys():
+                irl_trigger = True
+                if item["final_info"][0]['episode']["r"] > best_rew:
+                    best_rew = item["final_info"][0]['episode']["r"]
+                    torch.save(actor.state_dict(), f"runs/{run_name}/best_actor.pt")
+                    torch.save(qf1.state_dict(), f"runs/{run_name}/best_qf1.pt")
+                    torch.save(qf2.state_dict(), f"runs/{run_name}/best_qf2.pt")
+
+                if args.verbose:
+                    print(
+                        f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
+                if global_step % 1 == 0:
+                    writer.add_scalar(
+                        "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                    writer.add_scalar(
+                        "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
                 break
+
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
         real_next_obs = next_obs.copy()
         for idx, d in enumerate(dones):
             if d:
-                real_next_obs[idx] = infos[idx]["terminal_observation"]
+                real_next_obs[idx] = infos[idx]["final_observation"][0]
         rb.add(obs, real_next_obs, actions, rewards, dones, infos)
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
