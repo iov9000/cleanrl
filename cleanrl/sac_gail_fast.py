@@ -128,6 +128,9 @@ def parse_args():
         help="number of demos to use")
     parser.add_argument('--enhance_demos', default=False, required=False, 
         action='store_true', help='enhance demos using W2 barycenters')
+    parser.add_argument('--init_rb_with_demos', default=False, required=False, 
+        action='store_true', help='init replay buffer with demo transitions (with actor actions and disc rewards)')
+
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--use_dones', default=False, required=False, 
@@ -317,7 +320,7 @@ if __name__ == "__main__":
 
     if 'FAST' in args.env_id:
         demos = load_fast_demos(args, filename='default_fast_demo.pkl')['all']
-        #demos = load_fast_demos(args, filename='fast_demos/demo_fm2.pkl')['all']
+        #demos = load_fast_demos(args, filename='fast_demos/demo_fw.pkl')['all']
     else:
         demos = load_hf_demos(args, n_demos=args.n_demos, perturb = args.demo_eps)
     if args.enhance_demos:
@@ -367,6 +370,20 @@ if __name__ == "__main__":
         handle_timeout_termination=True,
     )
     start_time = time.time()
+
+    if args.init_rb_with_demos:
+        obs = demos['all']['obs']
+        obs_next = np.concatenate([obs[1:], np.expand_dims(obs[-1], 0)], axis=0)
+        dones = demos['all']['done']
+
+        with torch.no_grad():
+            actions, _, _ = actor.get_action(torch.Tensor(obs).to(device))
+            rewards = disc.get_reward(torch.Tensor(obs).to(device), actions)
+
+        for i, ob in enumerate(obs):
+            # since FAST demos should always terminate, set truncated to False in infos
+            rb.add(ob, obs_next[i], actions[i], rewards[i], dones[i], [{'TimeLimit.truncated':False}])
+
 
     # TRY NOT TO MODIFY: start the game
     obs = envs.reset(seed=args.seed)[0]
@@ -552,7 +569,7 @@ if __name__ == "__main__":
 
                     #  evaluate at regular intervals and save
                     if global_step % args.eval_interval == 0:
-                        mu, std, d = evaluate_model(args, actor, device, test_env, deterministic=True, n_traj=1)
+                        mu, std, d = evaluate_model(args, actor, device, test_env, deterministic=True, n_traj=1, save_eval=f"runs/{run_name}/eval_{global_step}.pkl")
                         print(f"Evaluation at {global_step}: {mu}, {std}")
                         writer.add_scalar('eval/mu', mu, global_step)
                         writer.add_scalar('eval/std', std, global_step)

@@ -308,7 +308,10 @@ class GAILDiscriminator(nn.Module):
 
         self.bce_loss = F.binary_cross_entropy_with_logits(d_out, labels)
         # self.grad_penalty = self.irm_penalty(d_out, labels)
-        lip_penalty, grad_mix = self.lip_penalty(update_dict, self.opt.lip_p)
+        if self.opt.lip_coeff > 0:
+            lip_penalty, grad_mix = self.lip_penalty(update_dict, self.opt.lip_p)
+        else:
+            lip_penalty, grad_mix = 0,0
         ## TODO: check IRM penalty form! -> ones not zeros!
         if self.opt.irm_loss_type == 'e1':
             self.grad_penalty, grad_irm = self.irm_penalty(

@@ -189,7 +189,7 @@ def parse_args():
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
     def thunk():
-        env = gym.make(env_id, args=opt, port_offset=opt.port_offset)
+        env = gym.make(env_id, args=opt, time_scale=20, port_offset=opt.port_offset)
         if opt.use_absorb_wrapper: # DAC
             env = AbsorbAfterDoneWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -228,14 +228,14 @@ class SoftQNetwork(nn.Module):
     def choose_action(self, state, alpha, sample=False):
         with torch.no_grad():
             q = self.forward(state)
-            dist = F.softmax(q/alpha, dim=1)
+            logits = F.softmax(q/alpha, dim=1)
             # if sample:
-            dist = Categorical(dist)
+            dist = Categorical(logits)
             action = dist.sample()  # if sample else dist.mean
             # else:
             #     action = torch.argmax(dist, dim=1)
 
-        return action.detach().cpu().numpy(), dist
+        return action, logits
 
 
 LOG_STD_MAX = 2
@@ -296,7 +296,7 @@ if __name__ == "__main__":
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
-    test_env = gym.make(args.env_id, args=args, no_graphics=False, time_scale=1, port_offset=args.port_offset+1)
+    test_env = gym.make(args.env_id, args=args, no_graphics=False, time_scale=20, port_offset=args.port_offset+1)
     disc = GAILDiscriminator(test_env, args)
 
     # env setup
@@ -346,7 +346,7 @@ if __name__ == "__main__":
                     actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
                 else:
                     actions, _ = qf1.choose_action(torch.Tensor(obs).to(device), alpha)  
-                    #actions = actions.detach().cpu().numpy()
+                    actions = actions.detach().cpu().numpy()
 
                 # TRY NOT TO MODIFY: execute the game and log data.
                 next_obs, rewards, term, trunc, infos = envs.step(actions)

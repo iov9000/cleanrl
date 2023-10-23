@@ -631,7 +631,7 @@ class MujocoTestWrapper(gym.Wrapper):
         return o, r, t, tr, i
 
 
-def evaluate_model(args, actor, device, test_env=None, deterministic=False, wrap_mujoco=False, n_traj=10):
+def evaluate_model(args, actor, device, test_env=None, deterministic=False, wrap_mujoco=False, n_traj=10, save_eval=None):
     if test_env is None:
         test_env = gym.make(args.env_id)
         if wrap_mujoco:
@@ -645,14 +645,14 @@ def evaluate_model(args, actor, device, test_env=None, deterministic=False, wrap
         test_env = gym.wrappers.TransformObservation(
             test_env, lambda obs: np.clip(obs, -10, 10))
     mu, std, d = save_traj_dict(args, args.env_id, test_env, 
-                                actor, device, deterministic=deterministic, nr_trajectories=n_traj)
+                                actor, device, deterministic=deterministic, nr_trajectories=n_traj, save_eval=save_eval)
 
     test_env.close()
 
     return mu, std, d
 
 def save_traj_dict(opt, env_name, env, model, device, 
-                    nr_trajectories=10, min_total_rew=-1e6, deterministic=True):
+                    nr_trajectories=10, min_total_rew=-1e6, deterministic=True, save_eval=None):
     num_steps = 0
     expert_obs = []
     expert_acs = []
@@ -680,6 +680,9 @@ def save_traj_dict(opt, env_name, env, model, device,
                                                                             eval=deterministic)
                 elif 'softq' in opt.exp_name:
                     action, softmax = model[0].choose_action(torch.Tensor(ob).to(device).unsqueeze(0), model[1])
+                elif 'dqn' in opt.exp_name:
+                    q_values = model(torch.Tensor(ob).to(device).unsqueeze(0))
+                    action = torch.argmax(q_values, dim=1)
                 else:
                     action, _, mean = model.get_action(torch.Tensor(ob).to(device).unsqueeze(0))
                     if deterministic:
@@ -723,7 +726,8 @@ def save_traj_dict(opt, env_name, env, model, device,
     print("Mean / std over {nr_trajectories} episodes: ", np.mean(ep_rew), np.std(ep_rew))
 
     d = {'obs': expert_obs, 'acs': expert_acs, 'rew': expert_rew, 'done': expert_done}
-    #pickle.dump(d, open(filename, 'wb'))
+    if save_eval is not None:
+        pickle.dump(d, open(save_eval, 'wb'))
 
     return np.mean(ep_rew), np.std(ep_rew), d
 

@@ -83,7 +83,7 @@ def parse_args():
         help="the batch size of sample from the reply memory")
     parser.add_argument("--exploration-noise", type=float, default=0.1,
         help="the scale of exploration noise")
-    parser.add_argument("--learning-starts", type=int, default=5e3,
+    parser.add_argument("--learning-starts", type=int, default=0,
         help="timestep to start learning")
     parser.add_argument("--policy-lr", type=float, default=3e-5,
         help="the learning rate of the policy network optimizer")
@@ -95,11 +95,15 @@ def parse_args():
         help="the frequency of updates for the target nerworks")
     parser.add_argument("--noise-clip", type=float, default=0.5,
         help="noise clip parameter of the Target Policy Smoothing Regularization")
-    parser.add_argument("--alpha", type=float, default=0.2,
+    parser.add_argument("--alpha", type=float, default=0.5,
             help="Entropy regularization coefficient.")
-    parser.add_argument("--autotune", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="automatic tuning of the entropy coefficient")
+    parser.add_argument('--autotune', default=True, required=False, 
+        action='store_false', help='autotune entropy')
+    parser.add_argument('--use_target', default=False, required=False, 
+        action='store_true', help='IQL: use target')
 
+    parser.add_argument('--orth_init', default=True, required=False, 
+        action='store_false', help='IQL: use orthogonal init')
     # compat
     parser.add_argument("--ent-coef", type=float, default=0.0,
         help="coefficient of the entropy")
@@ -146,7 +150,7 @@ def parse_args():
 
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
-    parser.add_argument("--div", type=str, default="rkl", help="divergence type")
+    parser.add_argument("--iql_div", type=str, default="chi2", help="divergence type")
 
     parser.add_argument('--drop_batch', default=False, required=False, 
         action='store_true', help='drop batch in irl epochs')   
@@ -192,13 +196,23 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name):
     return thunk
 
 
+def orthogonal_init_(m):
+    """Custom weight init for Conv2D and Linear layers."""
+    if isinstance(m, nn.Linear):
+        nn.init.orthogonal_(m.weight.data)
+        if hasattr(m.bias, 'data'):
+            m.bias.data.fill_(0.0)
+
 # ALGO LOGIC: initialize agent here:
 class SoftQNetwork(nn.Module):
-    def __init__(self, env):
+    def __init__(self, opt, env):
         super().__init__()
         self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape), 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, 1)
+
+        if opt.orth_init:
+            self.apply(orthogonal_init_)
 
     def forward(self, x, a):
         x = torch.cat([x, a], 1)
@@ -211,12 +225,18 @@ class SoftQNetwork(nn.Module):
 LOG_STD_MAX = 2
 LOG_STD_MIN = -5
 
-def orthogonal_init_(m):
-    """Custom weight init for Conv2D and Linear layers."""
-    if isinstance(m, nn.Linear):
-        nn.init.orthogonal_(m.weight.data)
-        if hasattr(m.bias, 'data'):
-            m.bias.data.fill_(0.0)
+# helper fct.
+def getV(actor, critic, alpha, obs):
+    action, log_prob, _ = actor.get_action(obs)
+    if isinstance(critic, tuple):
+        q1 = critic[0](obs, action)
+        q2 = critic[1](obs, action)
+        current_Q = torch.min(q1, q2) 
+    else:
+        current_Q = critic(obs, action)
+    
+    current_V = current_Q - alpha * log_prob
+    return current_V
 
 def iq_loss(actor, critic, alpha, gamma, current_Q, current_v, next_v, batch):
     obs, next_obs, action, env_reward, done, is_expert = batch
@@ -231,7 +251,26 @@ def iq_loss(actor, critic, alpha, gamma, current_Q, current_v, next_v, batch):
     y = (1 - done) * gamma * next_v
     reward = (current_Q - y)[is_expert]
 
-    loss = -(reward).mean()
+    with torch.no_grad():
+        # Use different divergence functions (For χ2 divergence we instead add a third bellmann error-like term)
+        if args.iql_div == "hellinger":
+            phi_grad = 1/(1+reward)**2
+        elif args.iql_div == "kl":
+            # original dual form for kl divergence (sub optimal)
+            phi_grad = torch.exp(-reward-1)
+        elif args.iql_div == "kl2":
+            # biased dual form for kl divergence
+            phi_grad = F.softmax(-reward, dim=0) * reward.shape[0]
+        elif args.iql_div == "kl_fix":
+            # our proposed unbiased form for fixing kl divergence
+            phi_grad = torch.exp(-reward)
+        elif args.iql_div == "js":
+            # jensen–shannon
+            phi_grad = torch.exp(-reward)/(2 - torch.exp(-reward))
+        else:
+            phi_grad = 1
+
+    loss = -(phi_grad*reward).mean()
     loss_dict['softq_loss'] = loss.item()
 
     # calculate 2nd term for IQ loss, we show different sampling strategies
@@ -242,15 +281,11 @@ def iq_loss(actor, critic, alpha, gamma, current_Q, current_v, next_v, batch):
     loss_dict['v0_loss'] = v0_loss.item()
     # Use χ2 divergence (calculate the regularization term for IQ loss using expert states) (works offline)
     y = (1 - done) * gamma * next_v
-
-    reward = current_Q - y
-    chi2_loss = 1/2 * (reward**2)[is_expert].mean()
-    loss += chi2_loss
-    loss_dict['chi2_loss'] = chi2_loss.item()
-
-    y = (1 - done) * gamma * next_v
-
-    # regularization loss (exp and policy)
+    # reward = current_Q - y
+    # chi2_loss = 1/2 * (reward**2)[is_expert].mean()
+    # loss += chi2_loss
+    # loss_dict['chi2_loss'] = chi2_loss.item()
+    # regularization loss (exp and policy) (true by default)
     reward = current_Q - y
     chi2_loss = 1/2 * (reward**2).mean()
     loss += chi2_loss
@@ -260,7 +295,7 @@ def iq_loss(actor, critic, alpha, gamma, current_Q, current_v, next_v, batch):
     return loss, loss_dict
 
 class Actor(nn.Module):
-    def __init__(self, env):
+    def __init__(self, opt, env):
         super().__init__()
         self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
         self.fc2 = nn.Linear(256, 256)
@@ -273,7 +308,8 @@ class Actor(nn.Module):
         self.register_buffer(
             "action_bias", torch.tensor((env.single_action_space.high + env.single_action_space.low) / 2.0, dtype=torch.float32)
         )
-        self.apply(orthogonal_init_)
+        if opt.orth_init:
+            self.apply(orthogonal_init_)
 
 
     def forward(self, x):
@@ -357,11 +393,11 @@ if __name__ == "__main__":
 
     max_action = float(envs.single_action_space.high[0])
 
-    actor = Actor(envs).to(device)
-    qf1 = SoftQNetwork(envs).to(device)
-    qf2 = SoftQNetwork(envs).to(device)
-    qf1_target = SoftQNetwork(envs).to(device)
-    qf2_target = SoftQNetwork(envs).to(device)
+    actor = Actor(args, envs).to(device)
+    qf1 = SoftQNetwork(args, envs).to(device)
+    qf2 = SoftQNetwork(args, envs).to(device)
+    qf1_target = SoftQNetwork(args, envs).to(device)
+    qf2_target = SoftQNetwork(args, envs).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)
@@ -386,20 +422,6 @@ if __name__ == "__main__":
         handle_timeout_termination=True,
     )
     start_time = time.time()
-
-    # helper fct.
-    def getV(actor, critic, alpha, obs):
-        action, log_prob, _ = actor.get_action(obs)
-        current_Q = critic(obs, action)
-        current_V = current_Q - alpha * log_prob
-        return current_V
-
-    def get_targetV(actor, critic_tgt, alpha, obs):
-        action, log_prob, _ = actor.get_action(obs)
-        target_Q = critic_tgt(obs, action)
-        target_V = target_Q - alpha * log_prob
-        return target_V
-
 
     # TRY NOT TO MODIFY: start the game
     obs = envs.reset(seed=args.seed)[0]
@@ -456,69 +478,25 @@ if __name__ == "__main__":
 
                 all_obs, all_obs_next, all_actions, all_rew, all_dones, is_expert = get_concat_samples(data, expert_demos)
                 batch = (all_obs, all_obs_next, all_actions, all_rew, all_dones, is_expert)
-                # with torch.no_grad():
-                #     next_state_actions, next_state_log_pi, _ = actor.get_action(data.next_observations)
-                #     qf1_next_target = qf1_target(data.next_observations, next_state_actions)
-                #     qf2_next_target = qf2_target(data.next_observations, next_state_actions)
-                #     min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - alpha * next_state_log_pi
-                #     next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * (min_qf_next_target).view(-1)
-                #qf1_a_values = qf1(data.observations, data.actions).view(-1)
-                #qf2_a_values = qf2(data.observations, data.actions).view(-1)
-                current_V = getV(actor, qf1, alpha, all_obs)
-                next_V = getV(actor, qf1, alpha, all_obs_next)
+
+                # update critic
+                current_V = getV(actor, (qf1, qf2), alpha, all_obs)
+                if args.use_target:
+                    with torch.no_grad():
+                        next_V = getV(actor, (qf1_target, qf2_target), alpha, all_obs_next)
+                else:
+                    next_V = getV(actor, qf1, qf2, alpha, all_obs_next)
                 current_Q1 = qf1(all_obs, all_actions)
                 current_Q2 = qf2(all_obs, all_actions)
                 q1_loss, loss_dict1 = iq_loss(actor, qf1, alpha, args.gamma, current_Q1, current_V, next_V, batch)
-                q2_loss, loss_dict2 = iq_loss(actor, qf1, alpha, args.gamma, current_Q2, current_V, next_V, batch)
+                q2_loss, loss_dict2 = iq_loss(actor, qf2, alpha, args.gamma, current_Q2, current_V, next_V, batch)
                 iql_loss = 1/2 * (q1_loss + q2_loss)
-                
-                ##########
-                # IQ-Learn minimal implementation with X^2 divergence (~15 lines)
-                # Calculate 1st term of loss: -E_(ρ_expert)[Q(s, a) - γV(s')]
-                # current_Q1 = qf1(all_obs, all_actions)
-                # y = (1 - all_dones) * args.gamma * getV(actor, qf1, alpha, all_obs_next)
-                # #if args.train.use_target:
-                # with torch.no_grad():
-                #     y = (1 - all_dones) * args.gamma * get_targetV(actor, qf1_target, alpha, all_obs_next)
-
-                # reward = (current_Q1 - y)[is_expert]
-                # iql_loss_1 = -(reward).mean()
-
-                # # 2nd term for our loss (use expert and policy states): E_(ρ)[Q(s,a) - γV(s')]
-                # value_loss = (getV(actor, qf1, alpha, all_obs) - y).mean()
-                # iql_loss_1 += value_loss
-
-                # # Use χ2 divergence (adds a extra term to the loss)
-                # chi2_loss = 1/(2) * (reward**2).mean()
-                # iql_loss_1 += chi2_loss
-
-                # # double Q repetition
-                # current_Q2 = qf2(all_obs, all_actions)
-                # y = (1 - all_dones) * args.gamma * getV(actor, qf2, alpha, all_obs_next)
-                # #if args.train.use_target:
-                # with torch.no_grad():
-                #     y = (1 - all_dones) * args.gamma * get_targetV(actor, qf2_target, alpha, all_obs_next)
-
-                # reward = (current_Q2 - y)[is_expert]
-                # iql_loss_2 = -(reward).mean()
-
-                # # 2nd term for our loss (use expert and policy states): E_(ρ)[Q(s,a) - γV(s')]
-                # value_loss = (getV(actor, qf1, alpha, all_obs) - y).mean()
-                # iql_loss_2 += value_loss
-
-                # # Use χ2 divergence (adds a extra term to the loss)
-                # chi2_loss = 1/(2) * (reward**2).mean()
-                # iql_loss_2 += chi2_loss
-                    
-                #qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
-                #qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
-                # iql_loss = iql_loss_1 + iql_loss_2
-                ###########
 
                 q_optimizer.zero_grad()
                 iql_loss.backward()
                 q_optimizer.step()
 
+                # update actor
                 if global_step % args.policy_frequency == 0:  # TD 3 Delayed update support
                     for _ in range(
                         args.policy_frequency
@@ -598,3 +576,46 @@ if __name__ == "__main__":
     # df.to_pickle(f"results_pkl/results_{run_name}_df.pkl")
 
 
+                
+                ##########
+                # IQ-Learn minimal implementation with X^2 divergence (~15 lines)
+                # Calculate 1st term of loss: -E_(ρ_expert)[Q(s, a) - γV(s')]
+                # current_Q1 = qf1(all_obs, all_actions)
+                # y = (1 - all_dones) * args.gamma * getV(actor, qf1, alpha, all_obs_next)
+                # #if args.train.use_target:
+                # with torch.no_grad():
+                #     y = (1 - all_dones) * args.gamma * get_targetV(actor, qf1_target, alpha, all_obs_next)
+
+                # reward = (current_Q1 - y)[is_expert]
+                # iql_loss_1 = -(reward).mean()
+
+                # # 2nd term for our loss (use expert and policy states): E_(ρ)[Q(s,a) - γV(s')]
+                # value_loss = (getV(actor, qf1, alpha, all_obs) - y).mean()
+                # iql_loss_1 += value_loss
+
+                # # Use χ2 divergence (adds a extra term to the loss)
+                # chi2_loss = 1/(2) * (reward**2).mean()
+                # iql_loss_1 += chi2_loss
+
+                # # double Q repetition
+                # current_Q2 = qf2(all_obs, all_actions)
+                # y = (1 - all_dones) * args.gamma * getV(actor, qf2, alpha, all_obs_next)
+                # #if args.train.use_target:
+                # with torch.no_grad():
+                #     y = (1 - all_dones) * args.gamma * get_targetV(actor, qf2_target, alpha, all_obs_next)
+
+                # reward = (current_Q2 - y)[is_expert]
+                # iql_loss_2 = -(reward).mean()
+
+                # # 2nd term for our loss (use expert and policy states): E_(ρ)[Q(s,a) - γV(s')]
+                # value_loss = (getV(actor, qf1, alpha, all_obs) - y).mean()
+                # iql_loss_2 += value_loss
+
+                # # Use χ2 divergence (adds a extra term to the loss)
+                # chi2_loss = 1/(2) * (reward**2).mean()
+                # iql_loss_2 += chi2_loss
+                    
+                #qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
+                #qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
+                # iql_loss = iql_loss_1 + iql_loss_2
+                ###########
