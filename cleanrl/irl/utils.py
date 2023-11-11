@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 
 from typing import Optional
 
+
+
 def load_hf_demos(args, n_demos, perturb=0.0, bary_enhance=False):
     folder = args.demo_dir
     env_name = args.env_id
@@ -33,6 +35,45 @@ def load_hf_demos(args, n_demos, perturb=0.0, bary_enhance=False):
     except:
         print("Generate demos from HuggingFace Hub first")
         assert False
+
+    return expert_demos
+
+def load_hf_demos_name(args, fnames):
+    folder = args.demo_dir
+    env_name = args.env_id
+    subsample = args.subsample
+    if folder is None:
+        folder = "demos"
+    expert_demos = {}
+
+    for fn in fnames:
+        try:
+            #expert_demos['all'] = np.load(os.path.join(folder, f"demo_hf_{env_name}_{n_demos}.npy"))
+            expert_demos[fn] = pickle.load(open(fn, 'rb'))
+            expert_demos[fn]['obs'] = expert_demos[fn]['obs'][::subsample]
+            expert_demos[fn]['acs'] = expert_demos[fn]['acs'][::subsample]
+            expert_demos[fn]['rew'] = expert_demos[fn]['rew'][::subsample]
+            expert_demos[fn]['done'] = expert_demos[fn]['done'][::subsample]
+        except:
+            print("Generate demos from HuggingFace Hub first")
+            assert False
+
+    obs_all = []
+    acs_all = []
+    rew_all = []
+    done_all = []
+
+    for k, v in expert_demos.items():
+        obs_all.append(v['obs'])
+        acs_all.append(v['acs'])
+        rew_all.append(v['rew'])
+        done_all.append(v['done'])
+
+    expert_demos['all'] = {}
+    expert_demos['all']['obs'] = np.concatenate(obs_all, 0)
+    expert_demos['all']['acs'] = np.concatenate(acs_all, 0)
+    expert_demos['all']['rew'] = np.concatenate(rew_all, 0)
+    expert_demos['all']['done'] = np.concatenate(done_all, 0)
 
     return expert_demos
 

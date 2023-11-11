@@ -310,8 +310,9 @@ class GAILDiscriminator(nn.Module):
         # self.grad_penalty = self.irm_penalty(d_out, labels)
         if self.opt.lip_coeff > 0:
             lip_penalty, grad_mix = self.lip_penalty(update_dict, self.opt.lip_p)
+            grad_mix_norm = torch.norm(grad_mix)
         else:
-            lip_penalty, grad_mix = 0,0
+            lip_penalty, grad_mix_norm = 0,0
         ## TODO: check IRM penalty form! -> ones not zeros!
         if self.opt.irm_loss_type == 'e1':
             self.grad_penalty, grad_irm = self.irm_penalty(
@@ -341,7 +342,7 @@ class GAILDiscriminator(nn.Module):
         output_dict = {}
         output_dict['d_loss'] = self.bce_loss
         output_dict['lip_penalty'] = lip_penalty
-        output_dict['lip_grad_mix'] = grad_mix
+        output_dict['lip_grad_mix'] = grad_mix_norm
         #output_dict['lip_grad_e'] = grad_e
         #output_dict['lip_grad_p'] = grad_p
         output_dict['grad_penalty'] = self.grad_penalty

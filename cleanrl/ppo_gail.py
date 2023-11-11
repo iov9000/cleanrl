@@ -594,7 +594,7 @@ if __name__ == "__main__":
                 if global_step % args.logging_interval  == 0:
                     writer.add_scalar('irl/gail_bce_loss', loss_dict['d_loss'], global_step)
                     # track norms
-                    writer.add_scalar('irl/lip_grad_mix_norm', torch.norm(loss_dict['lip_grad_mix']), global_step)
+                    writer.add_scalar('irl/lip_grad_mix_norm', loss_dict['lip_grad_mix'], global_step)
                     #writer.add_scalar('irl/lip_grad_e_norm', torch.norm(loss_dict['grad_e']), global_step)
                     #writer.add_scalar('irl/lip_grad_p_norm', torch.norm(loss_dict['grad_p']), global_step)
                     writer.add_scalar('irl/irm_grad_norm', torch.norm(loss_dict['irm_grad']), global_step)

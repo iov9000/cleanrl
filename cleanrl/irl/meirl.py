@@ -47,6 +47,7 @@ class MEIRLDiscriminator(nn.Module):
         self.is_atari = 'atari' in self.opt.exp_name
         self.snorm = opt.use_spectral_norm
         self.wnorm = opt.use_weight_norm
+        self.identity_features = opt.identity_features
 
         if opt.disc_nonlin == 'relu':
             nonlin = nn.ReLU()
@@ -77,34 +78,43 @@ class MEIRLDiscriminator(nn.Module):
         self.clamp_magnitude = clamp_magnitude
         layer_dims = self.layer_dims
 
-        if self.is_atari:
-            self.base = AtariCNNBase(opt,env, self.use_actions)
-            self.discriminator = nn.Linear(512, 1, bias=self.bias)
-        else:
-            if self.use_cnn_base:
-                self.base = MiniGridCNN(layer_dims, self.use_actions)
-            else:
-                self.base = nn.Sequential(linlayer(self.layer_dims[0], self.layer_dims[1], 
-                                                    self.bias, self.wnorm, self.snorm),
-                                        nonlin)
-
-            self.discriminator_layers = []
-            for i in range(2, len(layer_dims)):
-                self.discriminator_layers += [linlayer(in_dim=layer_dims[i - 1],
-                                                            out_dim=layer_dims[i],
-                                                            bias=self.bias,
-                                                            wnorm=self.wnorm,
-                                                            snorm=self.snorm),
-                                            nonlin]
-        self.phi = nn.Sequential(*self.discriminator_layers)
-
-        self.discriminator_layers += [linlayer(in_dim=layer_dims[-1],
+        if self.identity_features:
+            self.base = nn.Identity()
+            self.phi = nn.Identity()
+            self.discriminator = linlayer(in_dim=dim0,
                                                    out_dim=1,
                                                     bias=self.bias,
                                                     wnorm=self.wnorm,
-                                                    snorm=self.snorm)]
+                                                    snorm=self.snorm)
+        else:
+            if self.is_atari:
+                self.base = AtariCNNBase(opt,env, self.use_actions)
+                self.discriminator = nn.Linear(512, 1, bias=self.bias)
+            else:
+                if self.use_cnn_base:
+                    self.base = MiniGridCNN(layer_dims, self.use_actions)
+                else:
+                    self.base = nn.Sequential(linlayer(self.layer_dims[0], self.layer_dims[1], 
+                                                        self.bias, self.wnorm, self.snorm),
+                                            nonlin)
 
-        self.discriminator = nn.Sequential(*self.discriminator_layers)
+                self.discriminator_layers = []
+                for i in range(2, len(layer_dims)):
+                    self.discriminator_layers += [linlayer(in_dim=layer_dims[i - 1],
+                                                                out_dim=layer_dims[i],
+                                                                bias=self.bias,
+                                                                wnorm=self.wnorm,
+                                                                snorm=self.snorm),
+                                                nonlin]
+            self.phi = nn.Sequential(*self.discriminator_layers)
+
+            self.discriminator_layers += [linlayer(in_dim=layer_dims[-1],
+                                                    out_dim=1,
+                                                        bias=self.bias,
+                                                        wnorm=self.wnorm,
+                                                        snorm=self.snorm)]
+
+            self.discriminator = nn.Sequential(*self.discriminator_layers)
 
         if torch.cuda.is_available():
             self.base.cuda()
@@ -114,13 +124,32 @@ class MEIRLDiscriminator(nn.Module):
         # self.module_list = nn.ModuleList([self.base, self.discriminator])
         self.d_optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.l2_coeff)
 
-    def forward(self, ob, ac):
-        if self.use_actions and (self.use_cnn_base or self.is_atari):
-            base_out = self.base(ob, ac)
-        elif self.use_actions and not (self.use_cnn_base or self.is_atari):
-            base_out = self.base(torch.cat([ob, ac], axis=-1))
+    def base_fwd(self, ob, ac, nob=None, d=None):
+        #  match tensor sizes
+        if ac is not None:
+            if len(ob.shape) != len(ac.shape):
+                ac = torch.unsqueeze(ac, -1)
+        if d is not None and len(ob.shape) != len(d.shape):
+            d = torch.unsqueeze(d, -1)
+
+        input_ = [ob]
+        if self.use_actions:
+            input_.append(ac)
+        if self.use_next_obs:
+            input_.append(nob)
+        if self.use_dones:
+            input_.append(d)
+
+        if (self.use_cnn_base or self.is_atari):
+            base_out = self.base(*input_)
+
         else:
-            base_out = self.base(ob)
+            base_out = self.base(torch.cat(input_, axis=-1))
+
+        return base_out
+
+    def forward(self, ob, ac=None, nob=None, d=None):
+        base_out = self.base_fwd(ob, ac, nob, d)
 
         phi = self.phi(base_out)
         d_out = self.discriminator(phi)
@@ -206,10 +235,11 @@ class MEIRLDiscriminator(nn.Module):
 
         return grad_pen
 
-    def compute_loss(self, update_dict):
+    def compute_loss(self, update_dict):    
         r_policy, self.phi_policy = self.forward(update_dict['policy_obs'], update_dict['policy_acs'])
         r_expert, self.phi_expert = self.forward(update_dict['expert_obs'], update_dict['expert_acs'])
 
+        #self.diff_loss = r_policy.mean() - torch.exp(r_expert).mean()
         self.diff_loss = r_policy.mean() - r_expert.mean()
         self.grad_penalty = torch.norm(self.phi_expert-self.phi_policy)
         self.loss = self.diff_loss + self.irm_coeff * self.grad_penalty

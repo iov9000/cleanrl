@@ -37,7 +37,7 @@ import pickle
 #     sys.path.append(module_path)
 
 # from irl.utils import AntCFWrapper
-def train_expert(env, algo, n_timesteps, fname, n_traj, model=None, min_total_rew=-50000):
+def train_expert(args, env, algo, n_timesteps, fname, n_traj, model=None, min_total_rew=-50000):
 
     if algo == 'ppo':
         ppo_kwargs = {
@@ -68,11 +68,11 @@ def train_expert(env, algo, n_timesteps, fname, n_traj, model=None, min_total_re
             model = SAC.load(model)
 
     model.save('model_' + fname + str(n_timesteps))
-    save_expert_traj_dict('CMoveP-v0', env, model, nr_trajectories=n_traj, min_total_rew=min_total_rew)
+    save_expert_traj_dict('CMoveP-v0', env, model, nr_trajectories=n_traj, min_total_rew=min_total_rew, label=args.label)
     
     return model
 
-def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_rew=100):
+def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_rew=100, label=''):
     num_steps = 0
     expert_obs = []
     expert_acs = []
@@ -113,7 +113,7 @@ def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_re
             expert_rew.extend(episode_rew)
             expert_done.extend(episode_done)
 
-    filename = f"demo_hf_{env_name}_{nr_trajectories}.pkl" 
+    filename = f"demo_hf_{env_name}_{nr_trajectories}_{label}.pkl" 
     expert_obs = np.stack(expert_obs)
     expert_acs = np.stack(expert_acs)
     expert_rew = np.stack(expert_rew)
@@ -146,10 +146,19 @@ if __name__ == '__main__':
                         required=False, help="nr of timesteps to train")
     parser.add_argument("--model", default=None, type=str,
                         required=False, help="(optional) use pretrained model")
+    parser.add_argument("--label", default='', type=str,
+                        required=False, help="additional label for demo file")
     args = parser.parse_args()
 
-    env = gym.make(args.env_name, waypoints=[(175, 175)])
-    train_expert(env, args.algo, n_timesteps=args.n_timesteps, 
+    if args.label == 'down':
+        waypoints=[(100, 0),(190, 30)]
+    elif args.label == 'up':
+        waypoints=[(100, 60),(190, 30)]
+    else:
+        waypoints=[(100, 30),(190, 30)]
+
+    env = gym.make(args.env_name, shape=(200, 60), init_pos = (10,30), waypoints=waypoints)
+    train_expert(args, env, args.algo, n_timesteps=args.n_timesteps, 
                                 fname=args.env_name, 
                                 n_traj=args.nr_traj, 
                                 model=args.model,

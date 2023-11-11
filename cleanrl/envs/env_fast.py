@@ -316,6 +316,7 @@ class UnityToGymWrapper(Env):
 
         self._env.step()
         decision_step, terminal_step = self._env.get_steps(self.name)
+        #print(f"dec_steps: {len(decision_step)} term_step: {len(terminal_step)}")
         self._check_agents(max(len(decision_step), len(terminal_step)))
         if len(terminal_step) != 0:
             # The agent is done
@@ -487,7 +488,8 @@ class FASTRL(Env):
         #                             no_graphics=True, seed=1))
 
         self.env = make_unity_env(args.executable_name, 'ImageCentering', 
-                            base_port=5400+port_offset, env_args=[], seed=args.seed, results_dir=f"runs/{args.run_name}", 
+                            base_port=5400+port_offset, env_args=[], 
+                            seed=args.seed, results_dir=f"runs/{args.run_name}", 
                             no_graphics=no_graphics,
                             time_scale=time_scale,
                             worker_id=port_offset)
@@ -496,6 +498,7 @@ class FASTRL(Env):
 
         self.observation_space = self.env.observation_space
         self.action_space = self.env.action_space
+
 
         # self.observation_space = spaces.Box(low = np.ones(self.observation_shape)*-np.inf, 
         #                                     high = np.ones(self.observation_shape)*np.inf,
@@ -506,7 +509,7 @@ class FASTRL(Env):
         #                                dtype = np.float32)
                                                    
 
-    def reset(self, seed=1, options=None):
+    def reset(self, seed=None, options=None):
         return self.env.reset()
 
     def step(self, action):

@@ -191,7 +191,7 @@ def parse_args():
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
     def thunk():
-        env = gym.make(env_id, args=opt, port_offset=opt.port_offset)
+        env = gym.make(env_id, args=opt, time_scale=20, port_offset=opt.port_offset)
         if opt.use_absorb_wrapper: # DAC
             env = AbsorbAfterDoneWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -319,22 +319,48 @@ if __name__ == "__main__":
         torch.set_default_tensor_type(torch.FloatTensor)
 
     if 'FAST' in args.env_id:
-        demos = load_fast_demos(args, filename='default_fast_demo.pkl')['all']
-        #demos = load_fast_demos(args, filename='fast_demos/demo_fw.pkl')['all']
+        #demos = load_fast_demos(args, filename='default_fast_demo.pkl')['all']
+        demos = load_fast_demos(args, filename='fast_demos/20231106fastkmio.pkl')['all']
     else:
         demos = load_hf_demos(args, n_demos=args.n_demos, perturb = args.demo_eps)
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
-    test_env = gym.make(args.env_id, args=args, no_graphics=False, time_scale=1, port_offset=args.port_offset+1)
+    test_env = gym.make(args.env_id, args=args, no_graphics=False, time_scale=20, port_offset=args.port_offset+1)
     disc = GAILDiscriminator(test_env, args)
+    # o_l = []
+    # a_l = []
+    # test_env.reset(seed=args.seed)
+    # for i in range(50000):
+    #     action = test_env.action_space.sample()
+    #     o,r,t,tr,i = test_env.step(100*action)
+    #     if t or tr:
+    #         test_env.reset(seed=args.seed)
+    #     o_l.append(o)
+    #     a_l.append(action)
+
+    # print("Test env random obs sum:", np.sum(o_l), np.sum(a_l))
 
     # env setup
     envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, disc)])
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     max_action = float(envs.single_action_space.high[0])
+
+    # o_l = []
+    # a_l = []
+    # envs.reset(seed=args.seed)
+    # for i in range(50000):
+    #     action = envs.single_action_space.sample()
+    #     o,r,t,tr,i = envs.step([100*action])
+    #     if t or tr:
+    #         envs.reset(seed=args.seed)
+    #     o_l.append(o)
+    #     a_l.append(action)
+
+    # print("Env random obs sum:", np.sum(o_l), np.sum(a_l))
+    # exit(1)
 
     actor = Actor(envs).to(device)
     qf1 = SoftQNetwork(envs).to(device)
@@ -428,7 +454,8 @@ if __name__ == "__main__":
 
                         if args.verbose:
                             print(
-                                f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
+                                f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}"
+                                f"episodic_return_irl={item['final_info'][0]['episode']['ep_rew_irl']}")
                         if global_step % 1 == 0:
                             writer.add_scalar(
                                 "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
@@ -540,6 +567,8 @@ if __name__ == "__main__":
                                     obs_ = np.concatenate(traj['obs'])[i*args.batch_size:(i+1)*args.batch_size]
                                     actions_ = np.concatenate(traj['acs'])[i*args.batch_size:(i+1)*args.batch_size]
                                     dones_ = np.concatenate(traj['acs'])[i*args.batch_size:(i+1)*args.batch_size]
+                                    if len(d['obs']) > len(obs_):
+                                        break
                                     if len(d['obs']) < args.batch_size:
                                         if args.drop_batch:
                                             break
@@ -547,7 +576,6 @@ if __name__ == "__main__":
                                             obs_ = obs_[:len(d['obs'])]
                                             actions_ = actions_[:len(d['obs'])]
                                             dones_ = dones_[:len(d['obs'])]
-
                                 # GAIL Discriminator Update
                                 update_dict = prepare_batch_update_irl(envs, args, d, 
                                                     obs_, actions_, dones_, actor)

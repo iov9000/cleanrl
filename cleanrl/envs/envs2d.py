@@ -1,8 +1,67 @@
 from gymnasium import Env, spaces
 import numpy as np
 import cv2  
+import matplotlib
+matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import random
+import torch
+
+def plot_reward(discriminator, shape=(200,60), tgt_pos=(190,30), plot_value=False, env=None):
+    # generate grid w/ two different targets:
+    x = np.arange(0,shape[0])
+    y = np.arange(0,shape[1])
+
+    grid = np.array(np.meshgrid(y,x))
+    point_list = np.reshape(grid, [2,-1]).T
+    #point_list = grid
+
+    tgt_pos = np.array(tgt_pos)
+    grid_pos1 = np.concatenate([point_list, np.tile(tgt_pos, (point_list.shape[0],1))],1)
+
+    def dist_f(grid_pos):
+         return -(np.sqrt((grid_pos[:,0] - grid_pos[:,3])**2 + (grid_pos[:,1]-grid_pos[:,2])**2))
+    
+    r_gt_1 = dist_f(grid_pos1)
+    r_gt_1 = r_gt_1.reshape(shape)
+
+    # plot rewards for both goals
+    if env is None:
+        with torch.no_grad():
+            r_1 = discriminator.get_reward(ob=torch.Tensor(grid_pos1),ac=None)
+            if plot_value:
+                v_1 = discriminator.get_value(ob=torch.Tensor(grid_pos1),ac=None)
+            
+            r_1 = r_1.cpu().numpy()
+            
+    title = 'reward'
+    if plot_value:
+        r_1 = v_1.cpu().numpy()
+        title = 'value'
+
+    fig = plt.figure(figsize=(20,5))
+    ax1 = plt.subplot(121)
+    plt.pcolormesh(x,y,r_1.reshape(shape).T)
+    plt.colorbar()
+    plt.scatter(tgt_pos[0], tgt_pos[1], c='r')
+    plt.title(title + '_irl')
+    ax2 = plt.subplot(122)
+    plt.pcolormesh(x,y,r_gt_1.T)
+    plt.colorbar()
+    plt.scatter(tgt_pos[0], tgt_pos[1], c='r')
+    plt.title(title + '_gt')
+    
+    plt.tight_layout()
+
+    fig.canvas.draw()
+    data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+
+    image_from_plot = (data.reshape(fig.canvas.get_width_height()[::-1] + (3,)) / 255.0)
+    img = np.swapaxes(image_from_plot, 0, 2)
+    img = np.swapaxes(img, 1, 2)
+
+    return img
+
 
 class Point(object):
     def __init__(self, name, x_max, x_min, y_max, y_min):
@@ -274,7 +333,7 @@ class MovePoint(Env):
 class MoveP(Env):
     metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
 
-    def __init__(self, waypoints=[(175, 175)], size=200, random_init=False, goal_conditioning=True, render_mode="rgb_array"):
+    def __init__(self, init_pos=(10,10), waypoints=[(175, 175)], shape=(200,200), random_init=False, goal_conditioning=True, render_mode="rgb_array"):
         super(MoveP, self).__init__()
         
         self.goal_conditioning = goal_conditioning
@@ -284,10 +343,10 @@ class MoveP(Env):
             dim = 2
 
         # Define a 2-D observation space (R^4)
-        self.size = size
+        self.shape = shape
         self.observation_shape = (dim)
         self.observation_space = spaces.Box(low = np.zeros(self.observation_shape), 
-                                            high = np.ones(self.observation_shape)*self.size,
+                                            high = np.ones(self.observation_shape)*np.max(self.shape),
                                             dtype = np.float32)
     
         self.action_space = spaces.Discrete(5,)
@@ -300,11 +359,13 @@ class MoveP(Env):
         # Maximum episode length
         self.max_time = 1000
 
+        self.init_pos = init_pos
         # Permissible area of helicper to be 
         self.y_min = 0
         self.x_min = 0
-        self.y_max = self.size
-        self.x_max = self.size
+        self.x_max = self.shape[0]
+        self.y_max = self.shape[1]
+
         self.random_init = random_init
         
     def reset(self, seed=1, options=None):
@@ -319,11 +380,13 @@ class MoveP(Env):
 
         # Determine a place to intialise the agent in
         if self.random_init:
-            x = random.randrange(int(self.size * 0.05), int(self.size * 0.10))
-            y = random.randrange(int(self.size * 0.15), int(self.size * 0.20))
+            x_noise = random.randrange(int(self.shape[0] * 0.05), int(self.shape[0] * 0.10))
+            y_noise = random.randrange(int(self.shape[1] * 0.15), int(self.shape[1] * 0.20))
+            x, y = self.init_pos
+            x += x_noise
+            y += y_noise
         else:
-            x = 10
-            y = 10
+            x, y = self.init_pos
 
         # Intialise the agent
         self.agent = np.array([x,y])
@@ -580,6 +643,163 @@ class CMoveP(Env):
             return data
 
 
+# continuous movepoint
+class CMovePND(Env):
+    metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
+
+    def __init__(self, waypoints, D=2, size=20, n_obstacles=1, random_init=False, goal_conditioning=True, render_mode="rgb_array"):
+        super(CMovePND, self).__init__()
+        
+        self.dim = D
+        self.goal_conditioning = goal_conditioning
+        if goal_conditioning:
+            dim = 2*D
+        else:
+            dim = 2
+
+        # Define a 2-D observation space (R^4)
+        self.size = size
+        self.observation_shape = (dim)
+        self.observation_space = spaces.Box(low = np.zeros(self.observation_shape), 
+                                            high = np.ones(self.observation_shape)*self.size,
+                                            dtype = np.float32)
+    
+        self.action_space = spaces.Box(low = -3*np.ones((D,)), 
+                                            high = 3*np.ones((D,)),
+                                            dtype = np.float32)
+        
+        # Permissible area of point to be 
+        self.min = np.array([0.]*D)
+        self.max = np.array([self.size]*D)
+        self.random_init = random_init
+        # Maximum episode length
+        self.max_time = 1000
+        
+        # Add targets
+        self.n_tgt = len(waypoints)
+        self.waypoints = waypoints
+        self.obstacles = self.gen_random_obstacles(n_obstacles)
+        
+    def gen_random_obstacles(self, n_obstacles):
+        self.obstacles = []
+        for i in range(n_obstacles):
+            x0 = np.clip(np.random.randint(0.3*self.size,0.7*self.size,self.dim),self.min, self.max)
+            xlen = np.clip(np.random.randint(0, 0.2*self.size, self.dim), self.min, self.max)
+            self.obstacles.append((x0, xlen))
+        
+        return self.obstacles
+        
+    def check_obstacles(self, state, action):
+        res = state+action
+        for i, j in self.obstacles:
+            mask0 = state+action > i
+            mask1 = state+action < i+j
+            
+            if np.all(mask0) and np.all(mask1):
+                res = state
+            #mask = np.logical_or(mask0, mask1)
+            #res = mask*(state+action) + np.logical_not(mask)*state
+            
+        return res
+
+    def reset(self, seed=1, options=None):
+        # Flag that marks the termination of an episode
+        self.term = False
+        self.trunc = False
+        # Reset the fuel consumed
+        self.time = self.max_time
+
+        # Reset the reward
+        self.curr_tgt = 0
+
+        # Determine a place to intialise the agent in
+        if self.random_init:
+            x = np.random.rand(self.dim)*self.size*0.1
+        else:
+            x = np.zeros(self.dim)
+
+        # Intialise the agent
+        self.agent = x
+        
+        curr_tgt = np.array(self.waypoints[self.curr_tgt])
+        state = np.concatenate([self.agent, curr_tgt],0)
+        
+        self.needs_reset = False
+        # return the observation
+        return state, {}
+                            
+    def step(self, action):
+        # Assert that it is a valid action 
+        assert self.action_space.contains(action), "Invalid Action"
+
+        # Decrease the time counter 
+        self.time -= 1 
+
+        # apply the action to the agent
+        move = action
+
+        self.agent = self.clamp(self.check_obstacles(self.agent, move), self.min, self.max)
+        #self.agent = self.clamp(self.agent + move, self.min, self.max)
+
+        # compute obstacles
+        
+        # REMOVE NOOP
+        #elif action == 4:
+        #    self.agent.move(0,0)
+            
+        curr_tgt = np.array(self.waypoints[self.curr_tgt])
+        # l2 distance as reward
+        reward = self.get_reward(self.agent, curr_tgt)
+        
+        if np.linalg.norm(self.agent - curr_tgt) < 3:
+            #reward += 5
+            if self.curr_tgt == len(self.waypoints)-1:
+                # task solved
+                reward += 1000
+                self.term = True
+            else:
+                # update target
+                reward += 500
+                self.curr_tgt+=1
+        
+        if self.goal_conditioning:
+            state = np.concatenate([self.agent, curr_tgt], -1)
+        else:
+            state = self.agent
+
+        # If out of fuel, end the episode.
+        if self.time == 0:
+            self.trunc = True
+            self.needs_reset = True
+
+        return state, reward, self.term, self.trunc, {}
+                            
+    def clamp(self, n, minn, maxn):
+        return np.clip(n, minn, maxn)
+
+    def get_reward(self, state, tgt = (175,175)):
+        curr_tgt = np.array(tgt)
+        # l2 distance as reward
+        reward = -np.linalg.norm(state-tgt)
+        
+        return reward
+                            
+    def render(self, mode = "rgb_array"):
+        assert mode in ["human", "rgb_array"], "Invalid mode, must be either \"human\" or \"rgb_array\""
+        fig = plt.figure(figsize=(10,10))
+        plt.scatter(self.agent[0], self.agent[1], c='m',alpha=0.2)
+        curr_tgt = self.waypoints[self.curr_tgt]
+        plt.scatter(curr_tgt[0], curr_tgt[1], c='r')
+        plt.axis('equal')
+        if mode == "human":
+            plt.show()
+
+        elif mode == "rgb_array":
+            #return fig
+            fig.canvas.draw()
+            data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            return data
 # # continuous movepoint
 # class CMoveP(Env):
 #     metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}

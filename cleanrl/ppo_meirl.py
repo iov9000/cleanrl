@@ -9,19 +9,34 @@ import time
 from datetime import datetime
 from distutils.util import strtobool
 
-module_path = os.path.abspath(os.path.join('../ccl'))
-if module_path not in sys.path:
-    sys.path.append(module_path)
+import ot
+import gymnasium as gym
 
-import pybullet_envs  # noqa
+gym.envs.register(
+     id='MoveP-v0',
+     entry_point='envs.envs2d:MoveP',
+     max_episode_steps=1000,
+)
+
+gym.envs.register(
+     id='CMoveP-v0',
+     entry_point='envs.envs2d:CMoveP',
+     max_episode_steps=1000,
+)
+
+#import pybullet_envs  # noqa
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.normal import Normal
+from torch.distributions.categorical import Categorical
+
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.meirl import MeirlReward, MEIRLDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters, demos_gen_dict
+from irl.utils import load_hf_demos, load_hf_demos_name, evaluate_model, prepare_batch_update_irl,\
+     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper
+from envs.envs2d import plot_reward
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -30,10 +45,14 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
+    parser.add_argument("--exp-id", type=str, default="",
+        help="additional identifier of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
-    parser.add_argument("--logging_interval", type=int, default=500,
+    parser.add_argument("--logging_interval", type=int, default=512,
         help="logging interval")
+    parser.add_argument("--eval_interval", type=int, default=10240,
+        help="evaluation interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -51,7 +70,10 @@ def parse_args():
         action='store_true', required=False, help='normalize irl rewards')  
     parser.add_argument('--clip_action', default=True, 
         action='store_true', required=False, help='normalize irl rewards')  
-
+    parser.add_argument('--time_aware', default=False, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument('--normalize_irl_rewards', default=True, 
+        action='store_false', required=False, help='normalize irl rewards') 
 
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
@@ -93,12 +115,22 @@ def parse_args():
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
+    parser.add_argument("--demo_eps", type=float, default=0.0,
+        help="if > 0, load perturbed demos")    
+    parser.add_argument("--demo_fnames", type=str, nargs='+', default=None,
+        help="load specific demo files")    
     parser.add_argument("--n_demos", type=int, default=10,
+        help="number of demos to use")
+    parser.add_argument("--subsample", type=int, default=1,
         help="number of demos to use")
     parser.add_argument('--enhance_demos', default=False, required=False, 
         action='store_true', help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
+    parser.add_argument('--use_dones', default=False, required=False, 
+        action='store_true', help='use actions in discriminator')
+    parser.add_argument('--use_next_obs', default=False, required=False, 
+        action='store_true', help='use actions in discriminator')
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
                    help='discriminator MLP layer dimensions')
     parser.add_argument('--irm_coeff', default=0, type=float, 
@@ -106,23 +138,36 @@ def parse_args():
     parser.add_argument('--irl_epochs', default=1, type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--irl_init_epochs', default=1, type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
+    parser.add_argument('--lip_p', default=1, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
+
+    parser.add_argument("--disc_nonlin", type=str, default="tanh", help="nonlinearity for discriminator")
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
     parser.add_argument('--use_disc_bias', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
-    parser.add_argument("--div", type=str, default="rkl",
-        help="divergence type")
-    parser.add_argument("--disc_nonlin", type=str, default="prelu",
-        help="divergence type")
-    parser.add_argument('--normalize_irl_rewards', default=True, 
-        action='store_true', required=False, help='normalize irl rewards') 
+    parser.add_argument('--use_weight_norm', default=False, required=False, 
+        action='store_true', help='use weight norm')
+    parser.add_argument('--use_spectral_norm', default=False, required=False, 
+        action='store_true', help='use spectral_norm')
+    parser.add_argument('--use_absorb_wrapper', default=False, required=False, 
+        action='store_true', help='use_absorb_wrapper')
+    parser.add_argument('--identity_features', default=False, required=False, 
+        action='store_true', help='use state space features directly')
 
-    parser.add_argument('--on_policy', default=True, required=False, 
-        action='store_false', help='use bias in disc arch')
+    parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
+    parser.add_argument("--div", type=str, default="rkl", help="divergence type")
+    parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
+
+    parser.add_argument('--drop_batch', default=False, required=False, 
+        action='store_true', help='drop batch in irl epochs')   
+    parser.add_argument('--on_policy', default=False, required=False, 
+        action='store_true', help='use bias in disc arch')
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
+    parser.add_argument("--test_eps", type=float, default=0.0, help="test perturbation eps")
+    parser.add_argument("--perturbation_parameters", type=str, nargs='+', default='', help="which env parameter to perturb")
 
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
@@ -138,21 +183,23 @@ def parse_args():
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
     def thunk():
-        env = gym.make(env_id)
+        env = gym.make(env_id, render_mode='rgb_array')
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        if opt.time_aware:
+            env = gym.wrappers.TimeAwareObservation(env)
         if capture_video:
             if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        if opt.clip_action:
+                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % 200 == 0)
+        if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env)
-        if opt.normalize_obs:
+        if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeObservation(env)
             env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
         env = MeirlReward(env, opt, disc)
-        if opt.normalize_irl_rewards:
+        if opt.normalize_irl_rewards and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeReward(env, gamma=gamma)
             env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-        env.seed(seed)
+        #env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -167,35 +214,68 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self, envs, hidden_size=64):
+    def __init__(self, envs, hidden_size=64, nonlin='tanh', discrete=False):        
         super().__init__()
+
+        if nonlin == 'relu':
+            nonlin = nn.ReLU()
+        elif nonlin == 'prelu':
+            nonlin = nn.PReLU()
+        else:
+            nonlin = nn.Tanh()
+
+        self.discrete = discrete
+        if self.discrete:
+            output_dim = int(envs.single_action_space.n)
+        else:
+            output_dim = np.prod(envs.single_action_space.shape)
+
         self.critic = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
-            nn.Tanh(),
+            nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh(),
+            nonlin,
             layer_init(nn.Linear(hidden_size, 1), std=1.0),
         )
         self.actor_mean = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
-            nn.Tanh(),
+            nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh(),
-            layer_init(nn.Linear(hidden_size, np.prod(envs.single_action_space.shape)), std=0.01),
+            nonlin,
+            layer_init(nn.Linear(hidden_size, output_dim), std=0.01),
         )
-        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
+        if not self.discrete:
+            self.actor_logstd = nn.Parameter(torch.zeros(1,output_dim))
 
     def get_value(self, x):
         return self.critic(x)
 
-    def get_action_and_value(self, x, action=None):
+    def get_action_and_value_c(self, x, action=None, eval=False):
         action_mean = self.actor_mean(x)
         action_logstd = self.actor_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+
+        if eval:
+            return action_mean, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+        else:
+            return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+
+    def get_action_and_value_d(self, x, action=None, eval=False):
+        logits = self.actor_mean(x)
+        probs = Categorical(logits=logits)
+        if action is None:
+            action = probs.sample()
+        
+        return action, probs.log_prob(action), probs.entropy(), self.critic(x)
+
+    def get_action_and_value(self, x, action=None, eval=False):
+        if self.discrete:
+            return self.get_action_and_value_d(x, action, eval)
+        else:
+            return self.get_action_and_value_c(x, action, eval)
 
 
 if __name__ == "__main__":
@@ -203,8 +283,12 @@ if __name__ == "__main__":
     ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     ua = 'ua' if args.use_actions else ''
     # create output folder with non default arguments in the name
-    id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
+    id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_").replace("[","").replace("]","")
     run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    if len(run_name) > 220:
+        run_name = run_name[:220]
+    results_dict = {'eval_mu': [], 'eval_std': []}
+    
     if args.track:
         import wandb
 
@@ -237,21 +321,30 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
+    if args.demo_fnames is not None:
+        demos = load_hf_demos_name(args, args.demo_fnames)
+    else:
+        demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
+
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
     test_env = gym.make(args.env_id)
+    discrete = not isinstance(test_env.action_space, gym.spaces.Box)
     disc = MEIRLDiscriminator(test_env, args)
+    if args.resume is not None:
+        disc.load_state_dict(torch.load(os.path.join(args.resume, "disc.pt") , map_location=device))
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
         [make_env(args, args.env_id, args.seed + i, i, args.capture_video, run_name, args.gamma, disc) for i in range(args.num_envs)]
     )
-    assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
-    agent = Agent(envs, args.agent_size).to(device)
+    agent = Agent(envs, args.agent_size, discrete=discrete).to(device)
+    if args.resume:
+        agent.load_state_dict(torch.load(os.path.join(args.resume, "agent.pt") , map_location=device))
+    
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -265,10 +358,16 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    next_obs = torch.Tensor(envs.reset()).to(device)
+    next_obs = torch.Tensor(envs.reset(seed=args.seed)[0]).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
     init = True
+
+    # logging variables
+    irl_count = 0
+    annealed_irm_coeff = args.irm_coeff
+
+    sw_dists = []
 
     for update in range(1, num_updates + 1):
         # Annealing the rate if instructed to do so.
@@ -290,17 +389,27 @@ if __name__ == "__main__":
             logprobs[step] = logprob
 
             # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, reward, done, info = envs.step(action.cpu().numpy())
+            next_obs, reward, term, trunc, info = envs.step(action.cpu().numpy())
+            done = term or trunc                        
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 
+            if not isinstance(info, list):
+                info = [info]
+
             for item in info:
-                if "episode" in item.keys():
+                # TODO: fix this for new Gymnasium
+                if "final_info" in item.keys():
                     if args.verbose:
-                        print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
-                    if global_step % args.logging_interval == 0:
-                        writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
-                        writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
+                        print(
+                            f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
+                    if global_step % 10 == 0:
+                        writer.add_scalar(
+                            "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                        writer.add_scalar(
+                            "charts/episodic_return_irl", item["final_info"][0]['episode']["ep_rew_irl"], global_step)
+                        writer.add_scalar(
+                            "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
                     break
 
         # bootstrap value if not done
@@ -434,13 +543,24 @@ if __name__ == "__main__":
                 print("SPS:", int(global_step / (time.time() - start_time)))
             writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
+        #  evaluate at regular intervals and save
+        if global_step % args.eval_interval == 0:
+            mu, std, d = evaluate_model(args, agent, device)
+            print(f"Evaluation at {global_step}: {mu}, {std}")
+            writer.add_scalar('eval/mu', mu, global_step)
+            writer.add_scalar('eval/std', std, global_step)
+            rew_img = plot_reward(disc)
+            writer.add_image('img/reward', rew_img, global_step)
+
+
     envs.close()
-    writer.close()
-    
+
+    ## save model
     torch.save(agent.state_dict(), f"runs/{run_name}/agent.pt")
     torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
 
-    # save df for easier parsing
-    ea = read_tb_file(f"runs/{run_name}")
-    df = create_df_from_ea(ea, "charts/episodic_return")
-    df.to_pickle(f"results_{run_name}_df.pkl")
+    mu, std, d = evaluate_model(args, agent, device)
+    writer.add_scalar('eval/mu', mu, args.total_timesteps)
+    writer.add_scalar('eval/std', std, args.total_timesteps)
+
+    writer.close()
