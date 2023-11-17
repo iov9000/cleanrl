@@ -850,6 +850,32 @@ class AbsorbAfterDoneWrapper(gym.Wrapper):
         else:
             return obs, rew, True, True, info
 
+class FrankaObsWrapper(gym.ObservationWrapper):
+    def __init__(self, env: gym.Env):
+        #gym.utils.RecordConstructorArgs.__init__(self, filter_keys=filter_keys)
+        gym.ObservationWrapper.__init__(self, env)
+
+        #print(env.observation_space['observation'])        
+        self.env.observation_space = env.observation_space['observation']
+
+    def observation(self, obs):
+        obs_ = obs['observation']
+        cond_obs_1 = obs['achieved_goal']
+        cond_obs_2 = obs['desired_goal']
+
+        v_ = []
+        for k,v in cond_obs_1.items():
+            v_.append(v)
+        for k,v in cond_obs_2.items():
+            v_.append(v)     
+
+        v_ = np.concatenate(v_,-1)
+
+        #return np.concatenate((obs_, v_),-1)
+        return obs_
+
+        
+
 class DemoStateSeqWrapper(gym.Wrapper):
     def __init__(self, env, opt, demos):
         super().__init__(env=env)

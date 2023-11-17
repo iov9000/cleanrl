@@ -5,6 +5,7 @@ import argparse
 import os
 import random
 import time
+from datetime import datetime
 from distutils.util import strtobool
 
 module_path = os.path.abspath(os.path.join('..'))
@@ -31,7 +32,7 @@ gym.envs.register(
 )
 
 import numpy as np
-import pybullet_envs  # noqa
+#import pybullet_envs  # noqa
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -40,6 +41,7 @@ from torch.distributions.categorical import Categorical
 
 from torch.utils.tensorboard import SummaryWriter
 
+from irl.utils import FrankaObsWrapper
 
 def parse_args():
     # fmt: off
@@ -104,16 +106,29 @@ def parse_args():
         help="the maximum norm for the gradient clipping")
     parser.add_argument("--target-kl", type=float, default=None,
         help="the target KL divergence threshold")
+    parser.add_argument('--verbose', default=False, required=False, 
+        action='store_true', help='verbose output')
+
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     # fmt: on
-    return args
+    non_default = {
+        opt.dest: getattr(args, opt.dest)
+        for opt in parser._option_string_actions.values()
+        if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
+    }
 
+    return args, non_default
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma):
-    def thunk():
-        env = gym.make(env_id)
+    def thunk():        
+        if 'Franka' in env_id:
+            env = gym.make(env_id, tasks_to_complete=['microwave'])
+            env = FrankaObsWrapper(env)
+        else:
+            env = gym.make(env_id)
+
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
@@ -127,7 +142,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma):
         if opt.normalize_rewards and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeReward(env, gamma=gamma)
             env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-        env.seed(seed)
+        #env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -201,8 +216,13 @@ class Agent(nn.Module):
             return self.get_action_and_value_c(x, action)
 
 if __name__ == "__main__":
-    args = parse_args()
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    args, non_default = parse_args()
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+    # create output folder with non default arguments in the name
+    id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
+    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_{id_string}"
+    if len(run_name) > 220:
+        run_name = run_name[:220]
     if args.track:
         import wandb
 
@@ -250,7 +270,7 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    next_obs = torch.Tensor(envs.reset()).to(device)
+    next_obs = torch.Tensor(envs.reset(seed=args.seed)[0]).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
 
@@ -274,15 +294,25 @@ if __name__ == "__main__":
             logprobs[step] = logprob
 
             # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, reward, done, info = envs.step(action.cpu().numpy())
+            next_obs, reward, term, trunc, info = envs.step(action.cpu().numpy())
+            done = term or trunc
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
+            
+            if not isinstance(info, list):
+                info = [info]
 
             for item in info:
-                if "episode" in item.keys():
-                    print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
-                    writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
-                    writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
+                # TODO: fix this for new Gymnasium
+                if "final_info" in item.keys():
+                    if args.verbose:
+                        print(
+                            f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
+                    if global_step % 10 == 0:
+                        writer.add_scalar(
+                            "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                        writer.add_scalar(
+                            "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
                     break
 
         # bootstrap value if not done

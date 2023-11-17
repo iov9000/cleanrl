@@ -125,16 +125,23 @@ if __name__ == '__main__':
     filename4 = f"demo_hf_{env_name}_4.pkl" 
     filename10 = f"demo_hf_{env_name}_10.pkl" 
     filename25 = f"demo_hf_{env_name}_25.pkl" 
+    rews = []
     for dem in demo:
         dem['done'] = np.zeros(len(dem['observations']))
         dem['done'][-1] = 1
+        rews.append(np.sum(dem['rewards']))
 
+    r_srt = np.sort(rews)[::-1]
+    r_idx = np.argsort(rews)[::-1]
+
+    demo = [demo[i] for i in r_idx]
 
     for n in [1,4,10,25]:
         d = {'obs': concat_key_in_demo_list(demo[:n], 'observations'), 
              'acs': concat_key_in_demo_list(demo[:n], 'actions'), 
              'rew': concat_key_in_demo_list(demo[:n], 'rewards'), 
-             'done': concat_key_in_demo_list(demo[:n], 'done')}
+             'done': concat_key_in_demo_list(demo[:n], 'done'),
+             'init_state_dict': [d['init_state_dict'] for d in demo]}
         filename = f"demo_hf_{env_name}_{n}.pkl" 
         pickle.dump(d, open(filename, 'wb'))
 

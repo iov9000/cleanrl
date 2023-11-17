@@ -171,9 +171,14 @@ def parse_args():
     return args, non_default
 
 
-def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
+def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos):
     def thunk():
-        env = gym.make(env_id)
+        if 'Adroit' in env_id:
+            env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
+            env.set_env_state(demos['all']['init_state_dict'][0])
+        else:
+            env = gym.make(env_id, render_mode='rgb_array')        
+        
         if opt.use_absorb_wrapper: # DAC
             env = AbsorbAfterDoneWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -302,11 +307,15 @@ if __name__ == "__main__":
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
-    test_env = gym.make(args.env_id)
+    if 'Adroit' in args.env_id:
+        test_env = gym.make(args.env_id, max_episode_steps=500)
+        test_env.set_env_state(demos['all']['init_state_dict'][0])
+    else:
+        test_env = gym.make(args.env_id) 
     disc = GAILDiscriminator(test_env, args)
 
     # env setup
-    envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, disc)])
+    envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, disc, demos)])
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     max_action = float(envs.single_action_space.high[0])

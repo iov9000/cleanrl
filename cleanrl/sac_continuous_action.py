@@ -17,6 +17,7 @@ import torch.optim as optim
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
+from irl.utils import FrankaObsWrapper
 
 def parse_args():
     # fmt: off
@@ -85,7 +86,11 @@ def parse_args():
 
 def make_env(env_id, seed, idx, capture_video, run_name):
     def thunk():
-        env = gym.make(env_id)
+        if 'Franka' in env_id:
+            env = gym.make(env_id, tasks_to_complete=['microwave'])
+            env = FrankaObsWrapper(env)
+        else:
+            env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
@@ -102,7 +107,12 @@ def make_env(env_id, seed, idx, capture_video, run_name):
 class SoftQNetwork(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape), 256)
+        if isinstance(env.observation_space, gym.spaces.Dict):
+            ob_shape = env.observation_space['observation'].shape
+        else:
+            ob_shape = env.single_observation_space.shape
+
+        self.fc1 = nn.Linear(np.array(ob_shape).prod() + np.prod(env.single_action_space.shape), 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, 1)
 
@@ -121,7 +131,12 @@ LOG_STD_MIN = -5
 class Actor(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
+        if isinstance(env.observation_space, gym.spaces.Dict):
+            ob_shape = env.observation_space['observation'].shape
+        else:
+            ob_shape = env.single_observation_space.shape
+
+        self.fc1 = nn.Linear(np.array(ob_shape).prod(), 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc_mean = nn.Linear(256, np.prod(env.single_action_space.shape))
         self.fc_logstd = nn.Linear(256, np.prod(env.single_action_space.shape))
@@ -218,9 +233,14 @@ if __name__ == "__main__":
         alpha = args.alpha
 
     envs.single_observation_space.dtype = np.float32
+    if isinstance(envs.observation_space, gym.spaces.Dict):
+        ob_space = envs.observation_space['observation']
+    else:
+        ob_space = envs.single_observation_space
+
     rb = ReplayBuffer(
         args.buffer_size,
-        envs.single_observation_space,
+        ob_space,
         envs.single_action_space,
         device,
         handle_timeout_termination=True,

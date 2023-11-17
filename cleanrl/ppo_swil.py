@@ -264,6 +264,11 @@ class Agent(nn.Module):
         else:
             nonlin = nn.Tanh()
 
+        if isinstance(envs.observation_space, gym.spaces.Dict):
+            ob_shape = envs.observation_space['observation'].shape
+        else:
+            ob_shape = envs.single_observation_space.shape
+
         self.discrete = discrete
         if self.discrete:
             output_dim = int(envs.single_action_space.n)
@@ -271,14 +276,14 @@ class Agent(nn.Module):
             output_dim = np.prod(envs.single_action_space.shape)
 
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
+            layer_init(nn.Linear(np.array(ob_shape).prod(), hidden_size)),
             nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nonlin,
             layer_init(nn.Linear(hidden_size, 1), std=1.0),
         )
         self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
+            layer_init(nn.Linear(np.array(ob_shape).prod(), hidden_size)),
             nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nonlin,
