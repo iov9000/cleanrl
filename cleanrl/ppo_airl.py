@@ -519,7 +519,7 @@ if __name__ == "__main__":
                     #plt.legend()
                     plt.savefig(f"runs/{run_name}/airl_scatter_{global_step}.png")
 
-                update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
+                update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent, compute_lprobs=True)
 
                 loss_dict = disc.compute_loss(update_dict)
 
