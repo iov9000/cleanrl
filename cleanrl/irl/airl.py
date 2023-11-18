@@ -165,7 +165,7 @@ class AIRLDiscriminator(nn.Module):
             ob, next_ob, ac, lprobs)
         
         
-        return -torch.squeeze(torch.log(1-torch.sigmoid(d_out) + 1e-8))
+        return torch.squeeze(torch.log(torch.sigmoid(d_out) + 1e-8) - torch.log(1-torch.sigmoid(d_out) + 1e-8))
 
     # this computes the value of the reward fct instead of logD
     def _get_reward(self, ob, ac):

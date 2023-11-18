@@ -75,7 +75,7 @@ if __name__ == '__main__':
                                         euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
                                         # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
                                         exp_cmd = (f"python {algo}_swil.py --n_demos={n_demo} "
-                                                   f"--swil_period={per} {lin} --disc_nonlin={d_nl} --max_q_len {ql}"
+                                                   f"--swil_period={per} {lin} --disc_nonlin={d_nl} --max_q_len {ql} "
                                                    f"--verbose --seed={seed} --swil_loss surr_loss {ua} --env-id {env_name}")
                                         cluster_cmd = euler_slurm + exp_cmd 
                                         print("Running command: ", cluster_cmd)
