@@ -165,8 +165,11 @@ class SWILDiscriminator(nn.Module):
         #if opt.swil_ae:
             # constrain the dimension if using an autoencoder
         #    self.layer_dims[1] = 10
-
-        ob_shapes = list(env.observation_space.shape)
+        if isinstance(env.observation_space, gym.spaces.Dict):
+            ob_shapes = list(env.observation_space['observation'].shape)
+        else:
+            ob_shapes = list(env.observation_space.shape)
+        #ob_shapes = list(env.observation_space.shape)
         ac_shapes = list(env.action_space.shape)
         if not ac_shapes:
             ac_shapes = [1]

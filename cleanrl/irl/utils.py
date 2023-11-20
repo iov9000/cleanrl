@@ -866,8 +866,8 @@ class FrankaObsWrapper(gym.ObservationWrapper):
         v_ = []
         for k,v in cond_obs_1.items():
             v_.append(v)
-        for k,v in cond_obs_2.items():
-            v_.append(v)     
+        #for k,v in cond_obs_2.items():
+        #    v_.append(v)     
 
         v_ = np.concatenate(v_,-1)
 

@@ -6,7 +6,22 @@ import time
 from datetime import datetime
 from distutils.util import strtobool
 
+import ot
+
 import gymnasium as gym
+
+gym.envs.register(
+     id='MoveP-v0',
+     entry_point='envs.envs2d:MoveP',
+     max_episode_steps=1000,
+)
+
+gym.envs.register(
+     id='CMoveP-v0',
+     entry_point='envs.envs2d:CMoveP',
+     max_episode_steps=1000,
+)
+
 import numpy as np
 #import pybullet_envs  # noqa
 import torch
@@ -18,7 +33,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from irl.gail import GailReward, GAILDiscriminator
 from irl.utils import load_hf_demos, evaluate_model, prepare_batch_update_irl,\
-     enhance_demos_with_barycenters, demos_gen_dict
+     enhance_demos_with_barycenters, demos_gen_dict, AbsorbAfterDoneWrapper, FrankaObsWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -27,6 +42,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
+    parser.add_argument("--exp-id", type=str, default="",
+        help="additional identifier of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
     parser.add_argument("--logging_interval", type=int, default=500,
@@ -85,6 +102,8 @@ def parse_args():
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",
         help="expert demo folder")
+    parser.add_argument("--demo_eps", type=float, default=0.0,
+        help="if > 0, load perturbed demos")    
     parser.add_argument("--n_demos", type=int, default=10,
         help="number of demos to use")
     parser.add_argument("--subsample", type=int, default=1,
@@ -93,6 +112,10 @@ def parse_args():
         action='store_true', help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
+    parser.add_argument('--use_dones', default=False, required=False, 
+        action='store_true', help='use actions in discriminator')
+    parser.add_argument('--use_next_obs', default=False, required=False, 
+        action='store_true', help='use actions in discriminator')
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
                    help='discriminator MLP layer dimensions')
     parser.add_argument('--irm_coeff', default=0, type=float, 
@@ -104,6 +127,8 @@ def parse_args():
 
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
+    parser.add_argument('--disc_update_period', default=-1, type=int, required=False, help='discriminator update period')
+
     parser.add_argument("--disc_nonlin", type=str, default="tanh", help="nonlinearity for discriminator")
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
@@ -113,6 +138,8 @@ def parse_args():
         action='store_true', help='use weight norm')
     parser.add_argument('--use_spectral_norm', default=False, required=False, 
         action='store_true', help='use spectral_norm')
+    parser.add_argument('--use_absorb_wrapper', default=False, required=False, 
+        action='store_true', help='use_absorb_wrapper')
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
     parser.add_argument("--div", type=str, default="rkl",
@@ -124,6 +151,8 @@ def parse_args():
         action='store_true', help='use bias in disc arch')
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')        
+    parser.add_argument("--test_eps", type=float, default=0.0, help="test perturbation eps")
+    parser.add_argument("--perturbation_parameters", type=str, nargs='+', default='', help="which env parameter to perturb")
 
     args = parser.parse_args()
     # fmt: on
@@ -137,7 +166,15 @@ def parse_args():
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
     def thunk():
-        env = gym.make(env_id)
+        if 'Adroit' in env_id:
+            env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
+            env.set_env_state(demos['all']['init_state_dict'][0])
+        elif 'Franka' in env_id:
+            env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+            env = FrankaObsWrapper(env)
+        else:
+            env = gym.make(env_id, render_mode='rgb_array')        
+        
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
@@ -161,7 +198,12 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
 class QNetwork(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape), 256)
+        if isinstance(env.observation_space, gym.spaces.Dict):
+            ob_shape = env.observation_space['observation'].shape
+        else:
+            ob_shape = env.single_observation_space.shape
+
+        self.fc1 = nn.Linear(np.array(ob_shape).prod() + np.prod(env.single_action_space.shape), 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, 1)
 
@@ -176,7 +218,12 @@ class QNetwork(nn.Module):
 class Actor(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
+        if isinstance(env.observation_space, gym.spaces.Dict):
+            ob_shape = env.observation_space['observation'].shape
+        else:
+            ob_shape = env.single_observation_space.shape
+
+        self.fc1 = nn.Linear(np.array(ob_shape).prod(), 256)        
         self.fc2 = nn.Linear(256, 256)
         self.fc_mu = nn.Linear(256, np.prod(env.single_action_space.shape))
         # action rescaling
@@ -214,6 +261,8 @@ if __name__ == "__main__":
     # create output folder with non default arguments in the name
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
     run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    if len(run_name) > 220:
+        run_name = run_name[:220]
     results_dict = {'eval_mu': [], 'eval_std': []}
 
     if args.track:
@@ -247,12 +296,19 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    demos = load_hf_demos(args, n_demos=args.n_demos)
+    demos = load_hf_demos(args, n_demos=args.n_demos, perturb = args.demo_eps)
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
     #  get env specs
-    test_env = gym.make(args.env_id)
+    if 'Adroit' in args.env_id:
+        test_env = gym.make(args.env_id, max_episode_steps=500)
+        test_env.set_env_state(demos['all']['init_state_dict'][0])
+    elif 'Franka' in args.env_id:
+        test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+        test_env = FrankaObsWrapper(test_env)
+    else:
+        test_env = gym.make(args.env_id)     
     disc = GAILDiscriminator(test_env, args)
 
     # env setup
@@ -284,6 +340,7 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     obs = envs.reset(seed=args.seed)[0]
     for global_step in range(args.total_timesteps):
+        irl_trigger = False
         try:
             # ALGO LOGIC: put action logic here
             if global_step < args.learning_starts:
@@ -305,12 +362,15 @@ if __name__ == "__main__":
             for item in infos:
                 # TODO: fix this for new Gymnasium
                 if "final_info" in item.keys():
+                    irl_trigger = True
                     if args.verbose:
                         print(
                             f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
-                    if global_step % 10 == 0:
+                    if global_step % 1 == 0:
                         writer.add_scalar(
                             "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                        writer.add_scalar(                        
+                            "charts/episodic_return_irl", item["final_info"][0]['episode']["ep_rew_irl"], global_step)
                         writer.add_scalar(
                             "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
                     break
@@ -378,42 +438,47 @@ if __name__ == "__main__":
                     writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
                 # Optimize the discriminator
-                for epoch in range(args.irl_epochs):
-                    # GAIL Discriminator Update
-                    gen_demos = demos_gen_dict(demos['all'], args.batch_size)
-                    for d in gen_demos:
-                        if len(d['obs']) < args.batch_size:
-                            if args.drop_batch:
-                                break
-                            else:
-                                obs_ = data.observations[:len(d['obs'])]
-                                actions_ = data.actions[:len(d['obs'])]
-                                dones_ = data.dones[:len(d['obs'])]
-                        else:
-                            obs_ = data.observations
-                            actions_ = data.actions
-                            dones_ = data.dones
-
+                irl_condition = global_step % args.disc_update_period == 0
+                if args.disc_update_period == -1:
+                    irl_condition = irl_trigger
+                    
+                if irl_condition:     
+                    for epoch in range(args.irl_epochs):
                         # GAIL Discriminator Update
-                        update_dict = prepare_batch_update_irl(envs, args, d,
-                                                               obs_, actions_, dones_, actor)
+                        gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+                        for d in gen_demos:
+                            if len(d['obs']) < args.batch_size:
+                                if args.drop_batch:
+                                    break
+                                else:
+                                    obs_ = data.observations[:len(d['obs'])]
+                                    actions_ = data.actions[:len(d['obs'])]
+                                    dones_ = data.dones[:len(d['obs'])]
+                            else:
+                                obs_ = data.observations
+                                actions_ = data.actions
+                                dones_ = data.dones
 
-                        loss_dict = disc.compute_loss(update_dict)
+                            # GAIL Discriminator Update
+                            update_dict = prepare_batch_update_irl(envs, args, d,
+                                                                obs_, actions_, dones_, actor)
 
-                        loss = loss_dict['d_loss'] + args.irm_coeff * \
-                            loss_dict['grad_penalty'] + \
-                            args.lip_coeff * loss_dict['lip_penalty']
-                        if args.irm_coeff > 1.0:
-                            loss /= args.irm_coeff
+                            loss_dict = disc.compute_loss(update_dict)
 
-                        disc.update(loss)
+                            loss = loss_dict['d_loss'] + args.irm_coeff * \
+                                loss_dict['grad_penalty'] + \
+                                args.lip_coeff * loss_dict['lip_penalty']
+                            if args.irm_coeff > 1.0:
+                                loss /= args.irm_coeff
 
-                        if global_step % args.logging_interval == 0:
-                            writer.add_scalar(
-                                'irl/gail_bce_loss', loss_dict['d_loss'], global_step)
-                            if args.irm_coeff > 0:
+                            disc.update(loss)
+
+                            if global_step % args.logging_interval == 0:
                                 writer.add_scalar(
-                                    'irl/gail_irm_loss', loss_dict['grad_penalty'], global_step)
+                                    'irl/gail_bce_loss', loss_dict['d_loss'], global_step)
+                                if args.irm_coeff > 0:
+                                    writer.add_scalar(
+                                        'irl/gail_irm_loss', loss_dict['grad_penalty'], global_step)
 
                 #  evaluate at regular intervals and save
                 if global_step % args.eval_interval == 0:
@@ -423,6 +488,10 @@ if __name__ == "__main__":
                     writer.add_scalar('eval/std', std, global_step)
                     results_dict['eval_mu'].append(mu)
                     results_dict['eval_std'].append(std)
+                    ref_dist = ot.sliced_wasserstein_distance(
+                        d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
+                    writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
+
 
         except KeyboardInterrupt:
             break
@@ -447,6 +516,6 @@ if __name__ == "__main__":
     writer.close()
 
     #  save df for easier parsing
-    ea = read_tb_file(f"runs/{run_name}")
-    df = create_df_from_ea(ea, "charts/episodic_return")
-    df.to_pickle(f"results_pkl/results_{run_name}_df.pkl")
+    #ea = read_tb_file(f"runs/{run_name}")
+    #df = create_df_from_ea(ea, "charts/episodic_return")
+    #df.to_pickle(f"results_pkl/results_{run_name}_df.pkl")

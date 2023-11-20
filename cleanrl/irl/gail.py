@@ -55,7 +55,11 @@ class GAILDiscriminator(nn.Module):
         else:
             nonlin = nn.PReLU()
 
-        ob_shapes = list(env.observation_space.shape)
+        if isinstance(env.observation_space, gym.spaces.Dict):
+            ob_shapes = list(env.observation_space['observation'].shape)
+        else:
+            ob_shapes = list(env.observation_space.shape)
+        #ob_shapes = list(env.observation_space.shape)
         ac_shapes = list(env.action_space.shape)
 
         if not ac_shapes:

@@ -7,6 +7,19 @@ from datetime import datetime
 from distutils.util import strtobool
 
 import gymnasium as gym
+
+gym.envs.register(
+     id='MoveP-v0',
+     entry_point='envs.envs2d:MoveP',
+     max_episode_steps=1000,
+)
+
+gym.envs.register(
+     id='CMoveP-v0',
+     entry_point='envs.envs2d:CMoveP',
+     max_episode_steps=1000,
+)
+
 import numpy as np
 #import pybullet_envs  # noqa
 import torch
@@ -16,9 +29,11 @@ import torch.optim as optim
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
+import ot 
+
 from irl.swil import SwilReward, SWILDiscriminator
 from irl.utils import load_hf_demos, evaluate_model, prepare_batch_update_irl,\
-    enhance_demos_with_barycenters, demos_gen_dict
+    enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, FrankaObsWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -105,6 +120,7 @@ def parse_args():
     parser.add_argument("--min_beta", type=int, default=1.0, help="degree of polynomial for SWIL")
     parser.add_argument("--max_q_len", type=int, default=1, help="max number of projected atom sets in queue")
     parser.add_argument("--max_swil_step", type=int, default=100000000, help="only update projections until some timestep")
+    parser.add_argument('--swil_period', default=1, type=float, required=False, help='number of discriminator updates')
     parser.add_argument("--replace_atoms", default=False, required=False, action='store_true', help="actually replace atoms with policy samples")
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
@@ -179,7 +195,15 @@ def parse_args():
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
     def thunk():
-        env = gym.make(env_id, render_mode='rgb_array')
+        if 'Adroit' in env_id:
+            env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
+            env.set_env_state(demos['all']['init_state_dict'][0])
+        elif 'Franka' in env_id:
+            env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+            env = FrankaObsWrapper(env)
+        else:
+            env = gym.make(env_id, render_mode='rgb_array')        
+        
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
@@ -203,7 +227,12 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
 class QNetwork(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape), 256)
+        if isinstance(env.observation_space, gym.spaces.Dict):
+            ob_shape = env.observation_space['observation'].shape
+        else:
+            ob_shape = env.single_observation_space.shape
+
+        self.fc1 = nn.Linear(np.array(ob_shape).prod() + np.prod(env.single_action_space.shape), 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, 1)
 
@@ -218,7 +247,12 @@ class QNetwork(nn.Module):
 class Actor(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
+        if isinstance(env.observation_space, gym.spaces.Dict):
+            ob_shape = env.observation_space['observation'].shape
+        else:
+            ob_shape = env.single_observation_space.shape
+
+        self.fc1 = nn.Linear(np.array(ob_shape).prod(), 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc_mu = nn.Linear(256, np.prod(env.single_action_space.shape))
         # action rescaling
@@ -255,6 +289,8 @@ if __name__ == "__main__":
     # create output folder with non default arguments in the name
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
     run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    if len(run_name) > 220:
+        run_name = run_name[:220]
     results_dict = {'eval_mu': [], 'eval_std': []}
 
     if args.track:
@@ -293,7 +329,14 @@ if __name__ == "__main__":
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
     #  get env specs
-    test_env = gym.make(args.env_id)
+    if 'Adroit' in args.env_id:
+        test_env = gym.make(args.env_id, max_episode_steps=500)
+        test_env.set_env_state(demos['all']['init_state_dict'][0])
+    elif 'Franka' in args.env_id:
+        test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+        test_env = FrankaObsWrapper(test_env)
+    else:
+        test_env = gym.make(args.env_id)         
     disc = SWILDiscriminator(test_env, args)
 
     # env setup
@@ -367,6 +410,7 @@ if __name__ == "__main__":
     #####
     obs = envs.reset(seed=args.seed)[0]
     for global_step in range(args.total_timesteps):
+        irl_trigger = False
         try:
             # ALGO LOGIC: put action logic here
             if global_step < args.learning_starts:
@@ -391,12 +435,15 @@ if __name__ == "__main__":
             for item in infos:
                 # TODO: fix this for new Gymnasium
                 if "final_info" in item.keys():
+                    irl_trigger = True
                     if args.verbose:
                         print(
                             f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
-                    if global_step % 10 == 0:
+                    if global_step % 1 == 0:
                         writer.add_scalar(
                             "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                        writer.add_scalar(
+                            "charts/episodic_return_irl", item["final_info"][0]['episode']["ep_rew_irl"], global_step)
                         writer.add_scalar(
                             "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
                     break
@@ -469,39 +516,45 @@ if __name__ == "__main__":
                 else:
                     n_irl_epochs = args.irl_epochs
                 init = False
-
-                for epoch in range(n_irl_epochs):
-                    # GAIL Discriminator Update
-                    gen_demos = demos_gen_dict(demos['all'], args.batch_size)
-                    for d in gen_demos:
-                        if len(d['obs']) < args.batch_size:
-                            obs_ = data.observations[:len(d['obs'])]
-                            actions_ = data.actions[:len(d['obs'])]
-                            dones_ = data.dones[:len(d['obs'])]
-                        else:
-                            obs_ = data.observations
-                            actions_ = data.actions
-                            dones_ = data.dones
+                irl_condition = global_step % args.swil_period == 0
+                if args.swil_period == -1:
+                    irl_condition = irl_trigger
+                    
+                if irl_condition and global_step < args.max_swil_step:
+                    for epoch in range(n_irl_epochs):
                         # GAIL Discriminator Update
-                        update_dict = prepare_batch_update_irl(
-                            envs, args, d, obs_, actions_, dones_, actor)
+                        gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+                        for d in gen_demos:
+                            if len(d['obs']) < args.batch_size:
+                                obs_ = data.observations[:len(d['obs'])]
+                                actions_ = data.actions[:len(d['obs'])]
+                                dones_ = data.dones[:len(d['obs'])]
+                            else:
+                                obs_ = data.observations
+                                actions_ = data.actions
+                                dones_ = data.dones
+                            # GAIL Discriminator Update
+                            update_dict = prepare_batch_update_irl(
+                                envs, args, d, obs_, actions_, dones_, actor)
 
-                        loss_dict = disc.compute_loss(update_dict)
+                            loss_dict = disc.compute_loss(update_dict)
 
-                        loss = loss_dict['d_loss'] + \
-                            args.irm_coeff * loss_dict['grad_penalty']
-                        if args.irm_coeff > 1.0:
-                            loss /= args.irm_coeff
+                            loss = loss_dict['d_loss'] + \
+                                args.irm_coeff * loss_dict['grad_penalty']
+                            if args.irm_coeff > 1.0:
+                                loss /= args.irm_coeff
 
-                        disc.update(loss)
+                            disc.update(loss)
 
-                        if global_step % args.logging_interval == 0:
-                            writer.add_scalar(
-                                'irl/swil_gsw_dist', loss_dict['d_loss'], global_step)
-
-                            if args.irm_coeff > 0:
+                            if global_step % args.logging_interval == 0:
                                 writer.add_scalar(
-                                    'irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
+                                    'irl/swil_gsw_dist', loss_dict['d_loss'], global_step)
+
+                                if args.irm_coeff > 0:
+                                    writer.add_scalar(
+                                        'irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
+                                if args.swil_vb > 0:
+                                    writer.add_scalar('irl/swil_vib_loss', loss_dict['ib_loss'], global_step)
 
                 #  evaluate at regular intervals and save
                 if global_step % args.eval_interval == 0:
@@ -509,6 +562,9 @@ if __name__ == "__main__":
                     print(f"Evaluation at {global_step}: {mu}, {std}")
                     writer.add_scalar('eval/mu', mu, global_step)
                     writer.add_scalar('eval/std', std, global_step)
+                    ref_dist = ot.sliced_wasserstein_distance(
+                        d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
+                    writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
                     results_dict['eval_mu'].append(mu)
                     results_dict['eval_std'].append(std)
 
@@ -537,6 +593,6 @@ if __name__ == "__main__":
     writer.close()
 
     #  save df for easier parsing
-    ea = read_tb_file(f"runs/{run_name}")
-    df = create_df_from_ea(ea, "charts/episodic_return")
-    df.to_pickle(f"results_pkl/results_{run_name}_df.pkl")
+    #ea = read_tb_file(f"runs/{run_name}")
+    #df = create_df_from_ea(ea, "charts/episodic_return")
+    #df.to_pickle(f"results_pkl/results_{run_name}_df.pkl")

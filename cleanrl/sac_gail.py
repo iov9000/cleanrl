@@ -33,9 +33,10 @@ from torch.utils.tensorboard import SummaryWriter
 
 from irl.gail import GailReward, GAILDiscriminator
 from irl.utils import load_hf_demos, evaluate_model, prepare_batch_update_irl,\
-     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper
+     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper, FrankaObsWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
+
 
 def parse_args():
     # fmt: off
@@ -176,6 +177,9 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos):
         if 'Adroit' in env_id:
             env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
             env.set_env_state(demos['all']['init_state_dict'][0])
+        elif 'Franka' in env_id:
+            env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+            env = FrankaObsWrapper(env)
         else:
             env = gym.make(env_id, render_mode='rgb_array')        
         
@@ -204,7 +208,12 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos):
 class SoftQNetwork(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape), 256)
+        if isinstance(env.observation_space, gym.spaces.Dict):
+            ob_shape = env.observation_space['observation'].shape
+        else:
+            ob_shape = env.single_observation_space.shape
+
+        self.fc1 = nn.Linear(np.array(ob_shape).prod() + np.prod(env.single_action_space.shape), 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, 1)
 
@@ -223,7 +232,12 @@ LOG_STD_MIN = -5
 class Actor(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
+        if isinstance(env.observation_space, gym.spaces.Dict):
+            ob_shape = env.observation_space['observation'].shape
+        else:
+            ob_shape = env.single_observation_space.shape
+
+        self.fc1 = nn.Linear(np.array(ob_shape).prod(), 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc_mean = nn.Linear(256, np.prod(env.single_action_space.shape))
         self.fc_logstd = nn.Linear(256, np.prod(env.single_action_space.shape))
@@ -310,6 +324,9 @@ if __name__ == "__main__":
     if 'Adroit' in args.env_id:
         test_env = gym.make(args.env_id, max_episode_steps=500)
         test_env.set_env_state(demos['all']['init_state_dict'][0])
+    elif 'Franka' in args.env_id:
+        test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+        test_env = FrankaObsWrapper(test_env)
     else:
         test_env = gym.make(args.env_id) 
     disc = GAILDiscriminator(test_env, args)
@@ -501,7 +518,7 @@ if __name__ == "__main__":
 
                 #  evaluate at regular intervals and save
                 if global_step % args.eval_interval == 0:
-                    mu, std, d = evaluate_model(args, actor, device)
+                    mu, std, d = evaluate_model(args, actor, device, test_env)
                     print(f"Evaluation at {global_step}: {mu}, {std}")
                     writer.add_scalar('eval/mu', mu, global_step)
                     writer.add_scalar('eval/std', std, global_step)
