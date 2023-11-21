@@ -593,7 +593,7 @@ if __name__ == "__main__":
                                     if args.irm_coeff > 0:
                                         writer.add_scalar('irl/gail_irm_loss', loss_dict['grad_penalty'], global_step)
                             
-                            traj = {'obs': [], 'acs': [], 'done': []}
+                        traj = {'obs': [], 'acs': [], 'done': []}
 
                     #  evaluate at regular intervals and save
                     if global_step % args.eval_interval == 0:
