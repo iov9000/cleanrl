@@ -1,6 +1,12 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/dqn/#dqnpy
 import argparse
 import os
+import sys
+module_path = os.path.abspath(os.path.join('..'))
+if module_path not in sys.path:
+    sys.path.append(module_path)
+sys.path.append(os.getcwd())
+
 import random
 import time
 from distutils.util import strtobool
@@ -13,6 +19,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import gymnasium as gym
+
+
 
 gym.envs.register(
     id='MoveP-v0',

@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 
 from typing import Optional
 
-from drqv2 import DrQV2Agent, Encoder
+#from drqv2 import DrQV2Agent, Encoder
 
 
 def load_hf_demos(args, n_demos, perturb=0.0, bary_enhance=False):
@@ -115,7 +115,7 @@ def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, off
         cnt += 1
         if 'npy' in f:
             demo = {}
-            o = np.load(os.path.join(folder, f))[offset:, :obs_shape]
+            o = np.load(os.path.join(folder, f))[offset:-offset, :obs_shape]
             a = np.zeros([len(o)])
             r = np.zeros([len(o)])
             d = np.zeros([len(o)]) 
