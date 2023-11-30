@@ -78,6 +78,8 @@ def parse_args():
         help="the learning rate of the model network optimizer")
     parser.add_argument("--n_epochs", type=int, default=100,
         help="number of epochs (N)")
+    parser.add_argument("--model_learn_steps", type=int, default=1,
+        help="number of model learn steps (optional)")
     parser.add_argument("--n_env_steps_per_epoch", type=int, default=1000,
         help="number of env. steps per epoch (E)")
     parser.add_argument("--num_model_rollouts", type=int, default=400,
@@ -348,7 +350,7 @@ if __name__ == "__main__":
                 data = rb.sample(args.batch_size)
                 model_next_obs, rew = dynamics.get_sample(data.observations, data.actions)
                 obs_loss = F.mse_loss(model_next_obs, data.observations)
-                rew_loss = F.mse_loss(rew, data.rewards)
+                rew_loss = F.mse_loss(rew.squeeze(), data.rewards)
                 model_loss = obs_loss + rew_loss
                 # update value
                 dynamics_optimizer.zero_grad()
