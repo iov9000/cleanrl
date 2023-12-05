@@ -169,7 +169,7 @@ def parse_args():
 
     parser.add_argument("--div", type=str, default="rkl",
         help="divergence type")
-    parser.add_argument("--disc_nonlin", type=str, default="prelu",
+    parser.add_argument("--disc_nonlin", type=str, default="tanh",
         help="divergence type")
     parser.add_argument('--normalize_irl_rewards', default=True, 
         action='store_false', required=False, help='normalize irl rewards') 
