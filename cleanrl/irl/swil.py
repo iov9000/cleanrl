@@ -227,7 +227,7 @@ class SWILDiscriminator(nn.Module):
                 #                                         out_features=1,
                 #                                         bias=bias), torch.nn.Tanh())
                 self.proj_layer = nn.Sequential(
-                    linlayer(self.n_proj, 1, bias, opt.use_weight_norm), torch.nn.Tanh())
+                    linlayer(self.n_proj, 1, bias, opt.use_weight_norm, opt.use_spectral_norm), torch.nn.Tanh())
 
             if self.opt.swil_ae:
                 self.ae_layers = []
@@ -393,6 +393,9 @@ class SWILDiscriminator(nn.Module):
                 idx = torch.searchsorted(sorted_proj.T, obs_t_slice.T)#, right=True)
 
                 # shift extreme indices
+                #print(n)
+                #print(idx)
+
                 idx[idx==0] +=1
                 idx[idx==n] -=1
 
@@ -417,12 +420,32 @@ class SWILDiscriminator(nn.Module):
                         # calculate diff when replacing atom
                         w = 1/n
                         a_prev = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
+                        a_prev_2 = (sorted_proj_tgt[i-1,j] - sorted_proj[i-1,j])**2
+
                         a_new = (sorted_proj_tgt[i,j] - obs_t_slice[0,j])**2
+                        a_new_2 = (sorted_proj_tgt[i-1,j] - obs_t_slice[0,j])**2
+
+
+                        a_i = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
+                        a_h = (sorted_proj_tgt[i-1,j] - sorted_proj[i-1,j])**2
+                        a_new_i = (sorted_proj_tgt[i,j] - obs_t_slice[0,j])**2
+                        a_new_h = (sorted_proj_tgt[i-1,j] - obs_t_slice[0,j])**2
+
+                        rew_incr = torch.abs(sorted_proj[i,j] - obs_t_slice[0,j])
+                        rew_decr = torch.abs(sorted_proj[i-1,j] - obs_t_slice[0,j])
                         #w = 1/ (n + a_prev) # more reward if closer
 
                         rew_j = a_new - a_prev
                         if self.opt.repl_loss_type == 'diff':
                             rew += w*(a_new - a_prev)
+                        elif self.opt.repl_loss_type == 'diff2':
+                            #if sorted_proj[i,j] > sorted_proj_tgt[i,j]:
+                                #print("api>ae")
+                            if rew_incr > rew_decr:
+                                rew += (a_new_h-a_h)  
+                            else:
+                                rew += (a_new_i-a_i)
+                                #rew += w*(a_new - a_prev)
                         else:
                             rew += w*(a_new)
 
