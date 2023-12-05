@@ -45,7 +45,7 @@ gym.envs.register(
 
 from irl.gail import GailReward, GAILDiscriminator
 from irl.utils import load_hf_demos, load_lap_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
-                   demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model
+                   demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model, FrankaObsWrapper
 
 import ot
 
@@ -200,7 +200,15 @@ def parse_args():
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
     def thunk():
-        env = gym.make(env_id, render_mode='rgb_array')
+        if 'Adroit' in env_id:
+            env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
+            env.set_env_state(demos['all']['init_state_dict'][0])
+        elif 'Franka' in env_id:
+            env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+            env = FrankaObsWrapper(env)
+        else:
+            env = gym.make(env_id, render_mode='rgb_array')        
+        
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if opt.time_aware:
             env = gym.wrappers.TimeAwareObservation(env)
@@ -241,6 +249,11 @@ class Agent(nn.Module):
         else:
             nonlin = nn.Tanh()
 
+        if isinstance(envs.observation_space, gym.spaces.Dict):
+            ob_shape = envs.observation_space['observation'].shape
+        else:
+            ob_shape = envs.single_observation_space.shape
+
         self.discrete = discrete
         if self.discrete:
             output_dim = int(envs.single_action_space.n)
@@ -248,14 +261,14 @@ class Agent(nn.Module):
             output_dim = np.prod(envs.single_action_space.shape)
 
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
+            layer_init(nn.Linear(np.array(ob_shape).prod(), hidden_size)),
             nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nonlin,
             layer_init(nn.Linear(hidden_size, 1), std=1.0),
         )
         self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
+            layer_init(nn.Linear(np.array(ob_shape).prod(), hidden_size)),
             nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nonlin,
@@ -343,8 +356,15 @@ if __name__ == "__main__":
     else:
         demos = load_hf_demos(args, args.n_demos, args.demo_eps)
 
-    test_env = gym.make(args.env_id)
-
+    if 'Adroit' in args.env_id:
+        test_env = gym.make(args.env_id, max_episode_steps=500)
+        test_env.set_env_state(demos['all']['init_state_dict'][0])
+    elif 'Franka' in args.env_id:
+        test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+        test_env = FrankaObsWrapper(test_env)
+    else:
+        test_env = gym.make(args.env_id)         
+        
     if args.enhance_barys > 0:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(args, demos, test_env)
@@ -622,7 +642,7 @@ if __name__ == "__main__":
                 det = True
             else:
                 det = False
-            mu, std, d = evaluate_model(args, agent, device, deterministic = det, wrap_mujoco=args.test_eps > 0)
+            mu, std, d = evaluate_model(args, agent, device, test_env, deterministic = det, wrap_mujoco=args.test_eps > 0)
             print(f"Evaluation at {global_step}: {mu}, {std}")
             writer.add_scalar('eval/mu', mu, global_step)
             writer.add_scalar('eval/std', std, global_step)
@@ -636,7 +656,7 @@ if __name__ == "__main__":
     torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
 
     mu, std, d = evaluate_model(
-        args, agent, device, wrap_mujoco=args.test_eps > 0)
+        args, agent, device, test_env, wrap_mujoco=args.test_eps > 0)
     writer.add_scalar('eval/mu', mu, args.total_timesteps)
     writer.add_scalar('eval/std', std, args.total_timesteps)
 

@@ -41,7 +41,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from irl.swil import SwilReward, SWILDiscriminator
 from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
-                    demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model
+                    demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model, FrankaObsWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -222,7 +222,15 @@ def parse_args():
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
     def thunk():
-        env = gym.make(env_id, render_mode='rgb_array')
+        if 'Adroit' in env_id:
+            env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
+            env.set_env_state(demos['all']['init_state_dict'][0])
+        elif 'Franka' in env_id:
+            env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+            env = FrankaObsWrapper(env)
+        else:
+            env = gym.make(env_id, render_mode='rgb_array')        
+        
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if opt.time_aware:
             env = gym.wrappers.TimeAwareObservation(env)
@@ -367,7 +375,14 @@ if __name__ == "__main__":
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
-    test_env = gym.make(args.env_id)
+    if 'Adroit' in args.env_id:
+        test_env = gym.make(args.env_id, max_episode_steps=500)
+        test_env.set_env_state(demos['all']['init_state_dict'][0])
+    elif 'Franka' in args.env_id:
+        test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+        test_env = FrankaObsWrapper(test_env)
+    else:
+        test_env = gym.make(args.env_id)         
     discrete = not isinstance(test_env.action_space, gym.spaces.Box)
     disc = SWILDiscriminator(test_env, args)
 
@@ -624,7 +639,7 @@ if __name__ == "__main__":
 
             #  evaluate at regular intervals and save
             if global_step % args.eval_interval == 0:
-                mu, std, d = evaluate_model(args, agent, device)
+                mu, std, d = evaluate_model(args, agent, device, test_env)
                 print(f"Evaluation at {global_step}: {mu}, {std}")
                 writer.add_scalar('eval/mu', mu, global_step)
                 writer.add_scalar('eval/std', std, global_step)
@@ -655,7 +670,7 @@ if __name__ == "__main__":
     torch.save(agent.state_dict(), f"runs/{run_name}/agent.pt")
     torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
 
-    mu, std, d = evaluate_model(args, agent, device)
+    mu, std, d = evaluate_model(args, agent, device, test_env)
     writer.add_scalar('eval/mu', mu, args.total_timesteps)
     writer.add_scalar('eval/std', std, args.total_timesteps)
 

@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 
 from typing import Optional
 
+#from drqv2 import DrQV2Agent, Encoder
 
 
 def load_hf_demos(args, n_demos, perturb=0.0, bary_enhance=False):
@@ -114,7 +115,7 @@ def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, off
         cnt += 1
         if 'npy' in f:
             demo = {}
-            o = np.load(os.path.join(folder, f))[offset:, :obs_shape]
+            o = np.load(os.path.join(folder, f))[offset:-offset, :obs_shape]
             a = np.zeros([len(o)])
             r = np.zeros([len(o)])
             d = np.zeros([len(o)]) 
@@ -874,7 +875,36 @@ class FrankaObsWrapper(gym.ObservationWrapper):
         #return np.concatenate((obs_, v_),-1)
         return obs_
 
-        
+def drq_weight_init(m):
+    if isinstance(m, nn.Linear):
+        nn.init.orthogonal_(m.weight.data)
+        if hasattr(m.bias, 'data'):
+            m.bias.data.fill_(0.0)
+    elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
+        gain = nn.init.calculate_gain('relu')
+        nn.init.orthogonal_(m.weight.data, gain)
+        if hasattr(m.bias, 'data'):
+            m.bias.data.fill_(0.0)
+
+
+class DmcObsWrapper(gym.ObservationWrapper):
+    def __init__(self, env: gym.Env, device, enc_out_dim=100, filename=None):
+        #gym.utils.RecordConstructorArgs.__init__(self, filter_keys=filter_keys)
+        gym.ObservationWrapper.__init__(self, env)
+
+        if filename is not None:
+            model = torch.load(filename, map_location=device)
+
+        self.env.observation_space = gym.spaces.Box(low = -np.inf*np.ones((enc_out_dim,)), 
+                                            high = np.inf*np.ones((enc_out_dim,)),
+                                            dtype = np.float32)
+
+    def observation(self, obs):
+        with torch.no_grad():
+            enc_obs = self.enc(obs)
+
+        return enc_obs
+
 
 class DemoStateSeqWrapper(gym.Wrapper):
     def __init__(self, env, opt, demos):

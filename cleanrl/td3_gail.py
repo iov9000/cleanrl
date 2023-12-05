@@ -482,7 +482,7 @@ if __name__ == "__main__":
 
                 #  evaluate at regular intervals and save
                 if global_step % args.eval_interval == 0:
-                    mu, std, d = evaluate_model(args, actor, device)
+                    mu, std, d = evaluate_model(args, actor, device, test_env)
                     print(f"Evaluation at {global_step}: {mu}, {std}")
                     writer.add_scalar('eval/mu', mu, global_step)
                     writer.add_scalar('eval/std', std, global_step)
@@ -506,7 +506,7 @@ if __name__ == "__main__":
 
     # test model and save trajectories
     # test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
-    mu, std, d = evaluate_model(args, actor, device)
+    mu, std, d = evaluate_model(args, actor, device, test_env)
     results_dict['final_mu'] = mu
     results_dict['final_std'] = std
     writer.add_scalar('eval/mu', mu, args.total_timesteps)

@@ -125,6 +125,8 @@ def parse_args():
     parser.add_argument("--max_q_len", type=int, default=1, help="max number of projected atom sets in queue")
     parser.add_argument("--max_swil_step", type=int, default=100000000, help="only update projections until some timestep")
     parser.add_argument("--replace_atoms", default=False, required=False, action='store_true', help="actually replace atoms with policy samples")
+    parser.add_argument('--use_curr_traj_only', default=False, required=False, 
+        action='store_true', help='only used last sampled trajectory to do matching')
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
 
@@ -184,8 +186,8 @@ def parse_args():
     parser.add_argument("--eval_test_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
-    parser.add_argument('--drop_batch', default=False, required=False, 
-        action='store_true', help='drop batch in irl epochs')   
+    parser.add_argument('--drop_batch', default=True, required=False, 
+        action='store_false', help='drop batch in irl epochs')   
 
     args = parser.parse_args()
     # fmt: on
@@ -427,6 +429,8 @@ if __name__ == "__main__":
     ######## gather a batch to define a SWIL distance so we don't lose initial samples
     obs = envs.reset(seed=args.seed)[0]
     b_obs, b_acs, b_dones = [], [], [] 
+    traj = {'obs': [], 'acs': [], 'done': []} # traj_only IRL
+
     #b_obs.append(torch.from_numpy(obs).type(torch.get_default_dtype()))
     for i in range(args.batch_size):
         actions = np.array([envs.single_action_space.sample()
@@ -480,6 +484,11 @@ if __name__ == "__main__":
             next_obs, rewards, term, trunc, infos = envs.step(actions)
             dones = term or trunc
 
+            # traj_only IRL
+            traj['obs'].append(obs)
+            traj['acs'].append(actions)
+            traj['done'].append(dones)
+            
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             if not isinstance(infos, list):
                 infos = [infos]
@@ -586,20 +595,39 @@ if __name__ == "__main__":
                 irl_condition = global_step % args.swil_period == 0
                 if args.swil_period == -1:
                     irl_condition = irl_trigger
-                    
+            
+                use_curr_traj_only = args.use_curr_traj_only
                 if irl_condition and global_step < args.max_swil_step:
                     for epoch in range(n_irl_epochs):            
                         # GAIL Discriminator Update 
                         gen_demos = demos_gen_dict(demos['all'], args.batch_size)
                         for d in gen_demos:
                             if len(d['obs']) < args.batch_size:
-                                obs_ = data.observations[:len(d['obs'])]
-                                actions_ = data.actions[:len(d['obs'])]
-                                dones_ = data.dones[:len(d['obs'])]
+                                if args.drop_batch:
+                                    break
+                                else:
+                                    obs_ = data.observations[:len(d['obs'])]
+                                    actions_ = data.actions[:len(d['obs'])]
+                                    dones_ = data.dones[:len(d['obs'])]
                             else:
                                 obs_ = data.observations
                                 actions_ = data.actions
                                 dones_ = data.dones
+
+                            if use_curr_traj_only:
+                                obs_ = np.concatenate(traj['obs'])[i*args.batch_size:(i+1)*args.batch_size]
+                                actions_ = np.concatenate(traj['acs'])[i*args.batch_size:(i+1)*args.batch_size]
+                                dones_ = np.concatenate(traj['acs'])[i*args.batch_size:(i+1)*args.batch_size]
+                                if len(d['obs']) > len(obs_):
+                                    break
+                                if len(d['obs']) < args.batch_size:
+                                    if args.drop_batch:
+                                        break
+                                    else:
+                                        obs_ = obs_[:len(d['obs'])]
+                                        actions_ = actions_[:len(d['obs'])]
+                                        dones_ = dones_[:len(d['obs'])]
+
                             # GAIL Discriminator Update
                             update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, actor)
                             loss_dict = disc.compute_loss(update_dict)
@@ -617,6 +645,8 @@ if __name__ == "__main__":
                                     writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
                                 if args.swil_vb > 0:
                                     writer.add_scalar('irl/swil_vib_loss', loss_dict['ib_loss'], global_step)
+                        
+                    traj = {'obs': [], 'acs': [], 'done': []}
 
                 # evaluate at regular intervals and save 
                 if global_step % args.eval_interval == 0:
@@ -646,7 +676,7 @@ if __name__ == "__main__":
     #test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
 
     #  XXX f"runs/{args.exp_id}_dict.pkl" append to results dict
-    mu, std, d = evaluate_model(args, actor, device)
+    mu, std, d = evaluate_model(args, actor, device, test_env)
     results_dict['final_mu'] = mu
     results_dict['final_std'] = std
     writer.add_scalar('eval/mu', mu, args.total_timesteps)

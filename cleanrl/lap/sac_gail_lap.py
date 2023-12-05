@@ -1,6 +1,7 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_continuous_actionpy
 import argparse
 import os
+import sys
 import random
 import time
 from datetime import datetime
@@ -11,22 +12,15 @@ import ot
 import gymnasium as gym
 
 gym.envs.register(
-     id='MoveP-v0',
-     entry_point='envs.envs2d:MoveP',
-     max_episode_steps=1000,
+    id='Lap-v0',
+    entry_point='envs.env_lap_new:Laparos',
+    max_episode_steps=10000,
 )
 
-gym.envs.register(
-     id='CMoveP-v0',
-     entry_point='envs.envs2d:CMoveP',
-     max_episode_steps=1000,
-)
-
-gym.envs.register(
-     id='FASTIC-v0',
-     entry_point='envs.env_fast:FASTRL',
-     max_episode_steps=10000,
-)
+module_path = os.path.abspath(os.path.join('..'))
+if module_path not in sys.path:
+    sys.path.append(module_path)
+sys.path.append(os.getcwd())
 
 
 import numpy as np
@@ -39,7 +33,7 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.gail import GailReward, GAILDiscriminator
-from irl.utils import load_hf_demos, load_fast_demos, evaluate_model, prepare_batch_update_irl,\
+from irl.utils import load_hf_demos, load_lap_demos, evaluate_model, prepare_batch_update_irl,\
      enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
@@ -76,13 +70,35 @@ def parse_args():
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # environment specific arguments
+    parser.add_argument('--goal_conditioning', default=False, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument('--condition_on_n_tasks_completed', default=False, 
+        action='store_true', required=False, help='add num tasks completed as conditioner')  
+    parser.add_argument('--done_on_collision', default=True, 
+        action='store_false', required=False, help='end episode on collision') 
+    parser.add_argument('--collision_loss', default=False, 
+        action='store_true', required=False, help='end episode on collision')  
+    parser.add_argument('--hard_collisions', default=True, 
+        action='store_false', required=False, help='dont progress on collision')  
+    parser.add_argument('--continuous_actions', default=True, 
+        action='store_false', required=False, help='normalize irl rewards')  
+    parser.add_argument('--render_meshes', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument("--step_size", type=float, default=0.3,
+        help="step magnitude")
+    parser.add_argument("--state_spec", type=str, default="r3",
+        help="state spec (r3/r3so3)")
+
+    # environment specific arguments
     parser.add_argument('--normalize_obs', default=False, 
+        action='store_true', required=False, help='normalize observations')  
+    parser.add_argument('--normalize_rewards', default=False, 
         action='store_true', required=False, help='normalize irl rewards')  
     parser.add_argument('--clip_action', default=False, 
-        action='store_true', required=False, help='normalize irl rewards')  
+        action='store_true', required=False, help='clip actions')
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="FASTIC-v0",
+    parser.add_argument("--env-id", type=str, default="Lap-v0",
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
@@ -131,8 +147,8 @@ def parse_args():
     parser.add_argument('--init_rb_with_demos', default=False, required=False, 
         action='store_true', help='init replay buffer with demo transitions (with actor actions and disc rewards)')
 
-    parser.add_argument('--use_actions', default=True, required=False, 
-        action='store_false', help='use actions in discriminator')
+    parser.add_argument('--use_actions', default=False, required=False, 
+        action='store_true', help='use actions in discriminator')
     parser.add_argument('--use_dones', default=False, required=False, 
         action='store_true', help='use actions in discriminator')
     parser.add_argument('--use_next_obs', default=False, required=False, 
@@ -191,7 +207,15 @@ def parse_args():
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
     def thunk():
-        env = gym.make(env_id, args=opt, time_scale=20, port_offset=opt.port_offset)
+        env = gym.make(env_id, gc=args.goal_conditioning, 
+                             state_spec=args.state_spec, 
+                             step_size=args.step_size,
+                             condition_on_n_tasks_completed=args.condition_on_n_tasks_completed,
+                             done_on_collision=args.done_on_collision,
+                             hard_collisions=args.hard_collisions,
+                             plot_meshes=args.render_meshes,
+                             continuous_actions=args.continuous_actions,
+                             collision_loss=args.collision_loss)        
         if opt.use_absorb_wrapper: # DAC
             env = AbsorbAfterDoneWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -318,49 +342,35 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    if 'FAST' in args.env_id:
-        #demos = load_fast_demos(args, filename='default_fast_demo.pkl')['all']
-        demos = load_fast_demos(args, filename='fast_demos/20231106fastkmio.pkl')['all']
+
+    if args.env_id == 'Lap-v0':
+        demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
     else:
-        demos = load_hf_demos(args, n_demos=args.n_demos, perturb = args.demo_eps)
+        demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
+
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
-    test_env = gym.make(args.env_id, args=args, no_graphics=False, time_scale=20, port_offset=args.port_offset+1)
-    disc = GAILDiscriminator(test_env, args)
-    # o_l = []
-    # a_l = []
-    # test_env.reset(seed=args.seed)
-    # for i in range(50000):
-    #     action = test_env.action_space.sample()
-    #     o,r,t,tr,i = test_env.step(100*action)
-    #     if t or tr:
-    #         test_env.reset(seed=args.seed)
-    #     o_l.append(o)
-    #     a_l.append(action)
+    test_env = gym.make(args.env_id, gc=args.goal_conditioning, 
+                             state_spec=args.state_spec, 
+                             step_size=args.step_size,
+                             done_on_collision=args.done_on_collision,
+                             hard_collisions=args.hard_collisions,
+                             plot_meshes=args.render_meshes,
+                             continuous_actions=args.continuous_actions,
+                             condition_on_n_tasks_completed=args.condition_on_n_tasks_completed,
+                             collision_loss=args.collision_loss)        
 
-    # print("Test env random obs sum:", np.sum(o_l), np.sum(a_l))
+    print(test_env.observation_space)
+
+    disc = GAILDiscriminator(test_env, args)
 
     # env setup
     envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, disc)])
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     max_action = float(envs.single_action_space.high[0])
-
-    # o_l = []
-    # a_l = []
-    # envs.reset(seed=args.seed)
-    # for i in range(50000):
-    #     action = envs.single_action_space.sample()
-    #     o,r,t,tr,i = envs.step([100*action])
-    #     if t or tr:
-    #         envs.reset(seed=args.seed)
-    #     o_l.append(o)
-    #     a_l.append(action)
-
-    # print("Env random obs sum:", np.sum(o_l), np.sum(a_l))
-    # exit(1)
 
     actor = Actor(envs).to(device)
     qf1 = SoftQNetwork(envs).to(device)
@@ -593,7 +603,7 @@ if __name__ == "__main__":
                                     if args.irm_coeff > 0:
                                         writer.add_scalar('irl/gail_irm_loss', loss_dict['grad_penalty'], global_step)
                             
-                            traj = {'obs': [], 'acs': [], 'done': []}
+                        traj = {'obs': [], 'acs': [], 'done': []}
 
                     #  evaluate at regular intervals and save
                     if global_step % args.eval_interval == 0:
