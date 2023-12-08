@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from irl.airl import AirlReward, AIRLDiscriminator
 from irl.utils import load_hf_demos, evaluate_model, prepare_batch_update_irl,\
-     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper
+     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper, FrankaObsWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -47,6 +47,8 @@ def parse_args():
         help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
+    parser.add_argument("--capture_video_interval", type=int, default=200,
+        help="capture video interval")
    
     # environment specific arguments
     parser.add_argument('--normalize_obs', default=False, 
@@ -112,6 +114,7 @@ def parse_args():
     parser.add_argument("--irm_loss_type", type=str, default="sym", help="e1,e0,p0,p1,sym")
 
     parser.add_argument('--airl_resnet', default=False, action='store_true', help='use resnet for discriminator')
+    parser.add_argument('--d_out_reward', default=False, action='store_true', help='use d_out_reward')    
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
@@ -131,6 +134,9 @@ def parse_args():
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
     parser.add_argument("--div", type=str, default="rkl", help="divergence type")
 
+    parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
+    parser.add_argument("--load_disc", type=str, default=None, help="load discriminator from checkpoint")
+
     parser.add_argument('--drop_batch', default=False, required=False, 
         action='store_true', help='drop batch in irl epochs')  
     parser.add_argument('--on_policy', default=False, required=False, 
@@ -149,15 +155,23 @@ def parse_args():
     return args, non_default
 
 
-def make_env(opt, env_id, seed, idx, capture_video, run_name, agent, disc):
+def make_env(opt, env_id, seed, idx, capture_video, run_name, agent, disc, demos):
     def thunk():
-        env = gym.make(env_id, render_mode='rgb_array')
+        if 'Adroit' in env_id:
+            env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
+            env.set_env_state(demos['all']['init_state_dict'][0])
+        elif 'Franka' in env_id:
+            env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'], render_mode='rgb_array')
+            env = FrankaObsWrapper(env)
+        else:
+            env = gym.make(env_id, render_mode='rgb_array')        
+
         if opt.use_absorb_wrapper:  # DAC
             env = AbsorbAfterDoneWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % opt.capture_video_interval == 0)
         if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env)
         if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
@@ -289,16 +303,28 @@ if __name__ == "__main__":
     # get env specs
     test_env = gym.make(args.env_id)
     actor = Actor(test_env).to(device)
+
+
     disc = AIRLDiscriminator(test_env, args)
 
     # env setup
-    envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, actor, disc)])
+    envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, actor, disc, demos)])
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     max_action = float(envs.single_action_space.high[0])
 
     qf1 = SoftQNetwork(envs).to(device)
     qf2 = SoftQNetwork(envs).to(device)
+
+    if args.resume:
+        actor.load_state_dict(torch.load(os.path.join(args.resume, "actor.pt") , map_location=device))
+        qf1.load_state_dict(torch.load(os.path.join(args.resume, "qf1.pt") , map_location=device))
+        qf2.load_state_dict(torch.load(os.path.join(args.resume, "qf2.pt") , map_location=device))
+        disc.load_state_dict(torch.load(os.path.join(args.resume, "disc.pt") , map_location=device))
+
+    if args.load_disc:
+        disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
+
     qf1_target = SoftQNetwork(envs).to(device)
     qf2_target = SoftQNetwork(envs).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
@@ -513,6 +539,6 @@ if __name__ == "__main__":
     writer.close()
 
     # save df for easier parsing
-    ea = read_tb_file(f"runs/{run_name}")
-    df = create_df_from_ea(ea, "charts/episodic_return")
-    df.to_pickle(f"results_{run_name}_df.pkl")
+    # ea = read_tb_file(f"runs/{run_name}")
+    # df = create_df_from_ea(ea, "charts/episodic_return")
+    # df.to_pickle(f"results_{run_name}_df.pkl")

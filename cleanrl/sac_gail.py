@@ -63,6 +63,8 @@ def parse_args():
         help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
+    parser.add_argument("--capture_video_interval", type=int, default=200,
+        help="capture video interval")
 
     # environment specific arguments
     parser.add_argument('--normalize_obs', default=False, 
@@ -147,7 +149,8 @@ def parse_args():
         action='store_true', help='use spectral_norm')
     parser.add_argument('--use_absorb_wrapper', default=False, required=False, 
         action='store_true', help='use_absorb_wrapper')
-
+    parser.add_argument('--normalize_irl_rewards', default=False, 
+        action='store_true', required=False, help='normalize irl rewards')  
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
     parser.add_argument("--div", type=str, default="rkl", help="divergence type")
@@ -178,7 +181,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos):
             env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
             env.set_env_state(demos['all']['init_state_dict'][0])
         elif 'Franka' in env_id:
-            env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+            env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'], render_mode='rgb_array')
             env = FrankaObsWrapper(env)
         else:
             env = gym.make(env_id, render_mode='rgb_array')        
@@ -188,7 +191,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos):
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % opt.capture_video_interval == 0)
         if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env)
         if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
@@ -196,6 +199,9 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos):
             env = gym.wrappers.TransformObservation(
                 env, lambda obs: np.clip(obs, -10, 10))
         env = GailReward(env, opt, disc)        
+        if opt.normalize_irl_rewards and isinstance(env.action_space, gym.spaces.Box):
+            env = gym.wrappers.NormalizeReward(env, gamma=args.gamma)
+            env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         #env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
