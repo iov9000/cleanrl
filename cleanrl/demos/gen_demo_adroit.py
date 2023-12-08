@@ -111,7 +111,7 @@ def concat_key_in_demo_list(d_list, key):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env_name", type=str, default="AdroidHandDoor-v1",
+    parser.add_argument("--env_name", type=str, default="AdroitHandDoor-v1",
                         help="the name of the environment")
     parser.add_argument("--demofile", type=str, default="",
                         help="algorithm")
