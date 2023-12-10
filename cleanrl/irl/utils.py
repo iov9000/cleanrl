@@ -50,7 +50,7 @@ def load_hf_demos_name(args, fnames):
     for fn in fnames:
         try:
             #expert_demos['all'] = np.load(os.path.join(folder, f"demo_hf_{env_name}_{n_demos}.npy"))
-            expert_demos[fn] = pickle.load(open(fn, 'rb'))
+            expert_demos[fn] = pickle.load(open(os.path.join(folder, fn), 'rb'))
             expert_demos[fn]['obs'] = expert_demos[fn]['obs'][::subsample]
             expert_demos[fn]['acs'] = expert_demos[fn]['acs'][::subsample]
             expert_demos[fn]['rew'] = expert_demos[fn]['rew'][::subsample]
@@ -680,12 +680,13 @@ def evaluate_model(args, actor, device, test_env=None, deterministic=False, wrap
             test_env = MujocoTestWrapper(test_env, eps0=args.test_eps, 
                                         epsdyn=args.test_eps, 
                                         params=args.perturbation_parameters)
-    if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
-        test_env = gym.wrappers.ClipAction(test_env)
-    if args.normalize_obs:
-        test_env = gym.wrappers.NormalizeObservation(test_env)
-        test_env = gym.wrappers.TransformObservation(
-            test_env, lambda obs: np.clip(obs, -10, 10))
+        if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
+            test_env = gym.wrappers.ClipAction(test_env)
+        if args.normalize_obs:
+            test_env = gym.wrappers.NormalizeObservation(test_env)
+            test_env = gym.wrappers.TransformObservation(
+                test_env, lambda obs: np.clip(obs, -10, 10))
+
     mu, std, d = save_traj_dict(args, args.env_id, test_env, 
                                 actor, device, deterministic=deterministic, nr_trajectories=n_traj, save_eval=save_eval)
 

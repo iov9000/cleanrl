@@ -218,6 +218,7 @@ class SWILDiscriminator(nn.Module):
                     #                                     bias=bias)]
                     self.reward_layers += [
                         linlayer(self.layer_dims[-1], self.n_proj, bias, opt.use_ll_weight_norm, opt.use_spectral_norm)]
+                        #linlayer(self.layer_dims[-1], self.n_proj, bias, opt.use_ll_weight_norm, opt.use_spectral_norm), nn.Sigmoid()]
                     self.reward = nn.Sequential(*self.reward_layers)
                 else:
                     self.reward = nn.MultiheadAttention(embed_dim=self.layer_dims[1], num_heads = 1)
@@ -309,8 +310,9 @@ class SWILDiscriminator(nn.Module):
         #  match tensor sizes
         if len(ob.shape) != len(ac.shape):
             ac = torch.unsqueeze(ac, -1)
-        if len(ob.shape) != len(d.shape):
-            d = torch.unsqueeze(d, -1)
+        if d is not None:
+            if len(ob.shape) != len(d.shape):
+                d = torch.unsqueeze(d, -1)
 
         input_ = [ob]
         if self.use_actions:
@@ -366,7 +368,7 @@ class SWILDiscriminator(nn.Module):
 
         return vb_out, z, mu, std
 
-    def compute_replacement_reward(self, ob, ac, nob=None,d=None):
+    def compute_replacement_reward(self, ob, ac, nob=None,d=None, step=None):
         with torch.no_grad(): 
             # project next state and rank it as part of previous evaluation
             base_out = self.base_fwd(ob,ac,nob,d)
@@ -491,11 +493,11 @@ class SWILDiscriminator(nn.Module):
             # Self-Attention sliced wasserstein distances is a weighted sum? 
             return gsw_dist
 
-    def get_reward(self, ob, ac, nob=None,d=None):
+    def get_reward(self, ob, ac, nob=None,d=None, step=None):
         if self.opt.swil_rew == 'old_swil':
             return self.swil_reward(ob,ac,nob,d)
         else:
-            return self.compute_replacement_reward(ob,ac,nob,d)
+            return self.compute_replacement_reward(ob,ac,nob,d, step)
 
     def get_slice(self, ob, ac, theta):
         ''' Slices samples from distribution X~P_X
@@ -637,6 +639,64 @@ class SWILDiscriminator(nn.Module):
         #return gradient_mag, grad
         return torch.sum(grad ** 2), grad
 
+    def lip_penalty(self, update_dict, p=1):
+        policy_obs = update_dict['policy_obs']
+        policy_acs = update_dict['policy_acs']
+        policy_obs_next = update_dict['policy_obs_next']
+        policy_dones = update_dict['policy_dones']
+        exp_obs = update_dict['expert_obs']
+        exp_acs = update_dict['expert_acs']
+        exp_obs_next = update_dict['expert_obs_next']
+        exp_dones = update_dict['expert_dones']
+
+        if len(exp_obs.shape) != len(exp_dones.shape):
+            exp_dones = torch.unsqueeze(exp_dones, -1)
+
+        if len(policy_obs.shape) != len(policy_dones.shape):
+            policy_dones = torch.unsqueeze(policy_dones, -1)
+
+        obs_epsilon = torch.rand(policy_obs.shape)
+        interp_obs = obs_epsilon * policy_obs + (1 - obs_epsilon) * exp_obs
+        interp_obs.requires_grad = True  # For gradient calculation
+        
+        input_ = [interp_obs]
+        if self.use_actions:
+            acs_epsilon = torch.rand(policy_acs.shape)
+            interp_acs = acs_epsilon * policy_acs + (1 - acs_epsilon) * exp_acs
+            interp_acs.requires_grad = True  # For gradient calculation
+            input_.append(interp_acs)
+
+        if self.use_next_obs:
+            nobs_epsilon = torch.rand(policy_obs_next.shape)
+            interp_next_obs = nobs_epsilon * policy_obs_next + (1 - nobs_epsilon) * exp_obs_next
+            interp_next_obs.requires_grad = True  # For gradient calculation
+            input_.append(interp_next_obs)
+        if self.use_dones:
+            d_epsilon = torch.rand(policy_dones.shape)
+            interp_d = d_epsilon * policy_dones + (1 - d_epsilon) * exp_dones
+            interp_d.requires_grad = True  # For gradient calculation
+            input_.append(interp_d)
+
+        estimate, _, mu, std = self.proj(*input_)
+
+        # policy_obs = update_dict['policy_obs']
+        # expert_obs = update_dict['expert_obs']
+        # policy_obs.requires_grad = True
+        # expert_obs.requires_grad = True
+
+        gradient_mix = torch.autograd.grad(estimate.sum(), input_, create_graph=True)[0]
+        # gradient_p = torch.autograd.grad(
+        #     estimate.sum(), policy_obs, create_graph=True)[0]
+        # gradient_e = torch.autograd.grad(
+        #     estimate.sum(), expert_obs, create_graph=True)[0]
+
+        # Norm's gradient could be NaN at 0. Use our own safe_norm
+        safe_norm = (torch.sum(gradient_mix ** 2, dim=1) + 1e-8).sqrt()
+        # L1
+        gradient_mag = torch.mean((safe_norm - p) ** 2)
+
+        return gradient_mag, gradient_mix #, gradient_e, gradient_p
+
     def compute_loss(self, update_dict):
         # compute sliced Wasserstein distance here 
         self.policy_obs = update_dict['policy_obs']
@@ -719,6 +779,12 @@ class SWILDiscriminator(nn.Module):
         else:
             bottleneck_loss = 0
 
+        if self.opt.lip_coeff > 0:
+            lip_penalty, grad_mix = self.lip_penalty(update_dict, self.opt.lip_p)
+            grad_mix_norm = torch.norm(grad_mix)
+        else:
+            lip_penalty, grad_mix_norm = 0,0
+
         #with torch.no_grad():
         #    self.beta = torch.max(torch.tensor(0.0), self.beta + self.alpha_beta * bottleneck_loss)
 
@@ -726,7 +792,7 @@ class SWILDiscriminator(nn.Module):
         output_dict['grad_penalty'] = irm_pen
         output_dict['ib_loss'] = bottleneck_loss
         output_dict['beta'] = self.beta
-        output_dict['lip_penalty'] = 0
+        output_dict['lip_penalty'] = lip_penalty
 
         # TODO: classification or reconstruction loss for 
 
@@ -892,18 +958,26 @@ class SwilReward(gym.Wrapper):
         self.use_actions = opt.use_actions
         self.use_next_obs = opt.use_next_obs
         self.use_dones = opt.use_dones
+        self.opt = opt
 
         self.discriminator = disc
         self.obs = None
         # calculate reward at the end of trajecotiry
         self.traj = [] 
-        self.traj_ = [] 
+        self.traj_ = []
+        self.cnt = 0 
 
+    def reset(self, seed=0, options=None):
+        obs, info = super().reset()
+        self.cnt = 0
+        return obs, info
 
     def step(self, action):
         next_obs, gt_reward, term, trunc, info = self.env.step(action)
         done = term or trunc
         info['gt_reward'] = gt_reward
+        info['step'] = self.cnt
+        self.cnt+=1
         self.traj.append(gt_reward)
         if self.obs is not None:
             obs_t = torch.tensor(self.obs, dtype=torch.get_default_dtype())
@@ -918,7 +992,7 @@ class SwilReward(gym.Wrapper):
             # get discriminator reward and train on that
             #print([p.norm(2) for p in self.discriminator.parameters()])
             irl_reward = self.discriminator.get_reward(
-                obs_t, acs_t, next_obs_t, done_t).cpu().numpy()
+                obs_t, acs_t, next_obs_t, done_t, self.cnt).cpu().numpy()
             #irl_reward = self.discriminator.get_reward(obs_t, acs_t, next_obs_t).cpu().numpy()
         self.obs = next_obs
         self.traj_.append(irl_reward)        

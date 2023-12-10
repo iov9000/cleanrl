@@ -172,6 +172,8 @@ def parse_args():
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
     parser.add_argument('--irl_batch_size', default=64, type=int, required=False, help='batch size for discriminator updates')
+    parser.add_argument('--shuffle_irl_batches', default=False, required=False, 
+        action='store_true', help='use actions in discriminator')
     parser.add_argument('--irl_init_epochs', default=1  , type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
 
@@ -561,7 +563,7 @@ if __name__ == "__main__":
                     k = int(n_irl_epochs) if n_irl_epochs >=0 else 1
                     for epoch in tqdm(range(k)):            
                         # GAIL Discriminator Update 
-                        gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=False)
+                        gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=args.shuffle_irl_batches)
                         if "MoveP-v0" in args.env_id:
                             fig, ax = plt.subplots(1,2,figsize=(10,5))
                         for d in gen_demos:

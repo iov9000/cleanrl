@@ -18,15 +18,23 @@ import torch.optim as optim
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
-from irl.utils import FrankaObsWrapper
+from irl.utils import FrankaObsWrapper, evaluate_model
 
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
+    parser.add_argument("--exp-id", type=str, default="",
+        help="additional identifier of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
+    parser.add_argument("--logging_interval", type=int, default=500,
+        help="logging interval")
+    parser.add_argument("--eval_interval", type=int, default=10000,
+        help="evaluation interval")
+    parser.add_argument('--save_eval', default=False, required=False, 
+        action='store_true', help='verbose output')
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -40,9 +48,18 @@ def parse_args():
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
+    # environment specific arguments
+    parser.add_argument('--normalize_obs', default=False, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument('--clip_action', default=False, 
+        action='store_true', required=False, help='normalize irl rewards')  
+
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HopperBulletEnv-v0",
         help="the id of the environment")
+    parser.add_argument("--reward_components", type=str, default="", nargs='+',  help="reward_components to change")
+    parser.add_argument("--reward_components_values", type=float, nargs='+', help="reward_components values")
+
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--buffer-size", type=int, default=int(1e6),
@@ -85,18 +102,26 @@ def parse_args():
     return args, non_default
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
+def make_env(opt, env_id, seed, idx, capture_video, run_name, kwargs):
     def thunk():
         if 'Franka' in env_id:
             env = gym.make(env_id, tasks_to_complete=['microwave'])
             env = FrankaObsWrapper(env)
         else:
-            env = gym.make(env_id)
+            env = gym.make(env_id, **kwargs)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         #env.seed(seed)
+
+        if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
+            env = gym.wrappers.ClipAction(env)
+        if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
+            env = gym.wrappers.NormalizeObservation(env)
+            env = gym.wrappers.TransformObservation(
+                env, lambda obs: np.clip(obs, -10, 10))
+
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -208,10 +233,27 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
+    if torch.cuda.is_available():
+        torch.set_default_tensor_type(torch.cuda.FloatTensor)
+    else:
+        torch.set_default_tensor_type(torch.FloatTensor)
+
+    env_kwargs = {}
+    for i, comp in enumerate(args.reward_components):
+        env_kwargs[comp] = args.reward_components_values[i]
+
     # env setup
-    envs = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed, 0, args.capture_video, run_name)])
+    envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, env_kwargs)])
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
+    if 'Adroit' in args.env_id:
+        test_env = gym.make(args.env_id, max_episode_steps=500)
+    elif 'Franka' in args.env_id:
+        test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+        test_env = FrankaObsWrapper(test_env)
+    else:
+        test_env = gym.make(args.env_id, **env_kwargs) 
+    
     max_action = float(envs.single_action_space.high[0])
 
     actor = Actor(envs).to(device)
@@ -361,6 +403,16 @@ if __name__ == "__main__":
                 writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
                 if args.autotune:
                     writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
+
+                        #  evaluate at regular intervals and save
+            if global_step % args.eval_interval == 0:
+                if args.save_eval:
+                    mu, std, d = evaluate_model(args, actor, device, test_env, save_eval=f"runs/{run_name}/traj_{global_step}.pkl")
+                else:
+                    mu, std, d = evaluate_model(args, actor, device, test_env)
+                print(f"Evaluation at {global_step}: {mu}, {std}")
+                writer.add_scalar('eval/mu', mu, global_step)
+                writer.add_scalar('eval/std', std, global_step)
 
     envs.close()
     writer.close()
