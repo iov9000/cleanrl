@@ -157,6 +157,8 @@ def parse_args():
     parser.add_argument('--swil_period', default=1, type=float, required=False, help='number of discriminator updates')
 
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
+    parser.add_argument('--lip_p', default=1, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
+
     parser.add_argument('--gsw_coeff', default=1.0, type=float, required=False, help='ae loss coeff')
     parser.add_argument('--vb_coeff', default=1e-4, type=float, required=False, help='ae loss coeff')
     parser.add_argument('--recon_coeff', default=0.0, type=float, required=False, help='ae loss coeff')
@@ -488,6 +490,8 @@ if __name__ == "__main__":
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, rewards, term, trunc, infos = envs.step(actions)
             dones = term or trunc
+
+            print(infos)
 
             # traj_only IRL
             traj['obs'].append(obs)
