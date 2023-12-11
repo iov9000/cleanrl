@@ -5,15 +5,20 @@ import random
 import time
 from distutils.util import strtobool
 
-import gym
+from datetime import datetime
+
+import gymnasium as gym
 import numpy as np
-import pybullet_envs  # noqa
+#import pybullet_envs  # noqa
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from stable_baselines3.common.buffers import ReplayBuffer
+
 from torch.utils.tensorboard import SummaryWriter
+
+from irl.utils import FrankaObsWrapper, evaluate_model
 
 
 def parse_args():
@@ -21,8 +26,16 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
+    parser.add_argument("--exp-id", type=str, default="",
+        help="additional identifier of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
+    parser.add_argument("--logging_interval", type=int, default=500,
+        help="logging interval")
+    parser.add_argument("--eval_interval", type=int, default=10000,
+        help="evaluation interval")
+    parser.add_argument('--save_eval', default=False, required=False, 
+        action='store_true', help='verbose output')
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -36,9 +49,19 @@ def parse_args():
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
+    # environment specific arguments (wrappers)
+    parser.add_argument('--normalize_obs', default=False, 
+        action='store_true', required=False, help='normalize obs')  
+    parser.add_argument('--clip_action', default=False, 
+        action='store_true', required=False, help='clip action')  
+
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="HopperBulletEnv-v0",
+    # Algorithm specific arguments
+    parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
+    parser.add_argument("--reward_components", type=str, default="", nargs='+',  help="reward_components to change")
+    parser.add_argument("--reward_components_values", type=float, nargs='+', help="reward_components values")
+
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=3e-4,
@@ -59,19 +82,41 @@ def parse_args():
         help="the frequency of training policy (delayed)")
     parser.add_argument("--noise-clip", type=float, default=0.5,
         help="noise clip parameter of the Target Policy Smoothing Regularization")
+    parser.add_argument('--verbose', default=False, required=False, 
+        action='store_true', help='verbose output')
+
+
     args = parser.parse_args()
     # fmt: on
-    return args
+    non_default = {
+        opt.dest: getattr(args, opt.dest)
+        for opt in parser._option_string_actions.values()
+        if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
+    }
+
+    return args, non_default
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
+def make_env(opt, env_id, seed, idx, capture_video, run_name, kwargs):
     def thunk():
-        env = gym.make(env_id)
+        if 'Franka' in env_id:
+            env = gym.make(env_id, tasks_to_complete=['microwave'])
+            env = FrankaObsWrapper(env)
+        else:
+            env = gym.make(env_id, **kwargs)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env.seed(seed)
+        #env.seed(seed)
+
+        if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
+            env = gym.wrappers.ClipAction(env)
+        if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
+            env = gym.wrappers.NormalizeObservation(env)
+            env = gym.wrappers.TransformObservation(
+                env, lambda obs: np.clip(obs, -10, 10))
+
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -83,7 +128,11 @@ def make_env(env_id, seed, idx, capture_video, run_name):
 class QNetwork(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape), 256)
+        if isinstance(env.observation_space, gym.spaces.Dict):
+            ob_shape = env.observation_space['observation'].shape
+        else:
+            ob_shape = env.single_observation_space.shape
+        self.fc1 = nn.Linear(np.array(ob_shape).prod() + np.prod(env.single_action_space.shape), 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, 1)
 
@@ -98,7 +147,12 @@ class QNetwork(nn.Module):
 class Actor(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
+        if isinstance(env.observation_space, gym.spaces.Dict):
+            ob_shape = env.observation_space['observation'].shape
+        else:
+            ob_shape = env.single_observation_space.shape
+
+        self.fc1 = nn.Linear(np.array(ob_shape).prod(), 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc_mu = nn.Linear(256, np.prod(env.single_action_space.shape))
         # action rescaling
@@ -115,10 +169,21 @@ class Actor(nn.Module):
         x = torch.tanh(self.fc_mu(x))
         return x * self.action_scale + self.action_bias
 
+    def get_action(self, x):
+        a = self.forward(x)
+        return a,a,a
+
+
 
 if __name__ == "__main__":
-    args = parse_args()
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    args, non_default = parse_args()
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+    # create output folder with non default arguments in the name
+    id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
+    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_{id_string}"
+    if len(run_name) > 220:
+        run_name = run_name[:220]
+
     if args.track:
         import wandb
 
@@ -145,10 +210,26 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
+    if torch.cuda.is_available():
+        torch.set_default_tensor_type(torch.cuda.FloatTensor)
+    else:
+        torch.set_default_tensor_type(torch.FloatTensor)
+
+    env_kwargs = {}
+    for i, comp in enumerate(args.reward_components):
+        env_kwargs[comp] = args.reward_components_values[i]
     # env setup
-    envs = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed, 0, args.capture_video, run_name)])
+    envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, env_kwargs)])
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
+    if 'Adroit' in args.env_id:
+        test_env = gym.make(args.env_id, max_episode_steps=500)
+    elif 'Franka' in args.env_id:
+        test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+        test_env = FrankaObsWrapper(test_env)
+    else:
+        test_env = gym.make(args.env_id, **env_kwargs) 
+    
     actor = Actor(envs).to(device)
     qf1 = QNetwork(envs).to(device)
     qf1_target = QNetwork(envs).to(device)
@@ -159,6 +240,11 @@ if __name__ == "__main__":
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.learning_rate)
 
     envs.single_observation_space.dtype = np.float32
+    if isinstance(envs.observation_space, gym.spaces.Dict):
+        ob_space = envs.observation_space['observation']
+    else:
+        ob_space = envs.single_observation_space
+
     rb = ReplayBuffer(
         args.buffer_size,
         envs.single_observation_space,
@@ -169,7 +255,9 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
-    obs = envs.reset()
+    obs = envs.reset(seed=args.seed)[0]   
+    best_rew = -100000
+
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
         if global_step < args.learning_starts:
@@ -181,21 +269,37 @@ if __name__ == "__main__":
                 actions = actions.cpu().numpy().clip(envs.single_action_space.low, envs.single_action_space.high)
 
         # TRY NOT TO MODIFY: execute the game and log data.
-        next_obs, rewards, dones, infos = envs.step(actions)
+        next_obs, rewards, term, trunc, infos = envs.step(actions)
+        dones = term or trunc
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        for info in infos:
-            if "episode" in info.keys():
-                print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+        if not isinstance(infos, list):
+            infos = [infos]
+
+        # TRY NOT TO MODIFY: record rewards for plotting purposes
+        for item in infos:
+            if "final_info" in item.keys():
+                irl_trigger = True
+                if item["final_info"][0]['episode']["r"] > best_rew:
+                    best_rew = item["final_info"][0]['episode']["r"]
+                    torch.save(actor.state_dict(), f"runs/{run_name}/best_actor.pt")
+                    torch.save(qf1.state_dict(), f"runs/{run_name}/best_qf1.pt")
+
+                if args.verbose:
+                    print(
+                        f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
+                if global_step % 1 == 0:
+                    writer.add_scalar(
+                        "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                    writer.add_scalar(
+                        "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
                 break
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
         real_next_obs = next_obs.copy()
         for idx, d in enumerate(dones):
             if d:
-                real_next_obs[idx] = infos[idx]["terminal_observation"]
+                real_next_obs[idx] = infos[idx]["final_observation"][0]
         rb.add(obs, real_next_obs, actions, rewards, dones, infos)
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
@@ -235,6 +339,15 @@ if __name__ == "__main__":
                 writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), global_step)
                 print("SPS:", int(global_step / (time.time() - start_time)))
                 writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+
+            if global_step % args.eval_interval == 0:
+                if args.save_eval:
+                    mu, std, d = evaluate_model(args, actor, device, test_env, save_eval=f"runs/{run_name}/traj_{global_step}.pkl")
+                else:
+                    mu, std, d = evaluate_model(args, actor, device, test_env)
+                print(f"Evaluation at {global_step}: {mu}, {std}")
+                writer.add_scalar('eval/mu', mu, global_step)
+                writer.add_scalar('eval/std', std, global_step)
 
     envs.close()
     writer.close()

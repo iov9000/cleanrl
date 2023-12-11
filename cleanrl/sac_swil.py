@@ -111,6 +111,8 @@ def parse_args():
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
     parser.add_argument("--swil_rew", type=str, default='repl_loss', help="mean or replacement")
     parser.add_argument("--repl_loss_type", type=str, default='diff', help="replacement type: diff or a")
+    parser.add_argument("--aligned_index", default=False, required=False, action='store_true', help="replacement type: diff or a")
+
     parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
     parser.add_argument("--swil_loss", default='surr_loss', type=str, required=False, help="loss_type:")
     parser.add_argument("--gsw_df", default='nn', type=str, required=False, help="Radon transform defining function: nn/poly/linear/circular")
@@ -490,8 +492,6 @@ if __name__ == "__main__":
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, rewards, term, trunc, infos = envs.step(actions)
             dones = term or trunc
-
-            print(infos)
 
             # traj_only IRL
             traj['obs'].append(obs)

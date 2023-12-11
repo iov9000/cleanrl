@@ -263,6 +263,8 @@ class SWILDiscriminator(nn.Module):
         # init sorted atom queues
         self.pi_atoms_sorted = deque(maxlen=opt.max_q_len)
         self.exp_atoms_sorted = deque(maxlen=opt.max_q_len)
+        self.pi_atoms_sorted_idx = deque(maxlen=opt.max_q_len)
+        self.exp_atoms_sorted_idx = deque(maxlen=opt.max_q_len)
 
         self.policy_obs = torch.randn([opt.batch_size, *ob_shapes])#, requires_grad=True)
         self.policy_acs = torch.randn([opt.batch_size, *ac_shapes])#, requires_grad=True)
@@ -392,69 +394,95 @@ class SWILDiscriminator(nn.Module):
 
                 #idx = torch.searchsorted(sorted_proj.T.contiguous(), obs_t_slice.T.contiguous())#, right=True)
                 # determine slice index in previously sorted atoms used for SWD computation
-                idx = torch.searchsorted(sorted_proj.T, obs_t_slice.T)#, right=True)
+                if self.opt.aligned_index:
+                    idx = torch.tensor(step).unsqueeze(0).unsqueeze(0)
+                else:
+                    idx = torch.searchsorted(sorted_proj.T, obs_t_slice.T)#, right=True)
+                    #idx[idx==0] +=1
+                    #idx[idx==n] -=1
 
-                # shift extreme indices
-                #print(n)
-                #print(idx)
+                idxs = self.pi_atoms_sorted_idx[p]
+                
+                #print(idxs, idx, torch.where(idxs==idx)[0])
+
+                ## if idx is not in sorted list, use nearest neighbours
 
                 idx[idx==0] +=1
                 idx[idx==n] -=1
+                # shift extreme indices
+                #print(n)
 
                 # calculate weight based on position in queue
                 weight = len(self.pi_atoms_sorted)
-
+                #w = 1/n
+                w = 1
                 # TODO: what if target CDF is left or mixed?
-                for j,i in enumerate(idx):
-                    rew_j = 0
-                    if self.opt.swil_rew == 'insertion_loss':
-                        w = 1/(n*(n+1))
-                        # new atom contribution
-                        diff = sorted_proj[1:]-sorted_proj[:-1]
-
-                        rew += w*torch.sum(sorted_proj[i,j]-obs_t_slice[0,j] +
-                                        sorted_proj[i-1,j]-obs_t_slice[0,j])
-                        # reweighting of integrals
-                        rew_j = diff
-                        rew -= torch.sum(w*diff[:i-1,j])
-                        rew += torch.sum(w*diff[i:,j])
+                if self.opt.aligned_index:
+                    i = torch.where(idxs==idx)[0]
+                    j = 0
+                    a_i = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
+                    a_h = (sorted_proj_tgt[i-1,j] - sorted_proj[i-1,j])**2
+                    a_new_i = (sorted_proj_tgt[i,j] - obs_t_slice[0,j])**2
+                    a_new_h = (sorted_proj_tgt[i-1,j] - obs_t_slice[0,j])**2
+                    rew_incr = torch.abs(sorted_proj[i,j] - obs_t_slice[0,j])
+                    rew_decr = torch.abs(sorted_proj[i-1,j] - obs_t_slice[0,j])
+                    rew += torch.where(idxs==idx)[0]
+                    if rew_incr > rew_decr:
+                        rew += w*(a_new_h)  
                     else:
-                        # calculate diff when replacing atom
-                        w = 1/n
-                        a_prev = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
-                        a_prev_2 = (sorted_proj_tgt[i-1,j] - sorted_proj[i-1,j])**2
+                        rew += w*(a_new_i)
+                else:
+                    for j,i in enumerate(idx):
+                        rew_j = 0
+                        if self.opt.swil_rew == 'insertion_loss':
+                            w = 1/(n*(n+1))
+                            # new atom contribution
+                            diff = sorted_proj[1:]-sorted_proj[:-1]
 
-                        a_new = (sorted_proj_tgt[i,j] - obs_t_slice[0,j])**2
-                        a_new_2 = (sorted_proj_tgt[i-1,j] - obs_t_slice[0,j])**2
-
-
-                        a_i = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
-                        a_h = (sorted_proj_tgt[i-1,j] - sorted_proj[i-1,j])**2
-                        a_new_i = (sorted_proj_tgt[i,j] - obs_t_slice[0,j])**2
-                        a_new_h = (sorted_proj_tgt[i-1,j] - obs_t_slice[0,j])**2
-
-                        rew_incr = torch.abs(sorted_proj[i,j] - obs_t_slice[0,j])
-                        rew_decr = torch.abs(sorted_proj[i-1,j] - obs_t_slice[0,j])
-                        #w = 1/ (n + a_prev) # more reward if closer
-
-                        rew_j = a_new - a_prev
-                        if self.opt.repl_loss_type == 'diff':
-                            rew += w*(a_new - a_prev)
-                        elif self.opt.repl_loss_type == 'diff2':
-                            #if sorted_proj[i,j] > sorted_proj_tgt[i,j]:
-                                #print("api>ae")
-                            if rew_incr > rew_decr:
-                                rew += (a_new_h-a_h)  
-                            else:
-                                rew += (a_new_i-a_i)
-                                #rew += w*(a_new - a_prev)
+                            rew += w*torch.sum(sorted_proj[i,j]-obs_t_slice[0,j] +
+                                            sorted_proj[i-1,j]-obs_t_slice[0,j])
+                            # reweighting of integrals
+                            rew_j = diff
+                            rew -= torch.sum(w*diff[:i-1,j])
+                            rew += torch.sum(w*diff[i:,j])
                         else:
-                            rew += w*(a_new)
+                            # calculate diff when replacing atom
+                            a_prev = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
+                            a_prev_2 = (sorted_proj_tgt[i-1,j] - sorted_proj[i-1,j])**2
+
+                            a_new = (sorted_proj_tgt[i,j] - obs_t_slice[0,j])**2
+                            a_new_2 = (sorted_proj_tgt[i-1,j] - obs_t_slice[0,j])**2
 
 
-                    # replace stored atoms in queue if we're getting closer
-                    if self.opt.replace_atoms and rew_j < 0:
-                        self.pi_atoms_sorted[p][idx] = obs_t_slice
+                            a_i = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
+                            a_h = (sorted_proj_tgt[i-1,j] - sorted_proj[i-1,j])**2
+                            a_new_i = (sorted_proj_tgt[i,j] - obs_t_slice[0,j])**2
+                            a_new_h = (sorted_proj_tgt[i-1,j] - obs_t_slice[0,j])**2
+
+                            rew_incr = torch.abs(sorted_proj[i,j] - obs_t_slice[0,j])
+                            rew_decr = torch.abs(sorted_proj[i-1,j] - obs_t_slice[0,j])
+                            #w = 1/ (n + a_prev) # more reward if closer
+
+                            rew_j = a_new - a_prev
+                            if self.opt.repl_loss_type == 'diff':
+                                rew += w*(a_new - a_prev)
+                            elif self.opt.repl_loss_type == 'diff2':
+                                #if sorted_proj[i,j] > sorted_proj_tgt[i,j]:
+                                    #print("api>ae")
+                                if rew_incr > rew_decr:
+                                    rew += w*(a_new_h-a_h)  
+                                else:
+                                    rew += w*(a_new_i-a_i)
+                                    #rew += w*(a_new - a_prev)
+                            else:
+                                if rew_incr > rew_decr:
+                                    rew += w*(a_new_h)  
+                                else:
+                                    rew += w*(a_new_i)
+
+                        # replace stored atoms in queue if we're getting closer
+                        if self.opt.replace_atoms and rew_j < 0:
+                            self.pi_atoms_sorted[p][idx] = obs_t_slice
 
             rew = -rew
         
@@ -564,11 +592,13 @@ class SWILDiscriminator(nn.Module):
         exp_slices, _, _, _ = self.proj(obs_exp, acs_exp, nobs_exp, d_exp)
 
         # sort slices
-        pi_slices_sorted = torch.sort(pi_slices, dim=0)[0]
-        exp_slices_sorted = torch.sort(exp_slices, dim=0)[0]
+        pi_slices_sorted, pi_slices_sorted_idx = torch.sort(pi_slices, dim=0)
+        exp_slices_sorted, exp_slices_sorted_idx = torch.sort(exp_slices, dim=0)
         
         self.pi_atoms_sorted.append(pi_slices_sorted)
         self.exp_atoms_sorted.append(exp_slices_sorted)
+        self.pi_atoms_sorted_idx.append(pi_slices_sorted_idx)
+        self.exp_atoms_sorted_idx.append(exp_slices_sorted_idx)
 
         return torch.sqrt(torch.sum((pi_slices_sorted-exp_slices_sorted)**2))
 
@@ -720,12 +750,14 @@ class SWILDiscriminator(nn.Module):
                                 torch.ones(policy_out.size())])
 
             # sort slices for policy repl loss
-            pi_slices_sorted = torch.sort(policy_out, dim=0)[0]
-            exp_slices_sorted = torch.sort(expert_out, dim=0)[0]
+            pi_slices_sorted, pi_slices_sorted_idx = torch.sort(policy_out, dim=0)
+            exp_slices_sorted, exp_slices_sorted_idx = torch.sort(expert_out, dim=0)
 
             # save to FIFO queue of sorted atoms
             self.pi_atoms_sorted.append(pi_slices_sorted)
             self.exp_atoms_sorted.append(exp_slices_sorted)
+            self.pi_atoms_sorted_idx.append(pi_slices_sorted_idx)
+            self.exp_atoms_sorted_idx.append(exp_slices_sorted_idx)
 
             d_out = torch.cat([expert_out, policy_out])
             bce_loss = F.binary_cross_entropy_with_logits(d_out, labels)

@@ -300,7 +300,7 @@ if __name__ == "__main__":
         torch.set_default_tensor_type(torch.FloatTensor)
 
     if args.diverse_demos is not None:
-        demo_list = [f for f in os.listdir(args.demo_dir) if args.diverse_demos in f]
+        demo_list = [f for f in os.listdir(args.demo_dir) if args.diverse_demos in f and args.env_id in f]
         print("-> Training on union of demos:", demo_list)
         demos = load_hf_demos_name(args, demo_list)
     else:

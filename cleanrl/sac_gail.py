@@ -158,6 +158,9 @@ def parse_args():
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
     parser.add_argument("--div", type=str, default="rkl", help="divergence type")
 
+    parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
+    parser.add_argument("--load_disc", type=str, default=None, help="load discriminator from checkpoint")
+
     parser.add_argument('--drop_batch', default=False, required=False, 
         action='store_true', help='drop batch in irl epochs')   
     parser.add_argument('--on_policy', default=False, required=False, 
@@ -354,6 +357,16 @@ if __name__ == "__main__":
     actor = Actor(envs).to(device)
     qf1 = SoftQNetwork(envs).to(device)
     qf2 = SoftQNetwork(envs).to(device)
+
+    if args.resume:
+        actor.load_state_dict(torch.load(os.path.join(args.resume, "actor.pt") , map_location=device))
+        qf1.load_state_dict(torch.load(os.path.join(args.resume, "qf1.pt") , map_location=device))
+        qf2.load_state_dict(torch.load(os.path.join(args.resume, "qf2.pt") , map_location=device))
+        disc.load_state_dict(torch.load(os.path.join(args.resume, "disc.pt") , map_location=device))
+
+    if args.load_disc:
+        disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
+
     qf1_target = SoftQNetwork(envs).to(device)
     qf2_target = SoftQNetwork(envs).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
