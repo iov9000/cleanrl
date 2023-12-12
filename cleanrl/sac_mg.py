@@ -70,8 +70,7 @@ def parse_args():
     # multigrid specific arguments
     parser.add_argument("--nstep_distribution", type=str, default='uniform', help="distribution over scales")
     parser.add_argument("--ks", type=int, nargs='+', default=[1,10], help="multigrid scales")
-    parser.add_argument("--mg", default=True, 
-        action='store_false', required=False, help='mg or not')  
+    parser.add_argument("--mode", type=str, default='last', required=False, help='mg or last')  
     parser.add_argument("--prioritized_replay", default=True, 
         action='store_false', required=False, help='prioritize buffer items based on td-error')
 
@@ -315,7 +314,7 @@ if __name__ == "__main__":
             replay_capacity=args.buffer_size,
             update_horizon=ks[0],
             nstep_distribution=args.nstep_distribution,
-            multi_grid=args.mg,
+            mode=args.mode,
             gamma=args.gamma,
             observation_dtype=ob_space.dtype,
             action_dtype=envs.single_action_space.dtype)
@@ -399,7 +398,7 @@ if __name__ == "__main__":
                 qf1_next_target = qf1_target(data.next_observations, next_state_actions)
                 qf2_next_target = qf2_target(data.next_observations, next_state_actions)
                 min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - alpha * next_state_log_pi
-                next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * (min_qf_next_target).view(-1)
+                next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma ** data.ki * (min_qf_next_target).view(-1)
 
             qf1_a_values = qf1(data.observations, data.actions).view(-1)
             qf2_a_values = qf2(data.observations, data.actions).view(-1)

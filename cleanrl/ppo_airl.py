@@ -37,7 +37,7 @@ from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.airl import AirlReward, AIRLDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
+from irl.utils import load_hf_demos, load_hf_demos_name, prepare_batch_update_irl, enhance_demos_with_barycenters,\
      demos_gen_dict, AntCFWrapper, MujocoTestWrapper, save_traj_dict, evaluate_model, load_lap_demos
 
 from parse_tb import read_tb_file, create_df_from_ea
@@ -124,6 +124,9 @@ def parse_args():
         help="number of demos to use")
     parser.add_argument('--enhance_demos', default=False, required=False, 
         action='store_true', help='enhance demos using W2 barycenters')
+    parser.add_argument("--diverse_demos", type=str, default=None,
+        help="diverse demos for generalization experiments")
+
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
@@ -131,6 +134,9 @@ def parse_args():
     parser.add_argument('--airl_gamma', default=0.99, type=float, 
         required=False, help='gamma for AIRL advantage')
     parser.add_argument('--airl_resnet', default=False, action='store_true', help='use resnet for discriminator')
+    parser.add_argument('--d_out_reward', default=False, action='store_true', help='use d_out_reward')    
+
+
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
     parser.add_argument("--irm_loss_type", type=str, default="sym", help="e1,e0,p0,p1,sym")
@@ -148,11 +154,13 @@ def parse_args():
         action='store_false', help='use bias in disc arch')
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
+    
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
     parser.add_argument('--use_weight_norm', default=False, required=False, 
         action='store_true', help='use weight norm')
     parser.add_argument('--use_spectral_norm', default=False, required=False, 
         action='store_true', help='use spectral_norm')
+
     parser.add_argument('--drop_batch', default=False, required=False, 
         action='store_true', help='drop batch in irl epochs')   
     parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
@@ -315,10 +323,16 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    if args.env_id == 'Lap-v0':
-        demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
+
+    if args.diverse_demos is not None:
+        demo_list = [f for f in os.listdir(args.demo_dir) if args.diverse_demos in f and args.env_id in f]
+        print("-> Training on union of demos:", demo_list)
+        demos = load_hf_demos_name(args, demo_list)
     else:
-        demos = load_hf_demos(args, args.n_demos, args.demo_eps)
+        if args.env_id == 'Lap-v0':
+            demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
+        else:
+            demos = load_hf_demos(args, args.n_demos, args.demo_eps)
 
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")

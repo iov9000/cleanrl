@@ -104,7 +104,7 @@ class MultiStepReplayBuffer(object):
                  batch_size,
                  update_horizon=1,
                  nstep_distribution="beta",  # "uniform", "beta" or "fix"
-                 multi_grid=False,
+                 mode='last',
                  gamma=0.99,
                  max_sample_attempts=1000,
                  extra_storage_types=None,
@@ -130,7 +130,7 @@ class MultiStepReplayBuffer(object):
                 parameter a is 10 and the parameter b is 1 and being
                 annealed so that it starts at 0.8 and ends at 10.
             "fix" means a fix value of n.
-          multi_grid: bool, whether to use multi-grid n-step update.
+          mode: bool, whether to use multi-grid n-step update.
           gamma: float, the discount factor.
           max_sample_attempts: int, the maximum number of attempts allowed to
             get a sample.
@@ -185,7 +185,7 @@ class MultiStepReplayBuffer(object):
         self._update_horizon = update_horizon
         self._max_nstep = update_horizon
         self._nstep_distribution = nstep_distribution
-        self._multi_grid = multi_grid
+        self._mode = mode
         self._gamma = gamma
         self._observation_dtype = observation_dtype
         self._terminal_dtype = terminal_dtype
@@ -641,10 +641,6 @@ class MultiStepReplayBuffer(object):
             cum_discount_vector = np.array(
                 [math.pow(self._gamma, n) for n in range(update_horizon)],
                 dtype=np.float32)
-            if self._multi_grid:
-                # cum_discount where all discounts are 0 except the last one
-                cum_discount_vector[:-1] = 0.0
-
             trajectory_indices = [(state_index + j) % self._replay_capacity
                                   for j in range(update_horizon)]
             trajectory_terminals = self._store['terminal'][trajectory_indices]
@@ -656,9 +652,35 @@ class MultiStepReplayBuffer(object):
                 trajectory_length = np.argmax(
                     trajectory_terminals.astype(bool), 0) + 1
             next_state_index = state_index + trajectory_length
-            trajectory_discount_vector = cum_discount_vector[:trajectory_length]
             trajectory_rewards = self.get_range(
                 self._store['reward'], state_index, next_state_index)
+            if self._mode == 'last':
+                # cum_discount where all discounts are 0 except the last one
+                cum_discount_vector[:-1] = 0.0
+            elif self._mode == 'first':
+                # cum_discount where all discounts are 0 except the first one
+                cum_discount_vector[1:] = 0.0
+            elif self._mode == 'max':
+                # all values except where index is max_idx  set to zero
+                max_idx = np.argmax(trajectory_rewards)
+                cum_discount_vector[:max_idx] = 0.0
+                cum_discount_vector[max_idx + 1:] = 0.0
+            elif self._mode == 'min':
+                # all values except where index is min_idx  set to zero
+                min_idx = np.argmin(trajectory_rewards)
+                cum_discount_vector[:min_idx] = 0.0
+                cum_discount_vector[min_idx + 1:] = 0.0
+            elif self._mode == 'mean':
+                cum_discount_vector = np.ones_like(cum_discount_vector) / len(
+                    cum_discount_vector)
+            elif self._mode == 'reverse':
+                cum_discount_vector = cum_discount_vector[::-1]
+            elif self._mode == '':
+                pass
+            else:
+                raise ValueError('Unknown mode: {}'.format(self._mode))
+
+            trajectory_discount_vector = cum_discount_vector[:trajectory_length]
 
             # Fill the contents of each array in the sampled batch.
             assert len(transition_elements) == len(batch_arrays)
@@ -961,7 +983,7 @@ class PrioritisedMultiStepReplayBuffer(MultiStepReplayBuffer):
                  batch_size,
                  update_horizon=1,
                  nstep_distribution='beta',  # 'uniform', 'beta' or 'fix'
-                 multi_grid=False,
+                 mode=False,
                  gamma=0.99,
                  max_sample_attempts=1000,
                  extra_storage_types=None,
@@ -1002,7 +1024,7 @@ class PrioritisedMultiStepReplayBuffer(MultiStepReplayBuffer):
             batch_size=batch_size,
             update_horizon=update_horizon,
             nstep_distribution=nstep_distribution,
-            multi_grid=multi_grid,
+            mode=mode,
             gamma=gamma,
             max_sample_attempts=max_sample_attempts,
             extra_storage_types=extra_storage_types,
