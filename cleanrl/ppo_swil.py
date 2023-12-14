@@ -55,9 +55,9 @@ def parse_args():
         help="the id of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
-    parser.add_argument("--logging_interval", type=int, default=128,
+    parser.add_argument("--logging_interval", type=int, default=200,
         help="logging interval")
-    parser.add_argument("--eval_interval", type=int, default=8192,
+    parser.add_argument("--eval_interval", type=int, default=10000,
         help="evaluation interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
@@ -82,6 +82,9 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
+    parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
+    parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
+
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=3e-4,
@@ -91,7 +94,7 @@ def parse_args():
     parser.add_argument("--agent_size", type=int, default=64, help='actor-critic network size')
     parser.add_argument("--num-envs", type=int, default=1,
         help="the number of parallel game environments")
-    parser.add_argument("--num-steps", type=int, default=2048,
+    parser.add_argument("--num-steps", type=int, default=2000,
         help="the number of steps to run in each environment per policy rollout")
     #parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
     #    help="Toggle learning rate annealing for policy and value networks")
@@ -127,6 +130,7 @@ def parse_args():
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
     parser.add_argument("--swil_rew", type=str, default='repl_loss', help="mean or replacement")
     parser.add_argument("--repl_loss_type", type=str, default='diff', help="replacement type: diff or a")
+    parser.add_argument("--aligned_index", default=False, required=False, action='store_true', help="replacement type: diff or a")
 
     parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
     parser.add_argument("--swil_loss", default='surr_loss', type=str, required=False, help="loss_type:")
@@ -144,7 +148,7 @@ def parse_args():
     parser.add_argument("--linear_proj", default=False, required=False, action='store_true', 
                                         help="linear projection only")
     parser.add_argument("--swil_ae", default=False, required=False, action='store_true', help="use autoencoder")
-    parser.add_argument('--swil_period', default=1, type=float, required=False, help='number of discriminator updates')
+    parser.add_argument('--swil_period', default=1, type=float, required=False, help='how often to update discriminator')
     parser.add_argument("--max_q_len", type=int, default=1, help="max number of projected atom sets in queue")
     parser.add_argument("--max_swil_step", type=int, default=100000000, help="only update projections until some timestep")
     parser.add_argument("--replace_atoms", default=False, required=False, action='store_true', help="actually replace atoms with policy samples")
@@ -222,7 +226,7 @@ def parse_args():
     return args, non_default
 
 
-def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
+def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc, env_kwargs):
     def thunk():
         if 'Adroit' in env_id:
             env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
@@ -231,7 +235,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
             env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
             env = FrankaObsWrapper(env)
         else:
-            env = gym.make(env_id, render_mode='rgb_array')        
+            env = gym.make(env_id, render_mode='rgb_array', **env_kwargs)
         
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if opt.time_aware:
@@ -372,6 +376,10 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
+    env_kwargs = {}
+    for i, comp in enumerate(args.env_kwargs):
+        env_kwargs[comp] = args.env_kwargs_values[i]
+
     demos = load_hf_demos(args, n_demos=args.n_demos)
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
@@ -384,8 +392,13 @@ if __name__ == "__main__":
         test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
         test_env = FrankaObsWrapper(test_env)
     else:
-        test_env = gym.make(args.env_id)         
+        test_env = gym.make(args.env_id, **env_kwargs)        
+
+    if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
+        test_env = gym.wrappers.ClipAction(test_env)
+
     discrete = not isinstance(test_env.action_space, gym.spaces.Box)
+
     disc = SWILDiscriminator(test_env, args)
 
     print(">>>>>> Discriminator structure: ", disc.base, disc.reward)
@@ -395,7 +408,7 @@ if __name__ == "__main__":
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args, args.env_id, args.seed + i, i, args.capture_video, run_name, args.gamma, disc) for i in range(args.num_envs)]
+        [make_env(args, args.env_id, args.seed + i, i, args.capture_video, run_name, args.gamma, disc, env_kwargs) for i in range(args.num_envs)]
     )
     #assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
@@ -558,15 +571,18 @@ if __name__ == "__main__":
             init = False
 
             # SWIL updates
-            if cnt_on_policy_updates % args.swil_period == 0:
+            print(cnt_on_policy_updates)
+            if cnt_on_policy_updates % args.swil_period == 1:
                 if update % int(np.ceil(1/(n_irl_epochs+1))) == 0:
                     k = int(n_irl_epochs) if n_irl_epochs >=0 else 1
+                    print(k)
                     for epoch in tqdm(range(k)):            
                         # GAIL Discriminator Update 
                         gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=args.shuffle_irl_batches)
                         if "MoveP-v0" in args.env_id:
                             fig, ax = plt.subplots(1,2,figsize=(10,5))
                         for d in gen_demos:
+                            print(len(d['obs']), obs.shape)
                             if len(d['obs']) < args.batch_size:
                                 obs_ = obs[:len(d['obs'])]
                                 actions_ = actions[:len(d['obs'])]
@@ -641,7 +657,13 @@ if __name__ == "__main__":
 
             #  evaluate at regular intervals and save
             if global_step % args.eval_interval == 0:
+                if isinstance(test_env.action_space, gym.spaces.Box):
+                    det = True
+                else:
+                    det = False
                 mu, std, d = evaluate_model(args, agent, device, test_env)
+                #mu, std, d = evaluate_model(args, agent, device, test_env, deterministic = det)
+
                 print(f"Evaluation at {global_step}: {mu}, {std}")
                 writer.add_scalar('eval/mu', mu, global_step)
                 writer.add_scalar('eval/std', std, global_step)
@@ -672,7 +694,14 @@ if __name__ == "__main__":
     torch.save(agent.state_dict(), f"runs/{run_name}/agent.pt")
     torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
 
-    mu, std, d = evaluate_model(args, agent, device, test_env)
+    if isinstance(test_env.action_space, gym.spaces.Box):
+        det = True
+    else:
+        det = False
+    #mu, std, d = evaluate_model(args, agent, device, test_env, deterministic = det)   
+    mu, std, d = evaluate_model(args, agent, device, test_env)   
+
+                
     writer.add_scalar('eval/mu', mu, args.total_timesteps)
     writer.add_scalar('eval/std', std, args.total_timesteps)
 

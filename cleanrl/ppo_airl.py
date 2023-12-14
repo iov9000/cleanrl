@@ -37,8 +37,8 @@ from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.airl import AirlReward, AIRLDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
-     demos_gen_dict, AntCFWrapper, MujocoTestWrapper, save_traj_dict, evaluate_model, load_lap_demos
+from irl.utils import load_hf_demos, load_hf_demos_name, prepare_batch_update_irl, enhance_demos_with_barycenters,\
+     demos_gen_dict, AntCFWrapper, MujocoTestWrapper, save_traj_dict, evaluate_model, load_lap_demos, FrankaObsWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -79,6 +79,9 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
+    parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
+    parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
+
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=3e-4,
@@ -124,6 +127,9 @@ def parse_args():
         help="number of demos to use")
     parser.add_argument('--enhance_demos', default=False, required=False, 
         action='store_true', help='enhance demos using W2 barycenters')
+    parser.add_argument("--diverse_demos", type=str, default=None,
+        help="diverse demos for generalization experiments")
+
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
@@ -131,6 +137,9 @@ def parse_args():
     parser.add_argument('--airl_gamma', default=0.99, type=float, 
         required=False, help='gamma for AIRL advantage')
     parser.add_argument('--airl_resnet', default=False, action='store_true', help='use resnet for discriminator')
+    parser.add_argument('--d_out_reward', default=False, action='store_true', help='use d_out_reward')    
+
+
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
     parser.add_argument("--irm_loss_type", type=str, default="sym", help="e1,e0,p0,p1,sym")
@@ -148,11 +157,13 @@ def parse_args():
         action='store_false', help='use bias in disc arch')
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
+    
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
     parser.add_argument('--use_weight_norm', default=False, required=False, 
         action='store_true', help='use weight norm')
     parser.add_argument('--use_spectral_norm', default=False, required=False, 
         action='store_true', help='use spectral_norm')
+
     parser.add_argument('--drop_batch', default=False, required=False, 
         action='store_true', help='drop batch in irl epochs')   
     parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
@@ -176,9 +187,9 @@ def parse_args():
     return args, non_default
 
 
-def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, agent, disc):
+def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, agent, disc, env_kwargs):
     def thunk():
-        env = gym.make(env_id, render_mode='rgb_array')
+        env = gym.make(env_id, render_mode='rgb_array', **env_kwargs)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if opt.time_aware:
             env = gym.wrappers.TimeAwareObservation(env)
@@ -315,16 +326,33 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    if args.env_id == 'Lap-v0':
-        demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
+    env_kwargs = {}
+    for i, comp in enumerate(args.env_kwargs):
+        env_kwargs[comp] = args.env_kwargs_values[i]
+
+    if args.diverse_demos is not None:
+        demo_list = [f for f in os.listdir(args.demo_dir) if args.diverse_demos in f and args.env_id in f]
+        print("-> Training on union of demos:", demo_list)
+        demos = load_hf_demos_name(args, demo_list)
     else:
-        demos = load_hf_demos(args, args.n_demos, args.demo_eps)
+        if args.env_id == 'Lap-v0':
+            demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
+        else:
+            demos = load_hf_demos(args, args.n_demos, args.demo_eps)
 
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
-    test_env = gym.make(args.env_id)
+    if 'Adroit' in args.env_id:
+        test_env = gym.make(args.env_id, max_episode_steps=500)
+        test_env.set_env_state(demos['all']['init_state_dict'][0])
+    elif 'Franka' in args.env_id:
+        test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+        test_env = FrankaObsWrapper(test_env)
+    else:
+        test_env = gym.make(args.env_id, **env_kwargs)              
+        
     #if args.env_id == 'Ant-v3':
     #    print("Wrapping Ant-v3 test env with AntCFWrapper")
     #    test_env = AntCFWrapper(test_env)
@@ -339,7 +367,8 @@ if __name__ == "__main__":
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args, args.env_id, args.seed + i, i, args.capture_video, run_name, args.gamma, agent, disc) for i in range(args.num_envs)]
+        [make_env(args, args.env_id, args.seed + i, i, args.capture_video, 
+            run_name, args.gamma, agent, disc, env_kwargs) for i in range(args.num_envs)]
     )
     #assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
@@ -558,7 +587,16 @@ if __name__ == "__main__":
         
         #  evaluate at regular intervals and save
         if global_step % args.eval_interval == 0:
-            mu, std, d = evaluate_model(args, agent, device)
+            mu, std, d = evaluate_model(args, agent, device, test_env)
+            if 'Move' in args.env_id and 'mud' in args.diverse_demos:
+                import matplotlib.pyplot as plt
+                rew_grid = test_env.get_reward_grid()[-1]
+                print(rew_grid.shape, disc.base)
+                rew = disc.reward(disc.base(torch.tensor(rew_grid).to(device))).detach().numpy()
+                fig = plt.figure(figsize=(20,5))
+                plt.pcolormesh(rew_grid[0],rew_grid[1],rew.T)
+                plt.colorbar()
+                plt.savefig(f"runs/{run_name}/reward_{global_step}.png")
             print(f"Evaluation at {global_step}: {mu}, {std}")
             writer.add_scalar('eval/mu', mu, global_step)
             writer.add_scalar('eval/std', std, global_step)
@@ -605,9 +643,9 @@ if __name__ == "__main__":
     #     plt.savefig(f"runs/{run_name}/airl_scatter.png")
 
     # save df for easier parsing
-    if args.total_timesteps > 0:    
-        ea = read_tb_file(f"runs/{run_name}")
-        df = create_df_from_ea(ea, "charts/episodic_return")
-        df["mu"] = mu
-        df.to_pickle(f"results_{run_name}_df.pkl")
+    # if args.total_timesteps > 0:    
+    #     ea = read_tb_file(f"runs/{run_name}")
+    #     df = create_df_from_ea(ea, "charts/episodic_return")
+    #     df["mu"] = mu
+    #     df.to_pickle(f"results_{run_name}_df.pkl")
 

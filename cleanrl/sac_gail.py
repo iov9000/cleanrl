@@ -75,6 +75,9 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
+    parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
+    parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
+    
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--buffer-size", type=int, default=int(1e6),
@@ -128,7 +131,7 @@ def parse_args():
         action='store_true', help='use actions in discriminator')
     parser.add_argument('--use_next_obs', default=False, required=False, 
         action='store_true', help='use actions in discriminator')
-    parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
+    parser.add_argument('--d_layer_dims', default=[256, 256], nargs='+', required=False,
                    help='discriminator MLP layer dimensions')
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
@@ -158,6 +161,9 @@ def parse_args():
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
     parser.add_argument("--div", type=str, default="rkl", help="divergence type")
 
+    parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
+    parser.add_argument("--load_disc", type=str, default=None, help="load discriminator from checkpoint")
+
     parser.add_argument('--drop_batch', default=False, required=False, 
         action='store_true', help='drop batch in irl epochs')   
     parser.add_argument('--on_policy', default=False, required=False, 
@@ -178,7 +184,7 @@ def parse_args():
     return args, non_default
 
 
-def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos):
+def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos, env_kwargs):
     def thunk():
         if 'Adroit' in env_id:
             env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
@@ -325,6 +331,10 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
+    env_kwargs = {}
+    for i, comp in enumerate(args.env_kwargs):
+        env_kwargs[comp] = args.env_kwargs_values[i]
+
     if args.diverse_demos is not None:
         demo_list = [f for f in os.listdir(args.demo_dir) if args.diverse_demos in f]
         print("-> Training on union of demos:", demo_list)
@@ -342,11 +352,11 @@ if __name__ == "__main__":
         test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
         test_env = FrankaObsWrapper(test_env)
     else:
-        test_env = gym.make(args.env_id) 
+        test_env = gym.make(args.env_id, **env_kwargs) 
     disc = GAILDiscriminator(test_env, args)
 
     # env setup
-    envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, disc, demos)])
+    envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, disc, demos, env_kwargs)])
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     max_action = float(envs.single_action_space.high[0])
@@ -354,6 +364,16 @@ if __name__ == "__main__":
     actor = Actor(envs).to(device)
     qf1 = SoftQNetwork(envs).to(device)
     qf2 = SoftQNetwork(envs).to(device)
+
+    if args.resume:
+        actor.load_state_dict(torch.load(os.path.join(args.resume, "actor.pt") , map_location=device))
+        qf1.load_state_dict(torch.load(os.path.join(args.resume, "qf1.pt") , map_location=device))
+        qf2.load_state_dict(torch.load(os.path.join(args.resume, "qf2.pt") , map_location=device))
+        disc.load_state_dict(torch.load(os.path.join(args.resume, "disc.pt") , map_location=device))
+
+    if args.load_disc:
+        disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
+
     qf1_target = SoftQNetwork(envs).to(device)
     qf2_target = SoftQNetwork(envs).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
@@ -525,7 +545,7 @@ if __name__ == "__main__":
 
                             disc.update(loss)
                     
-                            if global_step % args.logging_interval == 0:
+                            if (global_step+1) % args.logging_interval == 0:
                                 writer.add_scalar('irl/gail_bce_loss', loss_dict['d_loss'], global_step)
                                 if args.irm_coeff > 0:
                                     writer.add_scalar('irl/gail_irm_loss', loss_dict['grad_penalty'], global_step)

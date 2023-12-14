@@ -57,8 +57,8 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HopperBulletEnv-v0",
         help="the id of the environment")
-    parser.add_argument("--reward_components", type=str, default="", nargs='+',  help="reward_components to change")
-    parser.add_argument("--reward_components_values", type=float, nargs='+', help="reward_components values")
+    parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
+    parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
 
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")

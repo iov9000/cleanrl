@@ -74,7 +74,7 @@ class AIRLDiscriminator(nn.Module):
         #else:
         f = lambda x: x
 
-        # reward function g_\psi
+        # reward function g_\psi (should be action independent)
         if self.use_cnn_base:
             self.base = MiniGridCNN(layer_dims, self.use_actions)
         elif self.is_atari:
