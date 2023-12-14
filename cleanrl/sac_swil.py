@@ -74,6 +74,9 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
+    parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
+    parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
+
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--buffer-size", type=int, default=int(1e6),
@@ -156,7 +159,7 @@ def parse_args():
     parser.add_argument('--irl_batch_size', default=64, type=int, required=False, help='batch size for discriminator updates')
     parser.add_argument('--irl_init_epochs', default=1  , type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
-    parser.add_argument('--swil_period', default=1, type=float, required=False, help='number of discriminator updates')
+    parser.add_argument('--swil_period', default=100, type=float, required=False, help='number of discriminator updates')
 
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--lip_p', default=1, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
@@ -205,7 +208,7 @@ def parse_args():
 
     return args, non_default
 
-def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos):
+def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos, env_kwargs):
     def thunk():
         if 'Adroit' in env_id:
             env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
@@ -214,7 +217,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos):
             env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'], render_mode='rgb_array')
             env = FrankaObsWrapper(env)
         else:
-            env = gym.make(env_id, render_mode='rgb_array')        
+            env = gym.make(env_id, render_mode='rgb_array', **env_kwargs)        
 
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
@@ -381,6 +384,10 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
+    env_kwargs = {}
+    for i, comp in enumerate(args.env_kwargs):
+        env_kwargs[comp] = args.env_kwargs_values[i]
+
     demos = load_hf_demos(args, n_demos=args.n_demos)
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
@@ -397,7 +404,7 @@ if __name__ == "__main__":
     disc = SWILDiscriminator(test_env, args)
 
     # env setup
-    envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, disc, demos)])
+    envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, disc, demos, env_kwargs)])
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     max_action = float(envs.single_action_space.high[0])
@@ -608,7 +615,7 @@ if __name__ == "__main__":
                 use_curr_traj_only = args.use_curr_traj_only
                 if irl_condition and global_step < args.max_swil_step:
                     for epoch in range(n_irl_epochs):            
-                        # GAIL Discriminator Update 
+                        # SWIL Discriminator Update 
                         gen_demos = demos_gen_dict(demos['all'], args.batch_size)
                         for d in gen_demos:
                             if len(d['obs']) < args.batch_size:

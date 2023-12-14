@@ -333,7 +333,8 @@ class MovePoint(Env):
 class MoveP(Env):
     metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
 
-    def __init__(self, init_pos=(10,10), waypoints=[(175, 175)], shape=(200,200), random_init=False, goal_conditioning=True, render_mode="rgb_array"):
+    def __init__(self, init_pos=(10,30), waypoints=[(100, 30), (190, 30)], shape=(200,60), 
+                random_init=False, goal_conditioning=True, render_mode="rgb_array"):
         super(MoveP, self).__init__()
         
         self.goal_conditioning = goal_conditioning
@@ -413,6 +414,19 @@ class MoveP(Env):
     
     def clamp(self, n, minn, maxn):
         return max(min(maxn, n), minn)
+
+    def get_reward_grid(self):
+        x = np.arange(0,self.shape[0])
+        y = np.arange(0,self.shape[1])
+
+        grid = np.array(np.meshgrid(y,x))
+        point_list = np.reshape(grid, [2,-1]).T
+
+        grids = []
+        for wp in self.waypoints:
+            grids.append(np.concatenate([point_list, np.tile(wp, (point_list.shape[0],1))],-1))
+
+        return grids
 
     def get_reward(self, state, tgt = (175,175)):
         curr_tgt = np.array(tgt)
@@ -643,11 +657,12 @@ class CMoveP(Env):
             return data
 
 
-# continuous movepoint
+# continuous movepoint with obstacles
 class CMovePND(Env):
     metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
 
-    def __init__(self, waypoints, D=2, size=20, n_obstacles=1, random_init=False, goal_conditioning=True, render_mode="rgb_array"):
+    def __init__(self, waypoints, D=2, size=20, 
+            n_obstacles=1, random_init=False, goal_conditioning=True, render_mode="rgb_array"):
         super(CMovePND, self).__init__()
         
         self.dim = D
@@ -773,7 +788,8 @@ class CMovePND(Env):
             self.needs_reset = True
 
         return state, reward, self.term, self.trunc, {}
-                            
+                        
+
     def clamp(self, n, minn, maxn):
         return np.clip(n, minn, maxn)
 
@@ -800,6 +816,51 @@ class CMovePND(Env):
             data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
             data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
             return data
+
+
+def plot_reward(shape=(200,60), tgt_pos=(190,30), plot_value=False, env=None):
+    # generate grid w/ two different targets:
+    x = np.arange(0,shape[0])
+    y = np.arange(0,shape[1])
+
+    grid = np.array(np.meshgrid(y,x))
+    point_list = np.reshape(grid, [2,-1]).T
+    #point_list = grid
+
+    tgt_pos = np.array(tgt_pos)
+    grid_pos1 = np.concatenate([point_list, np.tile(tgt_pos, (point_list.shape[0],1))],1)
+
+    def dist_f(grid_pos):
+        return -(np.sqrt((grid_pos[:,0] - grid_pos[:,3])**2 + (grid_pos[:,1]-grid_pos[:,2])**2))
+
+    r_gt_1 = dist_f(grid_pos1)
+    r_gt_1 = r_gt_1.reshape(np.array(shape))
+
+    title = 'reward'
+
+    fig = plt.figure(figsize=(20,5))
+    ax1 = plt.subplot(121)
+    plt.pcolormesh(x,y,r_gt_1.T)
+    plt.colorbar()
+    plt.scatter(tgt_pos[0], tgt_pos[1], c='r')
+    plt.title(title + '_irl')
+    ax2 = plt.subplot(122)
+    plt.pcolor(x,y,r_gt_1.T)
+    plt.colorbar()
+    plt.scatter(tgt_pos[0], tgt_pos[1], c='r')
+    plt.title(title + '_gt')
+    
+    plt.tight_layout()
+
+    fig.canvas.draw()
+    data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+
+    image_from_plot = (data.reshape(fig.canvas.get_width_height()[::-1] + (3,)) / 255.0)
+    img = np.swapaxes(image_from_plot, 0, 2)
+    img = np.swapaxes(img, 1, 2)
+
+    return img
+          
 # # continuous movepoint
 # class CMoveP(Env):
 #     metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}

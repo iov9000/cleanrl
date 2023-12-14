@@ -7,6 +7,20 @@ from datetime import datetime
 from distutils.util import strtobool
 
 import gymnasium as gym
+
+gym.envs.register(
+     id='MoveP-v0',
+     entry_point='envs.envs2d:MoveP',
+     max_episode_steps=1000,
+)
+
+gym.envs.register(
+     id='CMoveP-v0',
+     entry_point='envs.envs2d:CMoveP',
+     max_episode_steps=1000,
+)
+
+
 import numpy as np
 #import pybullet_envs  # noqa
 import torch
@@ -59,6 +73,9 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
+    parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
+    parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
+
     parser.add_argument("--total-timesteps", type=int, default=3000000,
         help="total timesteps of the experiments")
     parser.add_argument("--buffer-size", type=int, default=int(1e6),
@@ -158,7 +175,7 @@ def parse_args():
     return args, non_default
 
 
-def make_env(opt, env_id, seed, idx, capture_video, run_name, agent, disc, demos):
+def make_env(opt, env_id, seed, idx, capture_video, run_name, agent, disc, demos, env_kwargs):
     def thunk():
         if 'Adroit' in env_id:
             env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
@@ -167,7 +184,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, agent, disc, demos
             env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'], render_mode='rgb_array')
             env = FrankaObsWrapper(env)
         else:
-            env = gym.make(env_id, render_mode='rgb_array')        
+            env = gym.make(env_id, render_mode='rgb_array', **env_kwargs)      
 
         if opt.use_absorb_wrapper:  # DAC
             env = AbsorbAfterDoneWrapper(env)
@@ -299,6 +316,10 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
+    env_kwargs = {}
+    for i, comp in enumerate(args.env_kwargs):
+        env_kwargs[comp] = args.env_kwargs_values[i]
+
     if args.diverse_demos is not None:
         demo_list = [f for f in os.listdir(args.demo_dir) if args.diverse_demos in f and args.env_id in f]
         print("-> Training on union of demos:", demo_list)
@@ -309,13 +330,14 @@ if __name__ == "__main__":
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
-    test_env = gym.make(args.env_id)
+    test_env = gym.make(args.env_id, **env_kwargs)
     actor = Actor(test_env).to(device)
 
     disc = AIRLDiscriminator(test_env, args)
 
     # env setup
-    envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, actor, disc, demos)])
+    envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, 
+                                            run_name, actor, disc, demos, env_kwargs)])
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     max_action = float(envs.single_action_space.high[0])
@@ -504,7 +526,7 @@ if __name__ == "__main__":
 
                             disc.update(loss)
 
-                            if global_step % args.logging_interval == 0:
+                            if (global_step+1) % args.logging_interval == 0:
                                 writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
                                 if args.irm_coeff > 0:
                                     writer.add_scalar('irl/airl_irm_loss', loss_dict['grad_penalty'], global_step)
@@ -516,7 +538,16 @@ if __name__ == "__main__":
 
                 #  evaluate at regular intervals and save
                 if global_step % args.eval_interval == 0:
-                    mu, std, d = evaluate_model(args, actor, device)
+                    mu, std, d = evaluate_model(args, actor, device, test_env)
+                    if 'CMove' in args.env_id and '_mud' in args.diverse_demos:
+                        import matplotlib.pyplot as plt
+                        rew_grid = test_env.get_reward_grid()
+                        rew = disc.reward(torch.tensor(rew_grid).to(device)).detach().numpy()
+                        fig = plt.figure(figsize=(20,5))
+                        plt.pcolormesh(rew_grid[0],rew_grid[1],rew.T)
+                        plt.colorbar()
+                        plt.savefig(f"runs/{run_name}/reward_{global_step}.png")
+
                     print(f"Evaluation at {global_step}: {mu}, {std}")
                     writer.add_scalar('eval/mu', mu, global_step)
                     writer.add_scalar('eval/std', std, global_step)

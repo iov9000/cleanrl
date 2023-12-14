@@ -705,6 +705,8 @@ def save_traj_dict(opt, env_name, env, model, device,
     if isinstance(nr_trajectories, list):
         nr_trajectories = nr_trajectories[0]
 
+    print("Evaluation deterministic", deterministic)
+
     cnt = 0
     ep_rew = []
     while cnt < nr_trajectories:

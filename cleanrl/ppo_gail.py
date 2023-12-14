@@ -60,9 +60,9 @@ def parse_args():
         help="the id of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
-    parser.add_argument("--logging_interval", type=int, default=128,
+    parser.add_argument("--logging_interval", type=int, default=500,
         help="logging interval")
-    parser.add_argument("--eval_interval", type=int, default=8192,
+    parser.add_argument("--eval_interval", type=int, default=10000,
         help="evaluation interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
@@ -78,7 +78,7 @@ def parse_args():
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # environment specific arguments
-    parser.add_argument('--normalize_obs', default=True, 
+    parser.add_argument('--normalize_obs', default=False, 
         action='store_false', required=False, help='normalize irl rewards')  
     parser.add_argument('--clip_action', default=True, 
         action='store_false', required=False, help='normalize irl rewards')  
@@ -95,7 +95,7 @@ def parse_args():
     parser.add_argument("--agent_size", type=int, default=64, help='actor-critic network size')
     parser.add_argument("--num-envs", type=int, default=1,
         help="the number of parallel game environments")
-    parser.add_argument("--num-steps", type=int, default=2048,
+    parser.add_argument("--num-steps", type=int, default=2000,
         help="the number of steps to run in each environment per policy rollout")
     parser.add_argument('--anneal_lr', default=True, required=False, 
         action='store_false', help='anneal policy lr')
@@ -351,6 +351,10 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
+    env_kwargs = {}
+    for i, comp in enumerate(args.env_kwargs):
+        env_kwargs[comp] = args.env_kwargs_values[i]
+
     if args.env_id == 'Lap-v0':
         demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
     else:
@@ -363,8 +367,11 @@ if __name__ == "__main__":
         test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
         test_env = FrankaObsWrapper(test_env)
     else:
-        test_env = gym.make(args.env_id)         
-        
+        test_env = gym.make(args.env_id, **env_kwargs)          
+
+    if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
+        test_env = gym.wrappers.ClipAction(test_env)
+
     if args.enhance_barys > 0:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(args, demos, test_env)
@@ -642,7 +649,9 @@ if __name__ == "__main__":
                 det = True
             else:
                 det = False
-            mu, std, d = evaluate_model(args, agent, device, test_env, deterministic = det, wrap_mujoco=args.test_eps > 0)
+            #mu, std, d = evaluate_model(args, agent, device, test_env, deterministic = det, wrap_mujoco=args.test_eps > 0)
+            mu, std, d = evaluate_model(args, agent, device, test_env, wrap_mujoco=args.test_eps > 0)
+
             print(f"Evaluation at {global_step}: {mu}, {std}")
             writer.add_scalar('eval/mu', mu, global_step)
             writer.add_scalar('eval/std', std, global_step)

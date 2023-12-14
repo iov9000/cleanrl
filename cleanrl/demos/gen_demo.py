@@ -1,7 +1,7 @@
 import sys
 import os
 import gymnasium as gym
-import pybullet
+# import pybullet
 #import gym
 import numpy as np
 from huggingface_sb3 import load_from_hub
@@ -56,7 +56,7 @@ def save_expert_traj(env_name, env, model, nr_trajectories=10, min_total_rew=100
     expert_traj = np.stack(expert_traj)
     np.save(filename, expert_traj)
 
-def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_rew=100):
+def save_expert_traj_dict(opt, env_name, env, model, nr_trajectories=10, min_total_rew=100, extraflag=''):
     num_steps = 0
     expert_obs = []
     expert_acs = []
@@ -75,9 +75,15 @@ def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_re
         episode_acs = []
         episode_rew = []
         episode_done = []
+        coinflip = np.random.rand() > 0.5
+        if opt.action_noise > 0 and coinflip:
+            noise = opt.action_noise
+        else:
+            noise = 0.0
 
         while not done:
             ac, _states = model.predict(ob)
+            ac = ac + np.random.randn(*ac.shape)*noise
             next_ob, reward, term, trunc, _ = env.step(ac)
             done = term or trunc
             
@@ -98,7 +104,7 @@ def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_re
             expert_rew.extend(episode_rew)
             expert_done.extend(episode_done)
 
-    filename = f"demo_hf_{env_name}_{nr_trajectories}.pkl" 
+    filename = f"demo_hf_{env_name}_{nr_trajectories}{extraflag}.pkl" 
     expert_obs = np.stack(expert_obs)
     expert_acs = np.stack(expert_acs)
     expert_rew = np.stack(expert_rew)
@@ -121,12 +127,15 @@ if __name__ == '__main__':
                         required=False, help="initial state perturbation")
     parser.add_argument("--epsdyn", default=0.0, type=float,
                         required=False, help="dynamics perturbation")
+    parser.add_argument("--action_noise", default=0.0, type=float,
+                        required=False, help="action perturbation")
     parser.add_argument("--perturb_parameter", default='body_mass', type=str, nargs='+',
                         required=False, help="specify which sim parameter to perturb")
     parser.add_argument('--record_video', default=False, required=False,
                         action='store_true', help='record video')
     parser.add_argument('--normalize_obs', default=False,
                         action='store_true', required=False, help='normalize obs')
+    parser.add_argument("--extraflag", type=str, default="", help="extraflag for name")
 
     args = parser.parse_args()
 
@@ -154,7 +163,7 @@ if __name__ == '__main__':
     env = gym.make(args.env_name)
     if args.normalize_obs:
         env = gym.wrappers.NormalizeObservation(env)
-    save_expert_traj_dict(args.env_name, env, model, args.nr_traj, args.min_rew)
+    save_expert_traj_dict(args, args.env_name, env, model, args.nr_traj, args.min_rew, args.extraflag)
 
 
     

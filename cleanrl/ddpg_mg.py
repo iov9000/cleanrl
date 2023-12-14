@@ -65,8 +65,8 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
-    parser.add_argument("--reward_components", type=str, default="", nargs='+',  help="reward_components to change")
-    parser.add_argument("--reward_components_values", type=float, nargs='+', help="reward_components values")
+    parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
+    parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
     
     # multigrid specific arguments
     parser.add_argument("--nstep_distribution", type=str, default='uniform', help="distribution over scales")
@@ -229,8 +229,8 @@ if __name__ == "__main__":
         torch.set_default_tensor_type(torch.FloatTensor)
 
     env_kwargs = {}
-    for i, comp in enumerate(args.reward_components):
-        env_kwargs[comp] = args.reward_components_values[i]
+    for i, comp in enumerate(args.env_kwargs):
+        env_kwargs[comp] = args.env_kwargs_values[i]
     # env setup
     envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, env_kwargs)])
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
