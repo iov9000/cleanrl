@@ -32,7 +32,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from irl.airl import AirlReward, AIRLDiscriminator
 from irl.utils import load_hf_demos, load_hf_demos_name, evaluate_model, prepare_batch_update_irl,\
-     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper, FrankaObsWrapper
+     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper, FrankaObsWrapper, MujocoTestWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -75,6 +75,7 @@ def parse_args():
         help="the id of the environment")
     parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
     parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
+    parser.add_argument('--perturb_dynamics', type=float, default=0.0, help="perturb dynamics") 
 
     parser.add_argument("--total-timesteps", type=int, default=3000000,
         help="total timesteps of the experiments")
@@ -185,6 +186,9 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, agent, disc, demos
             env = FrankaObsWrapper(env)
         else:
             env = gym.make(env_id, render_mode='rgb_array', **env_kwargs)      
+
+        if opt.perturb_dynamics > 0.0:
+            env = MujocoTestWrapper(env, eps0=0.0, epsdyn=opt.perturb_dynamics, params=['body_mass'])
 
         if opt.use_absorb_wrapper:  # DAC
             env = AbsorbAfterDoneWrapper(env)
@@ -331,6 +335,8 @@ if __name__ == "__main__":
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
     test_env = gym.make(args.env_id, **env_kwargs)
+    if args.perturb_dynamics > 0.0:
+        test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=['body_mass'])
     actor = Actor(test_env).to(device)
 
     disc = AIRLDiscriminator(test_env, args)
@@ -539,12 +545,16 @@ if __name__ == "__main__":
                 #  evaluate at regular intervals and save
                 if global_step % args.eval_interval == 0:
                     mu, std, d = evaluate_model(args, actor, device, test_env)
-                    if 'CMove' in args.env_id and '_mud' in args.diverse_demos:
+                    if 'Move' in args.env_id and 'mud' in args.diverse_demos:
                         import matplotlib.pyplot as plt
-                        rew_grid = test_env.get_reward_grid()
-                        rew = disc.reward(torch.tensor(rew_grid).to(device)).detach().numpy()
+                        rew_grid = test_env.get_reward_grid()[-1]
+                        rew_grid_t = torch.from_numpy(rew_grid).type(torch.get_default_dtype())
+                        rew = disc.reward(disc.base(rew_grid_t)).detach().numpy()
                         fig = plt.figure(figsize=(20,5))
-                        plt.pcolormesh(rew_grid[0],rew_grid[1],rew.T)
+                        rew = rew.reshape(test_env.shape)
+                        x_ = np.arange(0,test_env.shape[0])
+                        y_ = np.arange(0,test_env.shape[1])
+                        plt.pcolormesh(x_,y_,rew.T)
                         plt.colorbar()
                         plt.savefig(f"runs/{run_name}/reward_{global_step}.png")
 
