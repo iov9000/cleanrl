@@ -510,7 +510,8 @@ class MoveP(Env):
 class CMoveP(Env):
     metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
 
-    def __init__(self, waypoints=[(175, 175)], size=200, random_init=False, goal_conditioning=True, render_mode="rgb_array"):
+    def __init__(self, init_pos=(10,30), waypoints=[(100, 30), (190, 30)], shape=(200,60), 
+                random_init=False, goal_conditioning=True, render_mode="rgb_array"):
         super(CMoveP, self).__init__()
         
         self.goal_conditioning = goal_conditioning
@@ -520,10 +521,10 @@ class CMoveP(Env):
             dim = 2
 
         # Define a 2-D observation space (R^4)
-        self.size = size
+        self.shape = shape
         self.observation_shape = (dim)
         self.observation_space = spaces.Box(low = np.zeros(self.observation_shape), 
-                                            high = np.ones(self.observation_shape)*self.size,
+                                            high = np.ones(self.observation_shape)*np.max(self.shape),
                                             dtype = np.float32)
     
         self.action_space = spaces.Box(low = -3*np.ones((2,)), 
@@ -537,11 +538,12 @@ class CMoveP(Env):
         # Maximum episode length
         self.max_time = 1000
 
-        # Permissible area of helicper to be 
+        # Permissible area of agent to be 
         self.y_min = 0
         self.x_min = 0
-        self.y_max = self.size
-        self.x_max = self.size
+        self.x_max = self.shape[0]
+        self.y_max = self.shape[1]
+
         self.random_init = random_init
         
     def reset(self, seed=1, options=None):
@@ -556,8 +558,8 @@ class CMoveP(Env):
 
         # Determine a place to intialise the agent in
         if self.random_init:
-            x = random.randrange(int(self.size * 0.05), int(self.size * 0.10))
-            y = random.randrange(int(self.size * 0.15), int(self.size * 0.20))
+            x_noise = random.randrange(int(self.shape[0] * 0.05), int(self.shape[0] * 0.10))
+            y_noise = random.randrange(int(self.shape[1] * 0.15), int(self.shape[1] * 0.20))
         else:
             x = 10
             y = 10
@@ -594,6 +596,19 @@ class CMoveP(Env):
         reward = -(np.sqrt((state[0] - curr_tgt[0])**2 + (state[1]-curr_tgt[1])**2))
         
         return reward
+
+    def get_reward_grid(self):
+        x = np.arange(0,self.shape[0])
+        y = np.arange(0,self.shape[1])
+
+        grid = np.array(np.meshgrid(y,x))
+        point_list = np.reshape(grid, [2,-1]).T
+
+        grids = []
+        for wp in self.waypoints:
+            grids.append(np.concatenate([point_list, np.tile(wp, (point_list.shape[0],1))],-1))
+
+        return grids
 
     def step(self, action):
         # Assert that it is a valid action 

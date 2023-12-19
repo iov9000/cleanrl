@@ -985,6 +985,9 @@ class PrioritisedMultiStepReplayBuffer(MultiStepReplayBuffer):
                  nstep_distribution='beta',  # 'uniform', 'beta' or 'fix'
                  mode=False,
                  gamma=0.99,
+                 epsilon=1e-10,
+                 alpha=0.3,
+                 beta=0.5,
                  max_sample_attempts=1000,
                  extra_storage_types=None,
                  observation_dtype=np.uint8,
@@ -1036,6 +1039,9 @@ class PrioritisedMultiStepReplayBuffer(MultiStepReplayBuffer):
             reward_dtype=reward_dtype)
 
         self.sum_tree = SumTree(replay_capacity)
+        self.eps = epsilon
+        self.alpha = alpha
+        self.beta = beta
 
     def get_add_args_signature(self):
         """The signature of the add function.
@@ -1143,7 +1149,12 @@ class PrioritisedMultiStepReplayBuffer(MultiStepReplayBuffer):
         indices = transition[indices_index]
         # The parent returned an empty array for the probabilities. Fill it with the
         # contents of the sum tree.
-        transition[probabilities_index][:] = self.get_priority(indices)
+        priorities = self.get_priority(indices)
+        probs = priorities / self.sum_tree._total_priority()  # TODO: not sure if this already done or not.
+        weights = (self._replay_capacity * probs) ** (-self.beta)
+        # weights = priorities ** (-self.beta)
+        weights /= weights.max()
+        transition[probabilities_index][:] = weights
         return transition
 
     def set_priority(self, indices, priorities):
@@ -1158,6 +1169,9 @@ class PrioritisedMultiStepReplayBuffer(MultiStepReplayBuffer):
                                            'given: {}'.format(indices.dtype))
         # Convert JAX arrays to NumPy arrays first, since it is faster to iterate
         # over the entirety of a NumPy array than a JAX array.
+
+        priorities = priorities.cpu().numpy()
+        priorities = (priorities + self.eps) ** self.alpha
         priorities = np.asarray(priorities)
         for index, priority in zip(indices, priorities):
             self.sum_tree.set(index, priority)

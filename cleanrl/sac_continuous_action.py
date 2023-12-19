@@ -239,8 +239,8 @@ if __name__ == "__main__":
         torch.set_default_tensor_type(torch.FloatTensor)
 
     env_kwargs = {}
-    for i, comp in enumerate(args.reward_components):
-        env_kwargs[comp] = args.reward_components_values[i]
+    for i, comp in enumerate(args.env_kwargs):
+        env_kwargs[comp] = args.env_kwargs_values[i]
 
     # env setup
     envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, env_kwargs)])

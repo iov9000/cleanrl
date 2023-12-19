@@ -51,9 +51,9 @@ def parse_args():
         help="the id of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
-    parser.add_argument("--logging_interval", type=int, default=128,
+    parser.add_argument("--logging_interval", type=int, default=500,
         help="logging interval")
-    parser.add_argument("--eval_interval", type=int, default=8192,
+    parser.add_argument("--eval_interval", type=int, default=10000,
         help="evaluation interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
@@ -89,7 +89,7 @@ def parse_args():
     parser.add_argument("--agent_size", type=int, default=64, help='actor-critic network size')
     parser.add_argument("--num-envs", type=int, default=1,
         help="the number of parallel game environments")
-    parser.add_argument("--num-steps", type=int, default=2048,
+    parser.add_argument("--num-steps", type=int, default=2000,
         help="the number of steps to run in each environment per policy rollout")
     parser.add_argument('--anneal_lr', default=True, required=False, 
         action='store_false', help='anneal policy lr')
@@ -534,8 +534,8 @@ if __name__ == "__main__":
                     actions_ = actions
                     dones_ = dones
                 if args.env_id == "MoveP-v0":
-                    plt.scatter(10, 10, s=200, c='b', marker='o',alpha=1.0)
-                    plt.scatter(190, 190, s=200, c='r', marker='*', alpha=1.0)
+                    plt.scatter(10, 30, s=200, c='b', marker='o',alpha=1.0)
+                    plt.scatter(190, 30, s=200, c='r', marker='*', alpha=1.0)
                     plt.scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
                     plt.scatter(obs_[:,:,0], obs_[:,:,1], s=20, c='m', alpha=0.3, label='agent')
                     plt.axis('equal')
@@ -591,10 +591,13 @@ if __name__ == "__main__":
             if 'Move' in args.env_id and 'mud' in args.diverse_demos:
                 import matplotlib.pyplot as plt
                 rew_grid = test_env.get_reward_grid()[-1]
-                print(rew_grid.shape, disc.base)
-                rew = disc.reward(disc.base(torch.tensor(rew_grid).to(device))).detach().numpy()
+                rew_grid_t = torch.from_numpy(rew_grid).type(torch.get_default_dtype())
+                rew = disc.reward(disc.base(rew_grid_t)).detach().numpy()
                 fig = plt.figure(figsize=(20,5))
-                plt.pcolormesh(rew_grid[0],rew_grid[1],rew.T)
+                rew = rew.reshape(test_env.shape)
+                x_ = np.arange(0,test_env.shape[0])
+                y_ = np.arange(0,test_env.shape[1])
+                plt.pcolormesh(x_,y_,rew.T)
                 plt.colorbar()
                 plt.savefig(f"runs/{run_name}/reward_{global_step}.png")
             print(f"Evaluation at {global_step}: {mu}, {std}")

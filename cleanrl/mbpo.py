@@ -349,7 +349,7 @@ if __name__ == "__main__":
             for model_learn_step in range(args.model_learn_steps):
                 data = rb.sample(args.batch_size)
                 model_next_obs, rew = dynamics.get_sample(data.observations, data.actions)
-                obs_loss = F.mse_loss(model_next_obs, data.observations)
+                obs_loss = F.mse_loss(model_next_obs, data.next_observations)
                 rew_loss = F.mse_loss(rew.squeeze(), data.rewards)
                 model_loss = obs_loss + rew_loss
                 # update value
