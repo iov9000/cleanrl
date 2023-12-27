@@ -24,7 +24,8 @@ if __name__ == '__main__':
     envs = ['Ant-v3', 'Walker2d-v3', 'Hopper-v3', 'HalfCheetah-v3', 'Humanoid-v3']
     n_demos = [1,4,10]
     use_acs = ['']
-    ent_coeffs = [0.01, 0.2, 1.0]
+    lins = ['--use_target', '']
+    alphas = [0.01, 0.2, 1.0]
     # lip_coeff = ['--use_actions']
     MEM_PER_CPU = 8000
     GPU_PER_CPU = 1
@@ -34,21 +35,20 @@ if __name__ == '__main__':
     for seed in seeds:
         for n_demo in n_demos:
             for algo in algos:
-                for alpha in alphas:
-                    for env_name in envs:
-                        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-                        ua_rbl = ua.replace(" ", "")
-                        lin_rbl = lin.replace(" ", "")
-                        exp_id = (f"{ts}_{algo}_{env_name}_seed_{seed}_{args.exp_id}_alpha{alpha}")
-                        euler_slurm = (f"sbatch --mem-per-cpu={MEM_PER_CPU} {gpu_string} " 
-                                    f"-o {args.output_dir / exp_id} "
-                                    f"--time={args.time}:00:00 --wrap ")
-                        # euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
-                        # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
-                        exp_cmd = (f"python {algo}.py --n_demos={n_demo} --alpha {alpha} "
-                                    f"--verbose --seed={seed} --env-id {env_name}")
-                        cluster_cmd = euler_slurm + exp_cmd 
-                        print("Running command: ", cluster_cmd)
-                        # subprocess.run(cluster_cmd, shell=True)
-                        subprocess.check_output(args=euler_slurm.split() + [exp_cmd])
+                for lin in lins:
+                    for alpha in alphas:
+                        for env_name in envs:
+                            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                            exp_id = (f"{ts}_{algo}_{env_name}_seed_{seed}_{args.exp_id}_alpha{alpha}_{lin}")
+                            euler_slurm = (f"sbatch --mem-per-cpu={MEM_PER_CPU} {gpu_string} " 
+                                        f"-o {args.output_dir / exp_id} "
+                                        f"--time={args.time}:00:00 --wrap ")
+                            # euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
+                            # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
+                            exp_cmd = (f"python {algo}.py --n_demos={n_demo} --alpha {alpha} "
+                                       f"--verbose --seed={seed} {lin} --env-id {env_name}")
+                            cluster_cmd = euler_slurm + exp_cmd 
+                            print("Running command: ", cluster_cmd)
+                            # subprocess.run(cluster_cmd, shell=True)
+                            subprocess.check_output(args=euler_slurm.split() + [exp_cmd])
 

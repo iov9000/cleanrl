@@ -96,7 +96,7 @@ def parse_args():
     parser.add_argument("--noise-clip", type=float, default=0.5,
         help="noise clip parameter of the Target Policy Smoothing Regularization")
     parser.add_argument("--alpha", type=float, default=0.5,
-            help="Entropy regularization coefficient.")
+          help="Entropy regularization coefficient.")
     parser.add_argument('--autotune', default=True, required=False, 
         action='store_false', help='autotune entropy')
     parser.add_argument('--use_target', default=False, required=False, 
@@ -485,7 +485,7 @@ if __name__ == "__main__":
                     with torch.no_grad():
                         next_V = getV(actor, (qf1_target, qf2_target), alpha, all_obs_next)
                 else:
-                    next_V = getV(actor, qf1, qf2, alpha, all_obs_next)
+                    next_V = getV(actor, qf1, alpha, all_obs_next)
                 current_Q1 = qf1(all_obs, all_actions)
                 current_Q2 = qf2(all_obs, all_actions)
                 q1_loss, loss_dict1 = iq_loss(actor, qf1, alpha, args.gamma, current_Q1, current_V, next_V, batch)
