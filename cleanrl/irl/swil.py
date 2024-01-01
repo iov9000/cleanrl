@@ -599,8 +599,8 @@ class SWILDiscriminator(nn.Module):
         exp_slices, _, _, _ = self.proj(obs_exp, acs_exp, nobs_exp, d_exp)
 
         # sort slices
-        pi_slices_sorted, pi_slices_sorted_idx = torch.sort(pi_slices, dim=0)
-        exp_slices_sorted, exp_slices_sorted_idx = torch.sort(exp_slices, dim=0)
+        pi_slices_sorted, pi_slices_sorted_idx = torch.sort(pi_slices, dim=0, stable=True)
+        exp_slices_sorted, exp_slices_sorted_idx = torch.sort(exp_slices, dim=0, stable=True)
         
         self.pi_atoms_sorted.append(pi_slices_sorted)
         self.exp_atoms_sorted.append(exp_slices_sorted)
@@ -757,8 +757,8 @@ class SWILDiscriminator(nn.Module):
                                 torch.ones(policy_out.size())])
 
             # sort slices for policy repl loss
-            pi_slices_sorted, pi_slices_sorted_idx = torch.sort(policy_out, dim=0)
-            exp_slices_sorted, exp_slices_sorted_idx = torch.sort(expert_out, dim=0)
+            pi_slices_sorted, pi_slices_sorted_idx = torch.sort(policy_out, dim=0, stable=True)
+            exp_slices_sorted, exp_slices_sorted_idx = torch.sort(expert_out, dim=0, stable=True)
 
             # save to FIFO queue of sorted atoms
             self.pi_atoms_sorted.append(pi_slices_sorted)
@@ -1007,7 +1007,7 @@ class SwilReward(gym.Wrapper):
         self.cnt = 0 
 
     def reset(self, seed=0, options=None):
-        obs, info = super().reset()
+        obs, info = super().reset(seed=self.opt.seed)
         self.cnt = 0
         return obs, info
 
@@ -1035,6 +1035,7 @@ class SwilReward(gym.Wrapper):
             #irl_reward = self.discriminator.get_reward(obs_t, acs_t, next_obs_t).cpu().numpy()
         self.obs = next_obs
         self.traj_.append(irl_reward)        
+        #print("GT: ", gt_reward, "IRL: ", irl_reward)
         if done:
             print("episode reward gt:", np.sum(np.array(self.traj)))
             print("episode reward irl:", np.sum(np.array(self.traj_)))

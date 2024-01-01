@@ -171,40 +171,12 @@ class MEIRLDiscriminator(nn.Module):
         self.reward = torch.clamp(d_out, min=-1.0*self.clamp_magnitude, max=self.clamp_magnitude)
         return self.reward
 
-    # lipschitz penalty
-    def lip_penalty(self, update_dict):
-        interp_inputs = []
-        for policy_input, expert_input in zip(update_dict['policy_obs'], update_dict['expert_obs']):
-            obs_epsilon = torch.rand(policy_input.shape)
-            interp_input = obs_epsilon * policy_input + (1 - obs_epsilon) * expert_input
-            interp_input.requires_grad = True  # For gradient calculation
-            interp_inputs.append(interp_input)
-        if self.use_actions:
-            action_epsilon = torch.rand(update_dict['policy_acs'].shape)
-
-            dones_epsilon = torch.rand(update_dict['policy_dones'].shape)
-            action_inputs = torch.cat(
-                [
-                    action_epsilon * update_dict['policy_acs']
-                    + (1 - action_epsilon) * update_dict['expert_acs'],
-                    dones_epsilon * update_dict['policy_dones'] +
-                    (1 - dones_epsilon) * update_dict['expert_dones'],
-                ],
-                dim=1,
-            )
-            action_inputs.requires_grad = True
-            hidden, _ = self.encoder(interp_inputs, action_inputs)
-            encoder_input = tuple(interp_inputs + [action_inputs])
-        else:
-            hidden, _ = self.encoder(interp_inputs)
-            encoder_input = tuple(interp_inputs)
-
-        estimate = self.forward(hidden).squeeze(1).sum()
-        gradient = torch.autograd.grad(estimate, encoder_input, create_graph=True)[0]
-        # Norm's gradient could be NaN at 0. Use our own safe_norm
-        safe_norm = (torch.sum(gradient ** 2, dim=1) + self.EPSILON).sqrt()
-        gradient_mag = torch.mean((safe_norm - 1) ** 2)
-        return gradient_mag
+    def irm_penalty(self, logits, y):
+        scale = torch.tensor(1.).requires_grad_()
+        #loss = F.binary_cross_entropy_with_logits(logits * scale, y)
+        loss = F.mse_loss(logits * scale, y)
+        grad = autograd.grad(loss, [scale], create_graph=True)[0]
+        return torch.sum(grad ** 2)
 
     def compute_grad_pen(self,
                          expert_state,
@@ -241,16 +213,85 @@ class MEIRLDiscriminator(nn.Module):
 
         #self.diff_loss = r_policy.mean() - torch.exp(r_expert).mean()
         self.diff_loss = r_policy.mean() - r_expert.mean()
-        self.grad_penalty = torch.norm(self.phi_expert-self.phi_policy)
-        self.loss = self.diff_loss + self.irm_coeff * self.grad_penalty
+        r_out = torch.cat([r_expert, r_policy], dim=0)
+
+        #self.grad_penalty = torch.norm(self.phi_expert-self.phi_policy)
+        self.grad_penalty = self.irm_penalty(r_policy, r_expert)
+
+        if self.opt.lip_coeff > 0:
+            lip_penalty, grad_mix = self.lip_penalty(update_dict, self.opt.lip_p)
+            grad_mix_norm = torch.norm(grad_mix)
+        else:
+            lip_penalty, grad_mix_norm = 0,0
+
+        self.loss = self.diff_loss + self.irm_coeff * self.grad_penalty + self.lip_coeff*lip_penalty
 
         output_dict = {}
         output_dict['total_loss'] = self.loss
         output_dict['d_loss'] = self.diff_loss
         output_dict['grad_penalty'] = self.grad_penalty
-        output_dict['lip_penalty'] = 0
+        output_dict['lip_penalty'] = lip_penalty
 
         return output_dict
+
+    def lip_penalty(self, update_dict, p=1):
+        policy_obs = update_dict['policy_obs']
+        policy_acs = update_dict['policy_acs']
+        policy_obs_next = update_dict['policy_obs_next']
+        policy_dones = update_dict['policy_dones']
+        exp_obs = update_dict['expert_obs']
+        exp_acs = update_dict['expert_acs']
+        exp_obs_next = update_dict['expert_obs_next']
+        exp_dones = update_dict['expert_dones']
+
+        if len(exp_obs.shape) != len(exp_dones.shape):
+            exp_dones = torch.unsqueeze(exp_dones, -1)
+
+        if len(policy_obs.shape) != len(policy_dones.shape):
+            policy_dones = torch.unsqueeze(policy_dones, -1)
+
+        obs_epsilon = torch.rand(policy_obs.shape)
+        interp_obs = obs_epsilon * policy_obs + (1 - obs_epsilon) * exp_obs
+        interp_obs.requires_grad = True  # For gradient calculation
+        
+        input_ = [interp_obs]
+        if self.use_actions:
+            acs_epsilon = torch.rand(policy_acs.shape)
+            interp_acs = acs_epsilon * policy_acs + (1 - acs_epsilon) * exp_acs
+            interp_acs.requires_grad = True  # For gradient calculation
+            input_.append(interp_acs)
+
+        if self.use_next_obs:
+            nobs_epsilon = torch.rand(policy_obs_next.shape)
+            interp_next_obs = nobs_epsilon * policy_obs_next + (1 - nobs_epsilon) * exp_obs_next
+            interp_next_obs.requires_grad = True  # For gradient calculation
+            input_.append(interp_next_obs)
+        if self.use_dones:
+            d_epsilon = torch.rand(policy_dones.shape)
+            interp_d = d_epsilon * policy_dones + (1 - d_epsilon) * exp_dones
+            interp_d.requires_grad = True  # For gradient calculation
+            input_.append(interp_d)
+
+        estimate, phi = self.forward(*input_)
+
+        # policy_obs = update_dict['policy_obs']
+        # expert_obs = update_dict['expert_obs']
+        # policy_obs.requires_grad = True
+        # expert_obs.requires_grad = True
+
+        gradient_mix = torch.autograd.grad(estimate.sum(), input_, create_graph=True)[0]
+        # gradient_p = torch.autograd.grad(
+        #     estimate.sum(), policy_obs, create_graph=True)[0]
+        # gradient_e = torch.autograd.grad(
+        #     estimate.sum(), expert_obs, create_graph=True)[0]
+
+        # Norm's gradient could be NaN at 0. Use our own safe_norm
+        safe_norm = (torch.sum(gradient_mix ** 2, dim=1) + 1e-8).sqrt()
+        # L1
+        gradient_mag = torch.mean((safe_norm - p) ** 2)
+
+        return gradient_mag, gradient_mix #, gradient_e, gradient_p
+
 
     def update(self, loss):
         self.d_optimizer.zero_grad()
