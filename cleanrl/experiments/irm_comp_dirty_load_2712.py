@@ -27,13 +27,15 @@ if __name__ == '__main__':
     irm_coeffs = [0.0, 0.1, 1.0, 10.0, 100.0]
     lip_coeffs = [0.0, 1.0, 10.0]
     disc_nonlins = ['tanh']
-    usenobs = ['', '--']
+    usenobs = ['']
     MEM_PER_CPU = 8000
     GPU_PER_CPU = 1
     gpu_string = f"--gpus={GPU_PER_CPU} " if args.gpu else ""
     # f"--gpus=gtx_1080:1 "
+
+    run_folder = '2912_200kRun'
     
-    runs = [f for f in os.listdir('./runs/2012_irm')] 
+    runs = [f for f in os.listdir(f"./runs/{run_folder}")] 
 
     for seed in seeds:
         for lin in lins:
@@ -47,26 +49,29 @@ if __name__ == '__main__':
 
                                     disc_folders = []
                                     for run_name in runs:
-                                        if env_name in run_name and f"irm{irm_c}" in run_name and f"lip{lip_c}" in run_name and seed in run_name:
+                                        if env_name in run_name and f"irm{irm_c}" in run_name and f"lip{lip_c}" in run_name and str(seed) in run_name:
                                             disc_folders.append(run_name)
 
                                     disc_folder = disc_folders[-1]
-                                    print(disc_folder)
+                                    print(os.listdir(f"runs/{run_folder}/{disc_folder}"))
+                                    if 'disc.pt' in os.listdir(f"runs/{run_folder}/{disc_folder}"):
                                     
-                                    # ua_rbl = ua.replace(" ", "")
-                                    # lin_rbl = lin.replace(" ", "")
-                                    exp_id = (f"{ts}_{algo}_{disc}_{env_name}_seed_{seed}_{args.exp_id}_irm{irm_c}_lip{lip_c}")
-                                    euler_slurm = (f"sbatch --mem-per-cpu={MEM_PER_CPU} {gpu_string} " 
-                                                f"-o {args.output_dir / exp_id} "
-                                                f"--time={args.time}:00:00 --wrap ")
-                                    euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
-                                    # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
-                                    exp_cmd = (f"python {algo}_{disc}.py "
-                                              f"{lin} --verbose --seed={seed} --env-id {env_name} {ua} --diverse_demos dirty "
-                                              f"--irm_coeff {irm_c} --lip_coeff {lip_c} "
-                                              f"--load_disc {disc_folder} --disc_update_period 1000000")
-                                    cluster_cmd = euler_slurm + exp_cmd 
-                                    print("Running command: ", cluster_cmd)
-                                    # subprocess.run(cluster_cmd, shell=True)
-                                    subprocess.check_output(args=euler_slurm.split() + [exp_cmd])
+                                      # ua_rbl = ua.replace(" ", "")
+                                      # lin_rbl = lin.replace(" ", "")
+                                      exp_id = (f"{ts}_{algo}_{disc}_{env_name}_seed_{seed}_{args.exp_id}_irm{irm_c}_lip{lip_c}")
+                                      euler_slurm = (f"sbatch --mem-per-cpu={MEM_PER_CPU} {gpu_string} " 
+                                                  f"-o {args.output_dir / exp_id} "
+                                                  f"--time={args.time}:00:00 --wrap ")
+                                      euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
+                                      # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
+                                      exp_cmd = (f"python {algo}_{disc}.py "
+                                                f"{lin} --verbose --seed={seed} --env-id {env_name} {ua} --diverse_demos dirty "
+                                                f"--irm_coeff {irm_c} --lip_coeff {lip_c} "
+                                                f"--load_disc runs/{run_folder}/{disc_folder} --disc_update_period 1000000")
+                                      cluster_cmd = euler_slurm + exp_cmd 
+                                      print("Running command: ", cluster_cmd)
+                                      # subprocess.run(cluster_cmd, shell=True)
+                                      subprocess.check_output(args=euler_slurm.split() + [exp_cmd])
+                                    else:
+                                      print("No saved disc for ", disc_folder)
 

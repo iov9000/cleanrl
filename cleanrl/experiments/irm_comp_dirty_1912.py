@@ -50,7 +50,7 @@ if __name__ == '__main__':
                                                 f"--time={args.time}:00:00 --wrap ")
                                     euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
                                     # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
-                                    exp_cmd = (f"python {algo}_{disc}.py "
+                                    exp_cmd = (f"python {algo}_{disc}.py --total-timesteps 200000 "
                                               f"{lin} --verbose --seed={seed} --env-id {env_name} {ua} --diverse_demos dirty "
                                               f"--irm_coeff {irm_c} --lip_coeff {lip_c}")
                                     cluster_cmd = euler_slurm + exp_cmd 
