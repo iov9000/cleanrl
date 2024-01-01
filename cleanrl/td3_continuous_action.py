@@ -15,6 +15,7 @@ import torch.optim as optim
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
+from irl.utils import FrankaObsWrapper, evaluate_model
 
 def parse_args():
     # fmt: off

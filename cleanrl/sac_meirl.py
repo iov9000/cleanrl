@@ -146,6 +146,8 @@ def parse_args():
         action='store_true', help='use spectral_norm')
     parser.add_argument('--use_absorb_wrapper', default=False, required=False, 
         action='store_true', help='use_absorb_wrapper')
+    parser.add_argument('--identity_features', default=False, required=False, 
+        action='store_true', help='use state space features directly')
 
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")

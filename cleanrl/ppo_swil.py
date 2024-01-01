@@ -435,6 +435,7 @@ if __name__ == "__main__":
 
     init = True # flag for IRL discriminator pretraining
     cnt_on_policy_updates = 0
+    total_swil_updates = 0
     sw_dists = []
     for update in range(1, num_updates + 1):
         try:
@@ -571,18 +572,20 @@ if __name__ == "__main__":
             init = False
 
             # SWIL updates
-            print(cnt_on_policy_updates)
+            #print(">>>>>>>> MOD ", cnt_on_policy_updates%args.swil_period)
             if cnt_on_policy_updates % args.swil_period == 1:
                 if update % int(np.ceil(1/(n_irl_epochs+1))) == 0:
                     k = int(n_irl_epochs) if n_irl_epochs >=0 else 1
-                    print(k)
+                    total_swil_updates+=1
+                    #print(">>>>>>>> SWIL update")
+
                     for epoch in tqdm(range(k)):            
                         # GAIL Discriminator Update 
                         gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=args.shuffle_irl_batches)
                         if "MoveP-v0" in args.env_id:
                             fig, ax = plt.subplots(1,2,figsize=(10,5))
                         for d in gen_demos:
-                            print(len(d['obs']), obs.shape)
+                            #print(len(d['obs']), obs.shape)
                             if len(d['obs']) < args.batch_size:
                                 obs_ = obs[:len(d['obs'])]
                                 actions_ = actions[:len(d['obs'])]
@@ -701,7 +704,8 @@ if __name__ == "__main__":
     #mu, std, d = evaluate_model(args, agent, device, test_env, deterministic = det)   
     mu, std, d = evaluate_model(args, agent, device, test_env)   
 
-                
+    print("Total SWIL updates: ", total_swil_updates)
+
     writer.add_scalar('eval/mu', mu, args.total_timesteps)
     writer.add_scalar('eval/std', std, args.total_timesteps)
 
