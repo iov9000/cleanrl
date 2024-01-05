@@ -168,8 +168,12 @@ class AIRLDiscriminator(nn.Module):
         reward, fitted_value, fitted_value_n, d_out = self.forward(
             ob, next_ob, ac, lprobs)
         
-        if self.opt.d_out_reward:
+        if self.opt.airl_reward_type == 'disc':
             return torch.squeeze(torch.log(torch.sigmoid(d_out) + 1e-8) - torch.log(1-torch.sigmoid(d_out) + 1e-8))
+        elif self.opt.airl_reward_type == 'shaping_term':
+            return fitted_value
+        elif self.opt.airl_reward_type == 'shaped_reward':
+            return reward + self.gamma*fitted_value_n
         else:
             return reward# + self.gamma*fitted_value_n
 

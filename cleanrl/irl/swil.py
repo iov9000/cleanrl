@@ -774,6 +774,7 @@ class SWILDiscriminator(nn.Module):
                 irm_pen = 0
             #surr_loss = torch.sum(self.proj(self.policy_obs, self.policy_acs)) - torch.sum(self.proj(exp_obs,exp_acs)) 
             d_loss = bce_loss
+            print(d_loss)
         elif self.opt.swil_loss == 'approx_sw':
             obs = self.policy_obs
             acs = self.policy_acs

@@ -76,6 +76,8 @@ def parse_args():
     # MBPO specific arguments
     parser.add_argument("--dyn_lr", type=float, default=3e-4,
         help="the learning rate of the model network optimizer")
+    parser.add_argument("--model_ensemble_size", type=int, default=7,
+        help="number of models in the ensemble")
     parser.add_argument("--n_epochs", type=int, default=100,
         help="number of epochs (N)")
     parser.add_argument("--model_learn_steps", type=int, default=1,
@@ -101,7 +103,7 @@ def parse_args():
         if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
     }
 
-    return args, non_default
+    return args, non_default    
 
 
 def make_env(env_id, seed, idx, capture_video, run_name):
@@ -181,6 +183,7 @@ class DynamicsModel(nn.Module):
 class ModelEnsemble(nn.Module):
     def __init__(self, env, opt, n=7):
         super().__init__()
+        n = opt.model_ensemble_size
 
         self.model_list = nn.ModuleList()
         for i in range(n):

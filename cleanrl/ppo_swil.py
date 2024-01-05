@@ -578,6 +578,7 @@ if __name__ == "__main__":
                     k = int(n_irl_epochs) if n_irl_epochs >=0 else 1
                     total_swil_updates+=1
                     #print(">>>>>>>> SWIL update")
+                    print(len(demos['all']['obs']), obs.shape)
 
                     for epoch in tqdm(range(k)):            
                         # GAIL Discriminator Update 

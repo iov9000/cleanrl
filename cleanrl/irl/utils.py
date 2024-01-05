@@ -624,8 +624,10 @@ class MujocoTestWrapper(gym.Wrapper):
         self.epsdyn = epsdyn
         self.default_params = {}
         # save default simulation parameters
+        print(dir(self.env.model))
         for p in params:
             self.default_params[p] = np.array(getattr(self.env.model, p))
+
 
         #print(dir(self.env.model))
         self.perturb_init(eps0)
@@ -649,8 +651,8 @@ class MujocoTestWrapper(gym.Wrapper):
         param = np.array(getattr(self.env.model, parameter))
         param_mod = param + np.random.randn(*param.shape)*self.epsdyn
 
-        #print(
-        #    f">> Perturbed parameter {parameter}, default: {self.default_params[parameter]}, changed: {param_mod}")
+        print(
+            f">> Perturbed parameter {parameter}, default: {self.default_params[parameter]}, changed: {param_mod}")
         # assign new value
         getattr(self.env.model, parameter)[:] = param_mod
 

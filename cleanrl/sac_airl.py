@@ -76,6 +76,7 @@ def parse_args():
     parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
     parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
     parser.add_argument('--perturb_dynamics', type=float, default=0.0, help="perturb dynamics") 
+    parser.add_argument("--perturb_parameters", type=str, default=['body_mass'], nargs='+', help="which dynamics params to perturb")
 
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
@@ -135,7 +136,7 @@ def parse_args():
     parser.add_argument("--irm_loss_type", type=str, default="sym", help="e1,e0,p0,p1,sym")
 
     parser.add_argument('--airl_resnet', default=False, action='store_true', help='use resnet for discriminator')
-    parser.add_argument('--d_out_reward', default=False, action='store_true', help='use d_out_reward')    
+    parser.add_argument('--airl_reward_type', default='reward_term', action='store_true', help='options: disc/shaping_term/shaped_reward/reward_term')    
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
@@ -188,7 +189,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, agent, disc, demos
             env = gym.make(env_id, render_mode='rgb_array', **env_kwargs)      
 
         if opt.perturb_dynamics > 0.0:
-            env = MujocoTestWrapper(env, eps0=0.0, epsdyn=opt.perturb_dynamics, params=['body_mass'])
+            env = MujocoTestWrapper(env, eps0=0.0, epsdyn=opt.perturb_dynamics, params=opt.perturb_parameters)
 
         if opt.use_absorb_wrapper:  # DAC
             env = AbsorbAfterDoneWrapper(env)
@@ -337,7 +338,7 @@ if __name__ == "__main__":
     # get env specs
     test_env = gym.make(args.env_id, **env_kwargs)
     if args.perturb_dynamics > 0.0:
-        test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=['body_mass'])
+        test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
     actor = Actor(test_env).to(device)
 
     disc = AIRLDiscriminator(test_env, args)
