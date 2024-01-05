@@ -21,7 +21,7 @@ if __name__ == '__main__':
     # lins = ['--use_spectral_norm', '--use_weight_norm']
     lins = ['--perturb_dynamics=0.1']
     # pps = ['body_mass', 'jnt_range', 'actuator_ctrlrange', '']
-    pps = ['jnt_range', 'actuator_ctrlrange', 'geom_friction']
+    pps = ['jnt_range', 'actuator_ctrlrange', 'geom_friction']
     # lins = ['--use_weight_norm --linear_proj']
     # usenobs = ['--use_next_obs', '', '--use_next_obs --use_dones']
     # usenobs = ['--use_next_obs', '', '--use_next_obs --use_dones']
@@ -69,7 +69,7 @@ if __name__ == '__main__':
                                             # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
                                             exp_cmd = (f"python {algo}_{disc}.py "
                                                         f"{lin} --verbose --seed={seed} --env-id {env_name} {ua} --diverse_demos dirty "
-                                                        f"--irm_coeff {irm_c} --lip_coeff {lip_c} --perturb_parameters {pp}"
+                                                        f"--irm_coeff {irm_c} --lip_coeff {lip_c} --perturb_parameters {pp} "
                                                         f"--load_disc runs/{run_folder}/{disc_folder} --disc_update_period 1000000")
                                             cluster_cmd = euler_slurm + exp_cmd 
                                             print("Running command: ", cluster_cmd)
