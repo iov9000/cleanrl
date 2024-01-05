@@ -210,6 +210,15 @@ class MultiStepReplayBuffer(object):
         self._a, self._b = 10, 1
         self._total_steps = 0
 
+        # UCB optimism in face of uncertainty to choose the best n-step
+        self.ucb_mean = np.zeros(self._max_nstep)
+        self.ucb_std = np.zeros(self._max_nstep)
+        self.ucb_nstep_count = np.zeros(self._max_nstep)
+        self.ucb_second_nstep_count = np.zeros(self._max_nstep)
+        self.ucb = np.zeros(self._max_nstep)
+        self._ucb_total_steps = 0
+        self._ucb_lambda = 0.1
+
     def update_nstep(self, new_nstep):
         self._update_horizon = new_nstep
 
@@ -219,6 +228,61 @@ class MultiStepReplayBuffer(object):
         num_time_steps = 1000000
         increment = (end_value - start_value) / num_time_steps
         self._b = start_value + self._total_steps * increment
+
+    def update_mean_std(self, avg, std, nstep):
+        nstep = nstep - 1
+        # self.ucb_mean[nstep] = np.mean(avg + self.ucb_mean[nstep] * 0.9)
+        # self.ucb_std[nstep] = np.mean(std + self.ucb_std[nstep] * 0.9)
+
+        self.ucb_mean[nstep] = avg + self.ucb_mean[nstep] * 0.0
+        self.ucb_std[nstep] = std + self.ucb_std[nstep] * 0.0
+
+        # self.ucb_mean[nstep] = avg
+        # self.ucb_std[nstep] = std
+
+    def _ucb_nstep_for_indices(self, indices):
+        if np.any(self.ucb_second_nstep_count < 10):
+
+            start_range = self._ucb_total_steps % self._max_nstep + 1
+            nsteps = np.tile(
+                np.arange(start_range, self._max_nstep + 1),
+                np.ceil(len(indices) / self._max_nstep))
+            nsteps = nsteps[:len(indices)]
+            for nstep in nsteps:
+                self.ucb_nstep_count[nstep - 1] += 1
+                self.ucb_second_nstep_count[nstep - 1] += 1
+            self._ucb_total_steps += len(indices)
+            return nsteps
+        else:
+            nsteps = []
+            for _ in indices:
+                self.ucb = np.sqrt(2 * np.log(
+                    self._ucb_total_steps) / self.ucb_nstep_count)
+
+                # nstep = np.argmin(self.ucb_std) + 1
+                # nstep = np.argmin(-self.ucb_mean + self.ucb_std) + 1
+                # nstep = np.argmin(-self.ucb + self.ucb_std) + 1
+                # nstep = np.argmax(self.ucb_mean - 1.0 * self.ucb_std) + 1
+
+                ucb = self.ucb - self.ucb_std
+                # ucb = - self.ucb_std * self.ucb
+                # ucb = self.ucb_mean + self.ucb * self.ucb_std
+                # ucb = self.ucb + self.ucb_std
+                nstep = np.argmax(ucb) + 1
+
+
+                # nstep = np.random.normal(nstep, 1)
+                # nstep = np.clip(nstep, 1, self._max_nstep)
+                # nstep = np.floor(nstep).astype(np.int32)
+
+                nsteps.append(nstep)
+                self.ucb_nstep_count[nsteps[-1] - 1] += 1
+                self.ucb_second_nstep_count[nsteps[-1] - 1] += 1
+                self._ucb_total_steps += len(indices)
+
+            if self._ucb_total_steps % 50000 == 0:
+                self.ucb_second_nstep_count = np.zeros(self._max_nstep)
+            return np.array(nsteps)
 
     def _sample_nstep_for_indices(self, indices):
         """For each index in `indices` sample a different n as its
@@ -234,6 +298,8 @@ class MultiStepReplayBuffer(object):
             self.anneal_beta_distribution()
             pdf = np.random.beta(self._a, self._b, size=len(indices))
             return np.floor(pdf * self._max_nstep).astype(np.int32) + 1
+        elif self._nstep_distribution == "ucb":
+            return self._ucb_nstep_for_indices(indices)
         else:
             raise ValueError("Unknown nstep_distribution: {}".format(
                 self._nstep_distribution))
@@ -579,10 +645,12 @@ class MultiStepReplayBuffer(object):
         indices = []
         nsteps = []
         attempt_count = 0
+        nstep = None
         while (len(indices) < batch_size and
                attempt_count < self._max_sample_attempts):
             index = np.random.randint(min_id, max_id) % self._replay_capacity
-            nstep = self._sample_nstep_for_indices([index])[0]
+            if nstep is None:
+                nstep = self._sample_nstep_for_indices([index])[0]
             if self.is_valid_transition(index, nstep):
                 indices.append(index)
                 nsteps.append(nstep)
@@ -1102,8 +1170,10 @@ class PrioritisedMultiStepReplayBuffer(MultiStepReplayBuffer):
         indices = self.sum_tree.stratified_sample(batch_size)
         allowed_attempts = self._max_sample_attempts
         nsteps = []
+        nstep = None
         for i in range(len(indices)):
-            nstep = self._sample_nstep_for_indices([indices[i]])[0]
+            if nstep is None:
+                nstep = self._sample_nstep_for_indices([indices[i]])[0]
             if not self.is_valid_transition(indices[i], nstep):
                 if allowed_attempts == 0:
                     raise RuntimeError(
@@ -1116,7 +1186,7 @@ class PrioritisedMultiStepReplayBuffer(MultiStepReplayBuffer):
                     # If index i is not valid keep sampling others. Note that this
                     # is not stratified.
                     index = self.sum_tree.sample()
-                    nstep = self._sample_nstep_for_indices([index])[0]
+                    # nstep = self._sample_nstep_for_indices([index])[0]
                     allowed_attempts -= 1
                 indices[i] = index
             nsteps.append(nstep)
