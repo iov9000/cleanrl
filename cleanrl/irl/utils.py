@@ -427,7 +427,6 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy, co
             torch.get_default_dtype())        
         all_acs_t = torch.cat([torch.zeros_like(acs_t), acs_t], axis=0)
 
-
     all_dones_t = torch.cat([expert_dones_t, policy_dones_t], axis=0)
 
     if torch.cuda.is_available():
