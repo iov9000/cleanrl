@@ -136,7 +136,7 @@ def parse_args():
     parser.add_argument("--irm_loss_type", type=str, default="sym", help="e1,e0,p0,p1,sym")
 
     parser.add_argument('--airl_resnet', default=False, action='store_true', help='use resnet for discriminator')
-    parser.add_argument('--airl_reward_type', default='reward_term', action='store_true', help='options: disc/shaping_term/shaped_reward/reward_term')    
+    parser.add_argument('--airl_reward_type', default='reward_term', type=str, help='options: disc/shaping_term/shaped_reward/reward_term')    
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
