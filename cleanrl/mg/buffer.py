@@ -97,7 +97,7 @@ class MultiStepReplayBuffer(object):
         end of an episode.
     """
 
-    def __init__(self,
+    def __init__(self, opt,
                  observation_shape,
                  stack_size,
                  replay_capacity,
@@ -190,6 +190,9 @@ class MultiStepReplayBuffer(object):
         self._observation_dtype = observation_dtype
         self._terminal_dtype = terminal_dtype
         self._max_sample_attempts = max_sample_attempts
+        self._ucb_reset_interval = opt.ucb_reset_interval
+        self._ucb_update_rule = opt.ucb_update_rule
+
         if extra_storage_types:
             self._extra_storage_types = extra_storage_types
         else:
@@ -241,7 +244,7 @@ class MultiStepReplayBuffer(object):
         # self.ucb_std[nstep] = std
 
     def _ucb_nstep_for_indices(self, indices):
-        if np.any(self.ucb_second_nstep_count < 10):
+        if np.any(self.ucb_second_nstep_count < 1):
 
             start_range = self._ucb_total_steps % self._max_nstep + 1
             nsteps = np.tile(
@@ -264,12 +267,20 @@ class MultiStepReplayBuffer(object):
                 # nstep = np.argmin(-self.ucb + self.ucb_std) + 1
                 # nstep = np.argmax(self.ucb_mean - 1.0 * self.ucb_std) + 1
 
-                ucb = self.ucb - self.ucb_std
+                # ucb = self.ucb - self.ucb_std
                 # ucb = - self.ucb_std * self.ucb
                 # ucb = self.ucb_mean + self.ucb * self.ucb_std
-                # ucb = self.ucb + self.ucb_std
-                nstep = np.argmax(ucb) + 1
+                # ucb = self.ucb_mean + self.ucb * self.ucb_std
 
+                # ucb = self.ucb + self.ucb_std
+                if self._ucb_update_rule == 'minvar':
+                  ucb = self.ucb_mean + self.ucb - self.ucb_std
+                elif self._ucb_update_rule == 'maxvar':
+                  ucb = self.ucb_mean + self.ucb - self.ucb_std
+                else:
+                  ucb = self.ucb - self.ucb_std
+
+                nstep = np.argmax(ucb) + 1
 
                 # nstep = np.random.normal(nstep, 1)
                 # nstep = np.clip(nstep, 1, self._max_nstep)
@@ -280,7 +291,7 @@ class MultiStepReplayBuffer(object):
                 self.ucb_second_nstep_count[nsteps[-1] - 1] += 1
                 self._ucb_total_steps += len(indices)
 
-            if self._ucb_total_steps % 50000 == 0:
+            if self._ucb_total_steps % self._ucb_reset_interval == 0:
                 self.ucb_second_nstep_count = np.zeros(self._max_nstep)
             return np.array(nsteps)
 

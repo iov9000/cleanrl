@@ -73,6 +73,8 @@ def parse_args():
     parser.add_argument("--ks", type=int, nargs='+', default=[1,10], help="multigrid scales")
     parser.add_argument("--mode", type=str, default='', required=False, help='mg or last')  
     parser.add_argument("--n_ensemble", type=int, default=10, help="ensemble size")
+    parser.add_argument("--ucb_reset_interval", type=int, default=50000, help="when to reset / update UCB arms")
+    parser.add_argument("--ucb_update_rule", type=str, default='minvar', required=False, help='minvar/maxvar/else')  
 
     parser.add_argument("--prioritized_replay", default=False, 
         action='store_true', required=False, help='prioritize buffer items based on td-error')
@@ -93,7 +95,7 @@ def parse_args():
         help="the scale of exploration noise")
     parser.add_argument("--learning-starts", type=int, default=25e3,
         help="timestep to start learning")
-    parser.add_argument("--policy-frequency", type=int, default=2,
+    parser.add_argument("--policy-frequency", type=int, default=1,
         help="the frequency of training policy (delayed)")
     parser.add_argument("--noise-clip", type=float, default=0.5,
         help="noise clip parameter of the Target Policy Smoothing Regularization")
@@ -313,7 +315,7 @@ if __name__ == "__main__":
     #         action_dtype=envs.single_action_space.dtype)
     envs.single_observation_space.dtype = np.float32
 
-    rb = MultiStepReplayBuffer(
+    rb = MultiStepReplayBuffer(args,
             observation_shape=envs.single_observation_space.shape,
             action_shape=envs.single_action_space.shape,
             stack_size=1,
@@ -428,10 +430,12 @@ if __name__ == "__main__":
                 rb.set_priority(data.indices, total_td_error)
 
             if global_step % args.policy_frequency == 0:
+                # get ensemble out
                 all_q_values = qf1(data.observations, actor(data.observations))
                 if isinstance(all_q_values, list):
                     all_q_values = torch.stack(all_q_values, dim=0)
 
+                # 
                 rb.update_mean_std(
                     all_q_values.mean().detach().numpy(),
                     all_q_values.std().detach().numpy(),
