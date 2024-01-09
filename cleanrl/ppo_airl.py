@@ -81,6 +81,8 @@ def parse_args():
         help="the id of the environment")
     parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
     parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
+    parser.add_argument('--perturb_dynamics', type=float, default=0.0, help="perturb dynamics") 
+    parser.add_argument("--perturb_parameters", type=str, default=['body_mass'], nargs='+', help="which dynamics params to perturb")
 
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
@@ -137,8 +139,7 @@ def parse_args():
     parser.add_argument('--airl_gamma', default=0.99, type=float, 
         required=False, help='gamma for AIRL advantage')
     parser.add_argument('--airl_resnet', default=False, action='store_true', help='use resnet for discriminator')
-    parser.add_argument('--d_out_reward', default=False, action='store_true', help='use d_out_reward')    
-
+    parser.add_argument('--airl_reward_type', default='reward_term', type=str, help='options: disc/shaping_term/shaped_reward/reward_term')    
 
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
@@ -148,7 +149,8 @@ def parse_args():
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
-    
+    parser.add_argument('--disc_update_period', default=-1, type=int, required=False, help='discriminator update period')
+
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
     parser.add_argument('--use_disc_bias', default=True, required=False, 
@@ -390,6 +392,8 @@ if __name__ == "__main__":
     num_updates = args.total_timesteps // args.batch_size
 
     for update in range(1, num_updates + 1):
+        irl_trigger = False
+
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
             frac = 1.0 - (update - 1.0) / num_updates
@@ -421,6 +425,7 @@ if __name__ == "__main__":
             for item in info:
                 # TODO: fix this for new Gymnasium
                 if "final_info" in item.keys():
+                    irl_trigger = True
                     if args.verbose:
                         print(
                             f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
@@ -513,62 +518,68 @@ if __name__ == "__main__":
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
-
+        
+        irl_condition = global_step % args.disc_update_period == 0
+        if args.disc_update_period == -1:
+            irl_condition = irl_trigger
+        
         # Optimize the discriminator
-        for epoch in range(args.irl_epochs):            
-            # GAIL Discriminator Update (exhaust demos)
-            gen_demos = demos_gen_dict(demos['all'], args.batch_size)
-            if args.env_id == "MoveP-v0":
-                fig = plt.figure(figsize=(10,10))
-
-            for d in gen_demos:
-                if len(d['obs']) < args.batch_size:
-                    if args.drop_batch:
-                        break
-                    else:
-                        obs_ = obs[:len(d['obs'])]
-                        actions_ = actions[:len(d['obs'])]
-                        dones_ = dones[:len(d['obs'])]
-                else:
-                    obs_ = obs
-                    actions_ = actions
-                    dones_ = dones
+        if irl_condition:
+            for epoch in range(args.irl_epochs):            
+                # GAIL Discriminator Update (exhaust demos)
+                gen_demos = demos_gen_dict(demos['all'], args.batch_size)
                 if args.env_id == "MoveP-v0":
-                    plt.scatter(10, 30, s=200, c='b', marker='o',alpha=1.0)
-                    plt.scatter(190, 30, s=200, c='r', marker='*', alpha=1.0)
-                    plt.scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
-                    plt.scatter(obs_[:,:,0], obs_[:,:,1], s=20, c='m', alpha=0.3, label='agent')
-                    plt.axis('equal')
-                    plt.tight_layout()
-                    f = plt.gca()
-                    f.axes.get_xaxis().set_ticks([])
-                    f.axes.get_yaxis().set_ticks([])
-                    f.axes.xaxis.set_ticklabels([])
-                    f.axes.yaxis.set_ticklabels([])
-                    #plt.legend()
-                    plt.savefig(f"runs/{run_name}/airl_scatter_{global_step}.png")
+                    fig = plt.figure(figsize=(10,10))
 
-                update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent, compute_lprobs=True)
+                for d in gen_demos:
+                    if len(d['obs']) < args.batch_size:
+                        if args.drop_batch:
+                            break
+                        else:
+                            obs_ = obs[:len(d['obs'])]
+                            actions_ = actions[:len(d['obs'])]
+                            dones_ = dones[:len(d['obs'])]
+                    else:
+                        obs_ = obs
+                        actions_ = actions
+                        dones_ = dones
+                    if args.env_id == "MoveP-v0":
+                        plt.scatter(10, 30, s=200, c='b', marker='o',alpha=1.0)
+                        plt.scatter(190, 30, s=200, c='r', marker='*', alpha=1.0)
+                        plt.scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
+                        plt.scatter(obs_[:,:,0], obs_[:,:,1], s=20, c='m', alpha=0.3, label='agent')
+                        plt.axis('equal')
+                        plt.tight_layout()
+                        f = plt.gca()
+                        f.axes.get_xaxis().set_ticks([])
+                        f.axes.get_yaxis().set_ticks([])
+                        f.axes.xaxis.set_ticklabels([])
+                        f.axes.yaxis.set_ticklabels([])
+                        #plt.legend()
+                        plt.savefig(f"runs/{run_name}/airl_scatter_{global_step}.png")
 
-                loss_dict = disc.compute_loss(update_dict)
+                    update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, 
+                                                        dones_, agent, compute_lprobs=True)
 
-                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
-                if args.irm_coeff > 1.0:
-                    loss /= args.irm_coeff
-                # if args.irm_coeff == 0.0:
-                    # loss /= 50
+                    loss_dict = disc.compute_loss(update_dict)
 
-                disc.update(loss)
+                    loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']
+                    if args.irm_coeff > 1.0:
+                        loss /= args.irm_coeff
+                    # if args.irm_coeff == 0.0:
+                        # loss /= 50
 
-                if global_step % args.logging_interval == 0:
-                    writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
-                    if args.irm_coeff > 0:
-                        writer.add_scalar('irl/airl_irm_loss', loss_dict['grad_penalty'], global_step)
-                    writer.add_scalar('irl/airl_r_p', loss_dict['policy_reward'], global_step)
-                    writer.add_scalar('irl/airl_v_p', loss_dict['policy_value'], global_step)
-                    writer.add_scalar('irl/airl_r_e', loss_dict['expert_reward'], global_step)
-                    writer.add_scalar('irl/airl_v_e', loss_dict['expert_value'], global_step)
-                    writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
+                    disc.update(loss)
+
+                    if global_step % args.logging_interval == 0:
+                        writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
+                        if args.irm_coeff > 0:
+                            writer.add_scalar('irl/airl_irm_loss', loss_dict['grad_penalty'], global_step)
+                        writer.add_scalar('irl/airl_r_p', loss_dict['policy_reward'], global_step)
+                        writer.add_scalar('irl/airl_v_p', loss_dict['policy_value'], global_step)
+                        writer.add_scalar('irl/airl_r_e', loss_dict['expert_reward'], global_step)
+                        writer.add_scalar('irl/airl_v_e', loss_dict['expert_value'], global_step)
+                        writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
 
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes

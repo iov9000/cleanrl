@@ -42,7 +42,7 @@ if __name__ == '__main__':
                         # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
                         exp_cmd = (f"python {algo}.py "
                                 f"--verbose --seed={seed} --env-id {env_name} --ucb_update_rule {ucb_o} "
-                                f"--ucb_reset_interval {ucb_reset_int}"
+                                f"--ucb_reset_interval {ucb_reset_int}")
                         cluster_cmd = euler_slurm + exp_cmd 
                         print("Running command: ", cluster_cmd)
                         # subprocess.run(cluster_cmd, shell=True)
