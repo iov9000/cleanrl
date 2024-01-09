@@ -14,6 +14,8 @@ gym.envs.register(
      max_episode_steps=1000,
 )
 
+import ot
+
 gym.envs.register(
      id='CMoveP-v0',
      entry_point='envs.envs2d:CMoveP',
@@ -508,7 +510,7 @@ if __name__ == "__main__":
                     
                 if irl_condition:                    
                     for epoch in range(args.irl_epochs):            
-                        # GAIL Discriminator Update
+                        # AIRL Discriminator Update
                                     
                         gen_demos = demos_gen_dict(demos['all'], args.batch_size)
                         for d in gen_demos:
@@ -567,6 +569,9 @@ if __name__ == "__main__":
                     writer.add_scalar('eval/std', std, global_step)
                     results_dict['eval_mu'].append(mu)
                     results_dict['eval_std'].append(std)
+                    ref_dist = ot.sliced_wasserstein_distance(
+                        d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
+                    writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
 
         except KeyboardInterrupt:
             break
