@@ -16,7 +16,7 @@ if __name__ == '__main__':
 
     seeds = [515, 234, 894, 72, 322]
     algos = ['ddpg_mg_ucb']
-    envs = ['Ant-v4', 'HalfCheetah-v4', 'Humanoid-v4', 'Hopper-v4', 'Walker2d-v4', 'Swimmer-v4', 'LunarLanderContinuous-v2', 'BipedalWalker-v3']
+    envs = ['Ant-v4', 'HalfCheetah-v4', 'Humanoid-v4', 'Hopper-v4', 'Walker2d-v4', 'Swimmer-v3', 'LunarLanderContinuous-v2', 'BipedalWalker-v3']
     ucb_opt = ['minvar', 'maxvar', 'other']
     ucb_reset = [10000, 50000, 100000]
 
@@ -42,7 +42,7 @@ if __name__ == '__main__':
                         # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
                         exp_cmd = (f"python {algo}.py "
                                 f"--verbose --seed={seed} --env-id {env_name} --ucb_update_rule {ucb_o} "
-                                f"--ucb_reset_interval {ucb_reset_int}"
+                                f"--ucb_reset_interval {ucb_reset_int}")
                         cluster_cmd = euler_slurm + exp_cmd 
                         print("Running command: ", cluster_cmd)
                         # subprocess.run(cluster_cmd, shell=True)

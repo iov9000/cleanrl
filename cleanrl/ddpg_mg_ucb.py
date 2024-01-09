@@ -70,7 +70,8 @@ def parse_args():
     
     # multigrid specific arguments
     parser.add_argument("--nstep_distribution", type=str, default='ucb', help="distribution over scales")
-    parser.add_argument("--ks", type=int, nargs='+', default=[1,10], help="multigrid scales")
+    # parser.add_argument("--ks", type=int, nargs='+', default=[1,10], help="multigrid scales")
+    parser.add_argument("--ks", type=int, default=10, help="multigrid scales")
     parser.add_argument("--mode", type=str, default='', required=False, help='mg or last')  
     parser.add_argument("--n_ensemble", type=int, default=10, help="ensemble size")
     parser.add_argument("--ucb_reset_interval", type=int, default=50000, help="when to reset / update UCB arms")
@@ -297,7 +298,7 @@ if __name__ == "__main__":
     else:
         ob_space = envs.single_observation_space
 
-    ks = args.ks
+    ks = [args.ks]
     ks = np.sort(ks)[::-1]
     assert len(ks) == 1, "only one ki is supported"
 
