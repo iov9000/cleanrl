@@ -32,7 +32,7 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.meirl import MeirlReward, MEIRLDiscriminator
-from irl.utils import load_hf_demos, evaluate_model, prepare_batch_update_irl,\
+from irl.utils import load_hf_demos, load_hf_demos_name, evaluate_model, prepare_batch_update_irl,\
      enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
@@ -72,6 +72,9 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
+    parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
+    parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
+
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--buffer-size", type=int, default=int(1e6),
@@ -116,6 +119,10 @@ def parse_args():
         help="number of demos to use")
     parser.add_argument('--enhance_demos', default=False, required=False, 
         action='store_true', help='enhance demos using W2 barycenters')
+    parser.add_argument("--diverse_demos", type=str, default=None,
+        help="diverse demos for generalization experiments")
+
+
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--use_dones', default=False, required=False, 
@@ -301,7 +308,17 @@ if __name__ == "__main__":
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
 
-    demos = load_hf_demos(args, n_demos=args.n_demos, perturb = args.demo_eps)
+    env_kwargs = {}
+    for i, comp in enumerate(args.env_kwargs):
+        env_kwargs[comp] = args.env_kwargs_values[i]
+
+    if args.diverse_demos is not None:
+        demo_list = [f for f in os.listdir(args.demo_dir) if args.diverse_demos in f and args.env_id in f]
+        print("-> Training on union of demos:", demo_list)
+        demos = load_hf_demos_name(args, demo_list)
+    else:
+        demos = load_hf_demos(args, n_demos=args.n_demos, perturb = args.demo_eps)
+
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
@@ -333,7 +350,7 @@ if __name__ == "__main__":
 
     if args.load_disc:
         disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
-        
+
     # Automatic entropy tuning
     if args.autotune:
         target_entropy = -torch.prod(torch.Tensor(envs.single_action_space.shape).to(device)).item()
@@ -469,6 +486,12 @@ if __name__ == "__main__":
                 if args.disc_update_period == -1:
                     irl_condition = irl_trigger
                     
+                if global_step % 100000 == 0:
+                    torch.save(actor.state_dict(), f"runs/{run_name}/actor_{global_step}.pt")
+                    torch.save(qf1.state_dict(), f"runs/{run_name}/qf1_{global_step}.pt")
+                    torch.save(qf2.state_dict(), f"runs/{run_name}/qf2_{global_step}.pt")
+                    torch.save(disc.state_dict(), f"runs/{run_name}/disc_{global_step}.pt")
+
                 if irl_condition:                    
                     for epoch in range(args.irl_epochs):            
                         # GAIL Discriminator Update

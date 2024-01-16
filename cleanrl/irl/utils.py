@@ -347,8 +347,8 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy, co
         rewards = expert_demos['rew']
         expert_obs = expert_demos['obs']
         expert_acs = expert_demos['acs']
-        expert_dones = np.squeeze(expert_demos['done'])
-        #expert_dones = expert_demos['done']
+        #expert_dones = np.squeeze(expert_demos['done'])
+        expert_dones = expert_demos['done']
     else:
         expert_ob_ac_done_reward = expert_demos#[np.random.randint(0, expert_demos.shape[0], opt.batch_size), :]
         expert_dones = expert_ob_ac_done_reward[:, -1]
