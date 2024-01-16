@@ -88,6 +88,9 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
+    parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
+    parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
+
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=3e-4,
@@ -369,12 +372,16 @@ if __name__ == "__main__":
     else:
         test_env = gym.make(args.env_id, **env_kwargs)          
 
+    if args.normalize_obs and isinstance(test_env.action_space, gym.spaces.Box):
+            env = gym.wrappers.NormalizeObservation(test_env)
+            env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
     if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
         test_env = gym.wrappers.ClipAction(test_env)
 
     if args.enhance_barys > 0:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(args, demos, test_env)
+        
     # get env specs
     discrete = not isinstance(test_env.action_space, gym.spaces.Box)
     disc = GAILDiscriminator(test_env, args)

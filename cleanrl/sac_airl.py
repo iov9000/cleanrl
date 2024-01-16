@@ -507,7 +507,13 @@ if __name__ == "__main__":
                 irl_condition = global_step % args.disc_update_period == 0
                 if args.disc_update_period == -1:
                     irl_condition = irl_trigger
-                    
+            
+                if global_step % 100000 == 0:
+                    torch.save(actor.state_dict(), f"runs/{run_name}/actor_{global_step}.pt")
+                    torch.save(qf1.state_dict(), f"runs/{run_name}/qf1_{global_step}.pt")
+                    torch.save(qf2.state_dict(), f"runs/{run_name}/qf2_{global_step}.pt")
+                    torch.save(disc.state_dict(), f"runs/{run_name}/disc_{global_step}.pt")
+
                 if irl_condition:                    
                     for epoch in range(args.irl_epochs):            
                         # AIRL Discriminator Update

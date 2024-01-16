@@ -62,6 +62,8 @@ def parse_args():
         help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
+    parser.add_argument("--capture_video_interval", type=int, default=200,
+        help="capture video interval")
 
     # environment specific arguments
     parser.add_argument('--normalize_obs', default=False, 
@@ -72,6 +74,9 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
+    parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
+    parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
+
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=3e-4,
@@ -105,6 +110,8 @@ def parse_args():
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
     parser.add_argument("--swil_rew", type=str, default='repl_loss', help="mean or replacement")
     parser.add_argument("--repl_loss_type", type=str, default='diff', help="replacement type: diff or a")
+    parser.add_argument("--aligned_index", default=False, required=False, action='store_true', help="atom index alignment")
+
     parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
     parser.add_argument("--swil_loss", default='surr_loss', type=str, required=False, help="loss_type:")
     parser.add_argument("--gsw_df", default='nn', type=str, required=False, help="Radon transform defining function: nn/poly/linear/circular")
@@ -120,8 +127,10 @@ def parse_args():
     parser.add_argument("--min_beta", type=int, default=1.0, help="degree of polynomial for SWIL")
     parser.add_argument("--max_q_len", type=int, default=1, help="max number of projected atom sets in queue")
     parser.add_argument("--max_swil_step", type=int, default=100000000, help="only update projections until some timestep")
-    parser.add_argument('--swil_period', default=1, type=float, required=False, help='number of discriminator updates')
+    parser.add_argument('--swil_period', default=100, type=float, required=False, help='number of discriminator updates')
     parser.add_argument("--replace_atoms", default=False, required=False, action='store_true', help="actually replace atoms with policy samples")
+    parser.add_argument('--use_curr_traj_only', default=False, required=False, 
+        action='store_true', help='only used last sampled trajectory to do matching')
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
 

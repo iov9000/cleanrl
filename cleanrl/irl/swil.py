@@ -8,6 +8,7 @@ import torch.autograd as autograd
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ExponentialLR
 import time
+import copy
 
 from collections import deque
 
@@ -765,6 +766,7 @@ class SWILDiscriminator(nn.Module):
             self.exp_atoms_sorted.append(exp_slices_sorted)
             self.pi_atoms_sorted_idx.append(pi_slices_sorted_idx)
             self.exp_atoms_sorted_idx.append(exp_slices_sorted_idx)
+            #self.pi_atoms_sorted_ = copy.deepcopy(self.pi_atoms_sorted)
 
             d_out = torch.cat([expert_out, policy_out])
             bce_loss = F.binary_cross_entropy_with_logits(d_out, labels)
@@ -774,7 +776,7 @@ class SWILDiscriminator(nn.Module):
                 irm_pen = 0
             #surr_loss = torch.sum(self.proj(self.policy_obs, self.policy_acs)) - torch.sum(self.proj(exp_obs,exp_acs)) 
             d_loss = bce_loss
-            print(d_loss)
+            #print(d_loss)
         elif self.opt.swil_loss == 'approx_sw':
             obs = self.policy_obs
             acs = self.policy_acs

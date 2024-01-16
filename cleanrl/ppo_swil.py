@@ -40,7 +40,7 @@ from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.swil import SwilReward, SWILDiscriminator
-from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
+from irl.utils import load_hf_demos, load_hf_demos_name, prepare_batch_update_irl, enhance_demos_with_barycenters,\
                     demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model, FrankaObsWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
@@ -73,9 +73,9 @@ def parse_args():
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     parser.add_argument('--normalize_obs', default=True, 
-        action='store_true', required=False, help='normalize irl rewards')  
+        action='store_false', required=False, help='normalize irl rewards')  
     parser.add_argument('--clip_action', default=True, 
-        action='store_true', required=False, help='normalize irl rewards')  
+        action='store_false', required=False, help='normalize irl rewards')  
     parser.add_argument('--time_aware', default=False, 
         action='store_true', required=False, help='normalize irl rewards')  
 
@@ -152,6 +152,11 @@ def parse_args():
     parser.add_argument("--max_q_len", type=int, default=1, help="max number of projected atom sets in queue")
     parser.add_argument("--max_swil_step", type=int, default=100000000, help="only update projections until some timestep")
     parser.add_argument("--replace_atoms", default=False, required=False, action='store_true', help="actually replace atoms with policy samples")
+    
+    ## testing (algo exploration) parameters
+    parser.add_argument("--single_state_pi0", default=False, required=False, action='store_true', help="use single state initial measure")
+    parser.add_argument("--load_init_rho", default=False, required=False, action='store_true', help="use single state initial measure")
+
     ## /SWIL
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
@@ -165,6 +170,9 @@ def parse_args():
         help="number of demos to use")
     parser.add_argument('--enhance_demos', default=False, required=False, 
         action='store_true', help='enhance demos using W2 barycenters')
+    parser.add_argument("--diverse_demos", type=str, default=None,
+        help="diverse demos for generalization experiments")
+    
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--use_dones', default=False, required=False, 
@@ -183,6 +191,8 @@ def parse_args():
 
 
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
+    parser.add_argument('--lip_p', default=1, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
+
     parser.add_argument('--gsw_coeff', default=1.0, type=float, required=False, help='ae loss coeff')
     parser.add_argument('--recon_coeff', default=0.0, type=float, required=False, help='ae loss coeff')
     parser.add_argument('--l2_coeff', default=0.0, type=float, required=False, help='use l2 penalty on discriminator')
@@ -201,7 +211,7 @@ def parse_args():
     parser.add_argument("--disc_nonlin", type=str, default="tanh",
         help="divergence type")
     parser.add_argument('--normalize_irl_rewards', default=True, 
-        action='store_true', required=False, help='normalize irl rewards')  
+        action='store_false', required=False, help='normalize irl rewards')  
 
     parser.add_argument('--on_policy', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
@@ -380,10 +390,20 @@ if __name__ == "__main__":
     for i, comp in enumerate(args.env_kwargs):
         env_kwargs[comp] = args.env_kwargs_values[i]
 
-    demos = load_hf_demos(args, n_demos=args.n_demos)
+    if args.diverse_demos is not None:
+        demo_list = [f for f in os.listdir(args.demo_dir) if args.diverse_demos in f and args.env_id in f]
+        print("-> Training on union of demos:", demo_list)
+        demos = load_hf_demos_name(args, demo_list)
+    else:
+        if args.env_id == 'Lap-v0':
+            demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
+        else:
+            demos = load_hf_demos(args, args.n_demos)
+
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
+
     # get env specs
     if 'Adroit' in args.env_id:
         test_env = gym.make(args.env_id, max_episode_steps=500)
@@ -394,6 +414,9 @@ if __name__ == "__main__":
     else:
         test_env = gym.make(args.env_id, **env_kwargs)        
 
+    if args.normalize_obs and isinstance(test_env.action_space, gym.spaces.Box):
+            env = gym.wrappers.NormalizeObservation(test_env)
+            env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
     if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
         test_env = gym.wrappers.ClipAction(test_env)
 
@@ -459,7 +482,7 @@ if __name__ == "__main__":
 
                 # TRY NOT TO MODIFY: execute the game and log data.
                 next_obs, reward, term, trunc, info = envs.step(action.cpu().numpy())
-                done = term or trunc # don't make the distinction here
+                done = np.logical_or(term, trunc) # don't make the distinction here
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 
@@ -580,11 +603,13 @@ if __name__ == "__main__":
                     #print(">>>>>>>> SWIL update")
                     print(len(demos['all']['obs']), obs.shape)
 
+                    #np.save("515_init_rho.npy", obs)
+                    if args.load_init_rho:
+                        obs = torch.tensor(np.load("515_init_rho.npy"))
+
                     for epoch in tqdm(range(k)):            
                         # GAIL Discriminator Update 
                         gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=args.shuffle_irl_batches)
-                        if "MoveP-v0" in args.env_id:
-                            fig, ax = plt.subplots(1,2,figsize=(10,5))
                         for d in gen_demos:
                             #print(len(d['obs']), obs.shape)
                             if len(d['obs']) < args.batch_size:
@@ -595,33 +620,11 @@ if __name__ == "__main__":
                                 obs_ = obs
                                 actions_ = actions
                                 dones_ = dones
-                            if "MoveP-v0" in args.env_id:
-                                ax[0].scatter(10, 10, s=200, c='b', marker='o',alpha=1.0)
-                                ax[0].scatter(190, 190, s=200, c='r', marker='*', alpha=1.0)
-                                ax[0].scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
-                                ax[0].scatter(obs[:,:,0], obs[:,:,1], s=20, c='m', alpha=0.3, label='agent')
-                                ax[0].axis('equal')
-                                plt.tight_layout()
-                                f = plt.gca()
 
-                                # calculate batch SW distance # asymmetric?
-                                dist = ot.sliced_wasserstein_distance(
-                                    obs_.squeeze().detach().cpu().numpy(), d['obs'], n_projections=100, seed=args.seed)
-
-                                # turn off ticks for scatter plot
-                                ax[0].get_xaxis().set_ticks([])
-                                ax[0].get_yaxis().set_ticks([])
-                                ax[0].xaxis.set_ticklabels([])
-                                ax[0].yaxis.set_ticklabels([])
-
-                                sw_dists.append(dist)
-
-                                ax[1].plot(sw_dists)
-                                ax[1].axis('equal')
-                                ax[1].set_title('SW2 dist, 10 proj.')
-                                # plt.legend()
-                                plt.savefig(
-                                    f"runs/{run_name}/swil_scatter_{global_step}.png")
+                            if args.single_state_pi0:
+                                obs_ref = torch.tile(obs_[0], (d['obs'].shape[0],1))
+                            else:
+                                obs_ref = obs_
 
                             update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
 
@@ -675,6 +678,50 @@ if __name__ == "__main__":
                 ref_dist = ot.sliced_wasserstein_distance(
                     d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
                 writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
+
+                # plot rollouts
+                if "MoveP-v0" in args.env_id:
+                    demos_obs = demos['all']['obs']
+                    agent_obs = d['obs']
+                    fig, ax = plt.subplots(1,3,figsize=(15,5))
+                    ax[0].scatter(test_env.init_pos[0], test_env.init_pos[1], s=200, c='b', marker='o',alpha=1.0)
+                    ax[0].scatter(test_env.waypoints[-1][0], test_env.waypoints[-1][1], s=200, c='r', marker='*', alpha=1.0)
+                    ax[0].scatter(demos_obs[:,0], demos_obs[:,1], s=20, c='g', alpha=0.3, label='expert')
+                    ax[0].scatter(agent_obs[:,0], agent_obs[:,1], s=20, c='m', alpha=0.3, label='agent')
+                    ax[0].axis('equal')
+                    plt.tight_layout()
+                    f = plt.gca()
+
+                    # calculate batch SW distance # asymmetric?
+                    dist = ot.sliced_wasserstein_distance(
+                        obs_.squeeze().detach().cpu().numpy(), d['obs'], n_projections=100, seed=args.seed)
+
+                    # turn off ticks for scatter plot
+                    ax[0].get_xaxis().set_ticks([])
+                    ax[0].get_yaxis().set_ticks([])
+                    ax[0].xaxis.set_ticklabels([])
+                    ax[0].yaxis.set_ticklabels([])
+
+                    val_grid = test_env.get_reward_grid()[-1]
+                    val_grid_t = torch.from_numpy(val_grid).type(torch.get_default_dtype())
+                    val = agent.get_value(val_grid_t).detach().numpy()
+                    val = val.reshape(test_env.shape)
+                    x_ = np.arange(0,test_env.shape[0])
+                    y_ = np.arange(0,test_env.shape[1])
+                    ax[1].pcolormesh(x_,y_,val.T)
+                    #plt.colorbar()
+                    #plt.savefig(f"runs/{run_name}/reward_{global_step}.png")
+
+                    sw_dists.append(dist)
+
+                    ax[2].plot(sw_dists)
+                    ax[2].axis('equal')
+                    ax[2].set_title('SW2 dist, 10 proj.')
+                    # plt.legend()
+                    plt.savefig(
+                        f"runs/{run_name}/swil_scatter_{global_step}.png")
+
+
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             if global_step % args.logging_interval == 0:

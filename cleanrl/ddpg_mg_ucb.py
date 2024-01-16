@@ -76,6 +76,8 @@ def parse_args():
     parser.add_argument("--n_ensemble", type=int, default=10, help="ensemble size")
     parser.add_argument("--ucb_reset_interval", type=int, default=50000, help="when to reset / update UCB arms")
     parser.add_argument("--ucb_update_rule", type=str, default='minvar', required=False, help='minvar/maxvar/else')  
+    parser.add_argument("--ucb_polyak_avg", type=float, default=1.0, required=False, 
+                        help='Polyak averaging update for n-step arms')
 
     parser.add_argument("--prioritized_replay", default=False, 
         action='store_true', required=False, help='prioritize buffer items based on td-error')
@@ -405,6 +407,7 @@ if __name__ == "__main__":
             #     next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma** * (qf1_next_target).view(-1)
             with torch.no_grad():
                 next_state_actions = target_actor(data.next_observations)
+                # !!! next_observations corresponds to s_n based on which Q(s_n, \pi(s_n) is calculated..)
                 qf1_next_targets = qf1_target(data.next_observations, next_state_actions)
                 discount = torch.tensor(args.gamma ** data.ki, dtype=torch.float32)
                 next_q_values_tensor = data.rewards.flatten() + (1 - data.dones.flatten()) * discount * qf1_next_targets
@@ -432,6 +435,7 @@ if __name__ == "__main__":
 
             if global_step % args.policy_frequency == 0:
                 # get ensemble out
+                #pi, log_pi, _ = actor.get_action(data.observations)
                 all_q_values = qf1(data.observations, actor(data.observations))
                 if isinstance(all_q_values, list):
                     all_q_values = torch.stack(all_q_values, dim=0)

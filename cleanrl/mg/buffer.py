@@ -192,6 +192,7 @@ class MultiStepReplayBuffer(object):
         self._max_sample_attempts = max_sample_attempts
         self._ucb_reset_interval = opt.ucb_reset_interval
         self._ucb_update_rule = opt.ucb_update_rule
+        self._ucb_polyak_avg = opt.ucb_polyak_avg
 
         if extra_storage_types:
             self._extra_storage_types = extra_storage_types
@@ -237,8 +238,8 @@ class MultiStepReplayBuffer(object):
         # self.ucb_mean[nstep] = np.mean(avg + self.ucb_mean[nstep] * 0.9)
         # self.ucb_std[nstep] = np.mean(std + self.ucb_std[nstep] * 0.9)
 
-        self.ucb_mean[nstep] = avg + self.ucb_mean[nstep] * 0.0
-        self.ucb_std[nstep] = std + self.ucb_std[nstep] * 0.0
+        self.ucb_mean[nstep] = self._ucb_polyak_avg*avg + self.ucb_mean[nstep] * (1-self._ucb_polyak_avg)
+        self.ucb_std[nstep] = self._ucb_polyak_avg*std + self.ucb_std[nstep] * (1-self._ucb_polyak_avg)
 
         # self.ucb_mean[nstep] = avg
         # self.ucb_std[nstep] = std
@@ -276,7 +277,7 @@ class MultiStepReplayBuffer(object):
                 if self._ucb_update_rule == 'minvar':
                   ucb = self.ucb_mean + self.ucb - self.ucb_std
                 elif self._ucb_update_rule == 'maxvar':
-                  ucb = self.ucb_mean + self.ucb - self.ucb_std
+                  ucb = self.ucb_mean + self.ucb +  self.ucb_std
                 else:
                   ucb = self.ucb - self.ucb_std
 

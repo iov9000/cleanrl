@@ -153,6 +153,7 @@ def parse_args():
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
     parser.add_argument("--div", type=str, default="rkl", help="divergence type")
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
+    parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
 
     parser.add_argument('--drop_batch', default=False, required=False, 
         action='store_true', help='drop batch in irl epochs')   
@@ -307,8 +308,6 @@ if __name__ == "__main__":
     # get env specs
     test_env = gym.make(args.env_id)
     disc = MEIRLDiscriminator(test_env, args)
-    if args.resume is not None:
-        disc.load_state_dict(torch.load(os.path.join(args.resume, "disc.pt") , map_location=device))
 
     # env setup
     envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, disc)])
@@ -326,6 +325,15 @@ if __name__ == "__main__":
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
 
+    if args.resume:
+        actor.load_state_dict(torch.load(os.path.join(args.resume, "actor.pt") , map_location=device))
+        qf1.load_state_dict(torch.load(os.path.join(args.resume, "qf1.pt") , map_location=device))
+        qf2.load_state_dict(torch.load(os.path.join(args.resume, "qf2.pt") , map_location=device))
+        disc.load_state_dict(torch.load(os.path.join(args.resume, "disc.pt") , map_location=device))
+
+    if args.load_disc:
+        disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
+        
     # Automatic entropy tuning
     if args.autotune:
         target_entropy = -torch.prod(torch.Tensor(envs.single_action_space.shape).to(device)).item()

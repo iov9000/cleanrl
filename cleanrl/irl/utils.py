@@ -674,6 +674,64 @@ class MujocoTestWrapper(gym.Wrapper):
         return o, r, t, tr, i
 
 
+class Box2dTestWrapper(gym.Wrapper):
+    def __init__(self, env, eps0=0.0, epsdyn=0.0, params=[]):
+        self.env = env
+        self.eps0 = eps0
+        self.epsdyn = epsdyn
+        self.default_params = {}
+        # save default simulation parameters
+        #print(dir(self.env.model))
+        for p in params:
+            self.default_params[p] = np.array(getattr(self.env.model, p))
+
+
+        #print(dir(self.env.model))
+        self.perturb_init(eps0)
+        for p in params:
+            self.perturb_parameter(p)
+
+        super().__init__(env=self.env)
+
+    def perturb_init(self, eps):
+        #  perturb initial position and velocity
+        self.init_qpos = np.array(self.init_qpos)
+        self.init_qvel = np.array(self.init_qvel)
+        self.init_qpos = self.init_qpos * eps * \
+            np.random.randn(*self.init_qpos.shape)
+        # self.init_qvel = self.init_qvel * eps * \
+        #    np.random.randn(*self.init_qvel.shape)
+        self.init_qpos = tuple(self.init_qpos)
+        self.init_qvel = tuple(self.init_qvel)
+
+    def perturb_parameter(self, parameter='body_mass'):
+        param = np.array(getattr(self.env.model, parameter))
+        param_mod = param + np.random.randn(*param.shape)*self.epsdyn
+
+        #print(
+        #    f">> Perturbed parameter {parameter}, default: {self.default_params[parameter]}, changed: {param_mod}")
+        # assign new value
+        getattr(self.env.model, parameter)[:] = param_mod
+
+    def reset(self, seed=1, options=None):
+        o = self.env.reset()[0]
+        # reset mass to default value otherwise accum.
+        for k, v in self.default_params.items():
+            getattr(self.env.model, k)[:] = v
+
+        self.perturb_init(self.eps0)
+        for k, v in self.default_params.items():
+            self.perturb_parameter(k)
+
+        return o, {}
+
+    def step(self, action):
+        o, r, t, tr, i = self.env.step(action)
+        d = t or tr
+        # o = o + self.eps*np.random.randn(*o.shape)
+        return o, r, t, tr, i
+
+
 def evaluate_model(args, actor, device, test_env=None, deterministic=False, wrap_mujoco=False, n_traj=10, save_eval=None):
     if test_env is None:
         test_env = gym.make(args.env_id)
