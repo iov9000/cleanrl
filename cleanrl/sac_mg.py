@@ -16,9 +16,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from stable_baselines3.common.buffers import ReplayBuffer
-from mg.buffer import PrioritisedMultiStepReplayBuffer
+from mg.buffer import MultiStepReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
-from collections import namedtuple
+from collections import namedtuple, deque
 
 BufferData = namedtuple("BufferData",
                         ["observations", "actions", "rewards",
@@ -68,11 +68,17 @@ def parse_args():
     parser.add_argument("--reward_components_values", type=float, nargs='+', help="reward_components values")
 
     # multigrid specific arguments
-    parser.add_argument("--nstep_distribution", type=str, default='uniform', help="distribution over scales")
-    parser.add_argument("--ks", type=int, nargs='+', default=[1,10], help="multigrid scales")
-    parser.add_argument("--mode", type=str, default='last', required=False, help='mg or last')  
-    parser.add_argument("--prioritized_replay", default=True, 
-        action='store_false', required=False, help='prioritize buffer items based on td-error')
+    parser.add_argument("--nstep_distribution", type=str, default='ucb_gradient_bandit', help="distribution over scales")
+    # parser.add_argument("--ks", type=int, nargs='+', default=[1,10], help="multigrid scales")
+    parser.add_argument("--ks", type=int, default=10, help="multigrid scales")
+    parser.add_argument("--mode", type=str, default='', required=False, help='mg or last')  
+    parser.add_argument("--n_ensemble", type=int, default=10, help="ensemble size")
+    parser.add_argument("--ucb_reset_interval", type=int, default=50000, help="when to reset / update UCB arms")
+    parser.add_argument("--ucb_update_rule", type=str, default='minvar', required=False, help='minvar/maxvar/else')  
+    parser.add_argument("--ucb_polyak_avg", type=float, default=1.0, required=False, 
+                        help='Polyak averaging update for n-step arms')
+    parser.add_argument("--prioritized_replay", default=False, 
+        action='store_true', required=False, help='prioritize buffer items based on td-error')
 
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
@@ -142,26 +148,57 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, kwargs):
 
     return thunk
 
+class HeadNet(nn.Module):
+    def __init__(self, reshape_size, n_actions=4):
+        super(HeadNet, self).__init__()
+        self.fc1 = nn.Linear(reshape_size, 256)
+        self.fc2 = nn.Linear(256, n_actions)
 
-# ALGO LOGIC: initialize agent here:
-class SoftQNetwork(nn.Module):
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+
+
+class CoreNet(nn.Module):
     def __init__(self, env):
         super().__init__()
-        if isinstance(env.observation_space, gym.spaces.Dict):
-            ob_shape = env.observation_space['observation'].shape
-        else:
-            ob_shape = env.single_observation_space.shape
+        self.fc1 = nn.Linear(np.array(
+            env.single_observation_space.shape).prod() + np.prod(
+            env.single_action_space.shape), 256)
+        self.reshape_size = 256
 
-        self.fc1 = nn.Linear(np.array(ob_shape).prod() + np.prod(env.single_action_space.shape), 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, 1)
-
-    def forward(self, x, a):
-        x = torch.cat([x, a], 1)
+    def forward(self, x):
         x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = self.fc3(x)
         return x
+
+
+class EnsembleNet(nn.Module):
+    def __init__(self, env, n_actions=1, n_ensemble=1):
+        super(EnsembleNet, self).__init__()
+        self.core_net = CoreNet(env)
+        reshape_size = self.core_net.reshape_size
+        self.net_list = nn.ModuleList(
+            [HeadNet(reshape_size=reshape_size, n_actions=n_actions)
+             for _ in range(n_ensemble)])
+
+    def _core(self, x, a=None):
+        if a is not None:
+            x = torch.cat([x, a], 1)
+        return self.core_net(x)
+
+    def _heads(self, x):
+        return [net(x) for net in self.net_list]
+
+    def forward(self, x, a, k=None):
+        x = torch.cat([x, a], 1)
+        if k is not None:
+            return self.net_list[k](self.core_net(x))
+        else:
+            core_cache = self._core(x)
+            net_heads = self._heads(core_cache)
+            all_heads = torch.stack(net_heads, dim=0).squeeze()
+            return all_heads
 
 
 LOG_STD_MAX = 2
@@ -271,13 +308,12 @@ if __name__ == "__main__":
     max_action = float(envs.single_action_space.high[0])
 
     actor = Actor(envs).to(device)
-    qf1 = SoftQNetwork(envs).to(device)
-    qf2 = SoftQNetwork(envs).to(device)
-    qf1_target = SoftQNetwork(envs).to(device)
-    qf2_target = SoftQNetwork(envs).to(device)
+    qf1 = EnsembleNet(
+        envs, n_actions=1, n_ensemble=args.n_ensemble).to(device)
+    qf1_target = EnsembleNet(
+        envs, n_actions=1, n_ensemble=args.n_ensemble).to(device) 
     qf1_target.load_state_dict(qf1.state_dict())
-    qf2_target.load_state_dict(qf2.state_dict())
-    q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)
+    q_optimizer = optim.Adam(list(qf1.parameters()), lr=args.q_lr)
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
 
     # Automatic entropy tuning
@@ -302,12 +338,12 @@ if __name__ == "__main__":
     #     device,
     #     handle_timeout_termination=True,
     # )
-    ks = args.ks
+    ks = [args.ks]
     ks = np.sort(ks)[::-1]
     assert len(ks) == 1, "only one ki is supported"
 
-    rb = PrioritisedMultiStepReplayBuffer(
-            observation_shape=ob_space.shape,
+    rb = MultiStepReplayBuffer(args,
+            observation_shape=envs.single_observation_space.shape,
             action_shape=envs.single_action_space.shape,
             stack_size=1,
             batch_size=args.batch_size,
@@ -316,7 +352,7 @@ if __name__ == "__main__":
             nstep_distribution=args.nstep_distribution,
             mode=args.mode,
             gamma=args.gamma,
-            observation_dtype=ob_space.dtype,
+            observation_dtype=envs.single_observation_space.dtype,
             action_dtype=envs.single_action_space.dtype)
 
     start_time = time.time()
@@ -324,6 +360,10 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     obs = envs.reset(seed=args.seed)[0]
     best_rew = -100000
+    average10 = deque(maxlen=10)
+    average100 = deque(maxlen=100)
+    kis = []
+
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
         if global_step < args.learning_starts:
@@ -348,7 +388,6 @@ if __name__ == "__main__":
                     best_rew = item["final_info"][0]['episode']["r"]
                     torch.save(actor.state_dict(), f"runs/{run_name}/best_actor.pt")
                     torch.save(qf1.state_dict(), f"runs/{run_name}/best_qf1.pt")
-                    torch.save(qf2.state_dict(), f"runs/{run_name}/best_qf2.pt")
 
                 if args.verbose:
                     print(
@@ -372,7 +411,10 @@ if __name__ == "__main__":
             priority = rb.sum_tree.max_recorded_priority
         else:
             priority = 1.
-        rb.add(obs, actions, rewards, dones, priority=priority)
+        
+        # TODO: why only [0]?
+        rb.add(obs, actions, rewards[0], term[0])
+        #rb.add(obs, actions, rewards, dones, priority=priority)
         
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
         obs = next_obs
@@ -391,38 +433,35 @@ if __name__ == "__main__":
                 torch.tensor(batch[6]).to(device),
                 batch[7],
                 batch[8],
-                torch.tensor(batch[9]).to(device))
+                None)
 
             with torch.no_grad():
-                next_state_actions, next_state_log_pi, _ = actor.get_action(data.next_observations)
-                qf1_next_target = qf1_target(data.next_observations, next_state_actions)
-                qf2_next_target = qf2_target(data.next_observations, next_state_actions)
-                min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - alpha * next_state_log_pi
-                next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma ** data.ki * (min_qf_next_target).view(-1)
+                next_state_actions, next_state_log_pi, _ = actor.get_action(
+                    data.next_observations)
+                qf1_next_targets = qf1_target(data.next_observations,
+                                              next_state_actions)
+                qf1_next_targets = qf1_next_targets - alpha * next_state_log_pi.squeeze()
+                discount = torch.tensor(
+                    args.gamma ** data.ki, dtype=torch.float32).to(device)
+                next_q_values = data.rewards.flatten() + (
+                        1 - data.dones.flatten()) * discount * qf1_next_targets
+            qf1_a_values = qf1(data.observations, data.actions)
 
-            qf1_a_values = qf1(data.observations, data.actions).view(-1)
-            qf2_a_values = qf2(data.observations, data.actions).view(-1)
-
-            weights = torch.ones_like(next_q_value).to(device)
-            td_err_1 = torch.abs(qf1_a_values - next_q_value).detach()
-            td_err_2 = torch.abs(qf2_a_values - next_q_value).detach()
-
-            td_error = 1/2*(td_err_1+td_err_2)
-
+            total_td_error = torch.abs(
+                qf1_a_values - next_q_values).sum(dim=0).detach()
+            weights = torch.ones_like(next_q_values[0]).to(device)
             if args.prioritized_replay:
-                prio = td_error
-                weights = 1.0 / torch.sqrt(data.probs + 1e-10)
-                weights /= torch.max(weights)
-                rb.set_priority(data.indices, prio + 1e-10)
+                weights = data.weights
+            # mask = torch.tensor(data.ki == (head_i + 1))
+            mask = torch.ones_like(weights).to(device)
 
-            #qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
-            qf1_loss = torch.mean((qf1_a_values - next_q_value) ** 2 * weights)
-            qf2_loss = torch.mean((qf2_a_values - next_q_value) ** 2 * weights)
-            #qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
-            qf_loss = qf1_loss + qf2_loss
+            total_q_loss = torch.mean(
+                (qf1_a_values - next_q_values) ** 2 * weights * mask,
+                dim=1).sum(dim=0)
 
+            # optimize the model
             q_optimizer.zero_grad()
-            qf_loss.backward()
+            total_q_loss.backward()
             q_optimizer.step()
 
             if global_step % args.policy_frequency == 0:  # TD 3 Delayed update support
@@ -430,9 +469,22 @@ if __name__ == "__main__":
                     args.policy_frequency
                 ):  # compensate for the delay by doing 'actor_update_interval' instead of 1
                     pi, log_pi, _ = actor.get_action(data.observations)
-                    qf1_pi = qf1(data.observations, pi)
-                    qf2_pi = qf2(data.observations, pi)
-                    min_qf_pi = torch.min(qf1_pi, qf2_pi).view(-1)
+                    qf1_pis = qf1(data.observations, pi)
+
+                    min_qf_pi = qf1_pis.min(dim=0)[0]
+                    max_qf_pi = qf1_pis.max(dim=0)[0]
+                    mean_qf_pi = qf1_pis.mean(dim=0)
+                    std_qf_pi = qf1_pis.std(dim=0)
+
+                    rb.update_mean_std(
+                        mean_qf_pi.mean().item(),
+                        std_qf_pi.mean().item(),
+                        min_qf_pi.mean().item(),
+                        max_qf_pi.mean().item(),
+                        nstep=data.ki[0])
+                    kis.append(data.ki[0])
+                    assert data.ki.max() == data.ki.min(), "ki should be the same"
+
                     actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
 
                     actor_optimizer.zero_grad()
@@ -453,25 +505,49 @@ if __name__ == "__main__":
             if global_step % args.target_network_frequency == 0:
                 for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
                     target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-                for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
-                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
 
             if global_step % 100 == 0:
-                writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), global_step)
-                writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), global_step)
-                writer.add_scalar("losses/td_error", td_error.mean().item(), global_step)
-
-                writer.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)
-                writer.add_scalar("losses/qf2_loss", qf2_loss.item(), global_step)
-                writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, global_step)
-                writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
-                writer.add_scalar("losses/alpha", alpha, global_step)
-                print("SPS:", int(global_step / (time.time() - start_time)))
-                writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+                writer.add_scalar("Train/Total TD-Error",
+                                    total_td_error.mean().item(),
+                                    global_step)
+                for head_i in range(args.n_ensemble):
+                    writer.add_scalar(f"Train/qf1_values_{head_i}",
+                                        qf1_a_values[head_i].mean().item(),
+                                        global_step)
+                writer.add_scalar("Train/total_q_loss", total_q_loss.item(),
+                                    global_step)
+                writer.add_scalar("Train/actor_loss", actor_loss.item(),
+                                    global_step)
+                writer.add_histogram("Train/kis", data.ki, global_step)
+                writer.add_histogram("Train/kis", np.array(kis),
+                                        global_step, bins="auto")
+                kis = []
+                for head_i in range(ks[0]):
+                    writer.add_scalar(f"UCB/mean_value_{head_i}",
+                                        rb.ucb_mean[head_i],
+                                        global_step)
+                    writer.add_scalar(f"UCB/std_value_{head_i}",
+                                        rb.ucb_std[head_i],
+                                        global_step)
+                    writer.add_scalar(f"UCB/nstep_count_{head_i}",
+                                        rb.ucb_nstep_count[head_i],
+                                        global_step)
+                    writer.add_scalar(f"UCB/ucb_{head_i}",
+                                        rb.ucb[head_i],
+                                        global_step)
+                writer.add_scalar("Train/alpha", alpha, global_step)
                 if args.autotune:
-                    writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
+                    writer.add_scalar("Train/alpha_loss", alpha_loss.item(),
+                                        global_step)
+                
+                #run.log({"actor_loss": actor_loss.item(),
+                #            "alpha": alpha,
+                #            "alpha_loss": alpha_loss.item()
+                #            if args.autotune else None})
+                #for head_i in range(args.n_ensemble):
+                #    run.log({f"qf1_values_{head_i}": qf1_a_values[head_i].mean().item()})
 
-                        #  evaluate at regular intervals and save
+            #  evaluate at regular intervals and save
             if global_step % args.eval_interval == 0:
                 if args.save_eval:
                     mu, std, d = evaluate_model(args, actor, device, test_env, save_eval=f"runs/{run_name}/traj_{global_step}.pkl")
