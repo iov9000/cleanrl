@@ -98,7 +98,7 @@ def parse_args():
         help="the learning rate of the policy network optimizer")
     parser.add_argument("--q-lr", type=float, default=1e-3,
         help="the learning rate of the Q network network optimizer")
-    parser.add_argument("--policy-frequency", type=int, default=2,
+    parser.add_argument("--policy-frequency", type=int, default=1,
         help="the frequency of training policy (delayed)")
     parser.add_argument("--target-network-frequency", type=int, default=1, # Denis Yarats' implementation delays this by 2.
         help="the frequency of updates for the target nerworks")
@@ -463,6 +463,9 @@ if __name__ == "__main__":
             q_optimizer.zero_grad()
             total_q_loss.backward()
             q_optimizer.step()
+
+            if args.prioritized_replay:
+                rb.set_priority(data.indices, total_td_error)
 
             if global_step % args.policy_frequency == 0:  # TD 3 Delayed update support
                 for _ in range(
