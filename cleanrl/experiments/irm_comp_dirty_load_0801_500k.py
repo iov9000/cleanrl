@@ -35,7 +35,8 @@ if __name__ == '__main__':
     gpu_string = f"--gpus={GPU_PER_CPU} " if args.gpu else ""
     # f"--gpus=gtx_1080:1 "
 
-    run_folder = '0701_500kRun'
+    run_folder = '1601_allRun'
+    load_timestep = 800000
     
     runs = [f for f in os.listdir(f"./runs/{run_folder}")] 
 
@@ -57,7 +58,8 @@ if __name__ == '__main__':
 
                                         disc_folder = disc_folders[-1]
                                         print(os.listdir(f"runs/{run_folder}/{disc_folder}"))
-                                        if 'disc.pt' in os.listdir(f"runs/{run_folder}/{disc_folder}"):
+                                        disc_ckpt_name = f"disc_{load_timestep}.pt"
+                                        if disc_ckpt_name in os.listdir(f"runs/{run_folder}/{disc_folder}"):
                                         
                                             # ua_rbl = ua.replace(" ", "")
                                             # lin_rbl = lin.replace(" ", "")
@@ -70,7 +72,7 @@ if __name__ == '__main__':
                                             exp_cmd = (f"python {algo}_{disc}.py "
                                                         f"{lin} --verbose --seed={seed} --env-id {env_name} {ua} --diverse_demos dirty "
                                                         f"--irm_coeff {irm_c} --lip_coeff {lip_c} --perturb_parameters {pp} "
-                                                        f"--load_disc runs/{run_folder}/{disc_folder} --disc_update_period 1000000")
+                                                        f"--load_disc runs/{run_folder}/{disc_folder} --load_disc_timestep {load_timestep} --disc_update_period 1000000")
                                             cluster_cmd = euler_slurm + exp_cmd 
                                             print("Running command: ", cluster_cmd)
                                             # subprocess.run(cluster_cmd, shell=True)

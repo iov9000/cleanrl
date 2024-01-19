@@ -28,7 +28,7 @@ if __name__ == '__main__':
     lip_coeffs = [0.0, 1.0, 10.0]
     disc_nonlins = ['tanh']
     usenobs = ['']
-    MEM_PER_CPU = 8000
+    MEM_PER_CPU = 4000
     GPU_PER_CPU = 1
     gpu_string = f"--gpus={GPU_PER_CPU} " if args.gpu else ""
     # f"--gpus=gtx_1080:1 "
