@@ -32,7 +32,7 @@ from torch.utils.tensorboard import SummaryWriter
 import ot 
 
 from irl.swil import SwilReward, SWILDiscriminator
-from irl.utils import load_hf_demos, evaluate_model, prepare_batch_update_irl,\
+from irl.utils import load_hf_demos, load_hf_demos_name, evaluate_model, prepare_batch_update_irl,\
      enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, FrankaObsWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
@@ -146,6 +146,9 @@ def parse_args():
         help="number of demos to use")
     parser.add_argument('--enhance_demos', default=False, required=False, 
         action='store_true', help='enhance demos using W2 barycenters')
+    parser.add_argument("--diverse_demos", type=str, default=None,
+        help="diverse demos for generalization experiments")
+
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--use_dones', default=False, required=False, 
@@ -388,7 +391,13 @@ if __name__ == "__main__":
     for i, comp in enumerate(args.env_kwargs):
         env_kwargs[comp] = args.env_kwargs_values[i]
 
-    demos = load_hf_demos(args, n_demos=args.n_demos)
+    if args.diverse_demos is not None:
+        demo_list = [f for f in os.listdir(args.demo_dir) if args.diverse_demos in f and args.env_id in f]
+        print("-> Training on union of demos:", demo_list)
+        demos = load_hf_demos_name(args, demo_list)
+    else:
+        demos = load_hf_demos(args, n_demos=args.n_demos)    
+    
     if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
