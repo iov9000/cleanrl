@@ -478,6 +478,7 @@ class SWILDiscriminator(nn.Module):
                                     rew_j = a_new_i-a_i
                                     #rew += w*(a_new - a_prev)
                             elif self.opt.repl_loss_type == 'diffmax0':
+                                #print(sorted_proj[i,j] > sorted_proj_tgt[i,j])
                                 if rew_incr > rew_decr:
                                     rew_j = a_new_h-a_h
                                 else:

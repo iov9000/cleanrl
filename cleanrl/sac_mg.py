@@ -402,7 +402,7 @@ if __name__ == "__main__":
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
         real_next_obs = next_obs.copy()
-        for idx, d in enumerate(dones):
+        for idx, d in enumerate(trunc):
             if d:
                 real_next_obs[idx] = infos[idx]["final_observation"][0]
         # rb.add(obs, real_next_obs, actions, rewards, dones, infos)
@@ -464,6 +464,20 @@ if __name__ == "__main__":
             total_q_loss.backward()
             q_optimizer.step()
 
+            min_qf_pi = qf1_a_values.min(dim=0)[0]
+            max_qf_pi = qf1_a_values.max(dim=0)[0]
+            mean_qf_pi = qf1_a_values.mean(dim=0)
+            std_qf_pi = qf1_a_values.std(dim=0)
+
+            rb.update_mean_std(
+                mean_qf_pi.mean().item(),
+                std_qf_pi.mean().item(),
+                min_qf_pi.mean().item(),
+                max_qf_pi.mean().item(),
+                nstep=data.ki[0])
+            kis.append(data.ki[0])
+            assert data.ki.max() == data.ki.min(), "ki should be the same"
+
             if args.prioritized_replay:
                 rb.set_priority(data.indices, total_td_error)
 
@@ -472,23 +486,10 @@ if __name__ == "__main__":
                     args.policy_frequency
                 ):  # compensate for the delay by doing 'actor_update_interval' instead of 1
                     pi, log_pi, _ = actor.get_action(data.observations)
-                    qf1_pis = qf1(data.observations, pi)
-
+                    qf1_pis = qf1(data.observations, pi) 
                     min_qf_pi = qf1_pis.min(dim=0)[0]
-                    max_qf_pi = qf1_pis.max(dim=0)[0]
-                    mean_qf_pi = qf1_pis.mean(dim=0)
-                    std_qf_pi = qf1_pis.std(dim=0)
 
-                    rb.update_mean_std(
-                        mean_qf_pi.mean().item(),
-                        std_qf_pi.mean().item(),
-                        min_qf_pi.mean().item(),
-                        max_qf_pi.mean().item(),
-                        nstep=data.ki[0])
-                    kis.append(data.ki[0])
-                    assert data.ki.max() == data.ki.min(), "ki should be the same"
-
-                    actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
+                    actor_loss = ((alpha * log_pi.squeeze()) - min_qf_pi).mean()
 
                     actor_optimizer.zero_grad()
                     actor_loss.backward()

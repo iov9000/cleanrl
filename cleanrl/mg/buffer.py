@@ -190,10 +190,6 @@ class MultiStepReplayBuffer(object):
         self._observation_dtype = observation_dtype
         self._terminal_dtype = terminal_dtype
         self._max_sample_attempts = max_sample_attempts
-        self._ucb_reset_interval = opt.ucb_reset_interval
-        self._ucb_update_rule = opt.ucb_update_rule
-        self._ucb_polyak_avg = opt.ucb_polyak_avg
-
         if extra_storage_types:
             self._extra_storage_types = extra_storage_types
         else:
@@ -240,25 +236,28 @@ class MultiStepReplayBuffer(object):
         self._b = start_value + self._total_steps * increment
 
     def _ucb_prob(self, nstep):
-        return np.exp(self.ucb_pref[nstep]) / np.sum(np.exp(self.ucb_pref))
+        return np.exp(self.ucb_pref[nstep]) / np.sum(np.exp(self.ucb_pref)+1e-6)
 
-    def update_mean_std(self, mean_q, std_q, min_q, max_q, nstep):
+    def update_mean_std(self, mean_q, var_q, min_q, max_q, nstep):
         nstep = nstep - 1
 
         # TODO: mean_q here is an estimate of the q, not the reward.
         #  shouldn't we use the reward instead?
         self.ucb_mean[nstep] += ((mean_q - self.ucb_mean[nstep]) *
                                  self.ucb_alpha)
-        self.ucb_std[nstep] += ((std_q - self.ucb_std[nstep]) * self.ucb_alpha)
+        self.ucb_std[nstep] += ((var_q - self.ucb_std[nstep]) * self.ucb_alpha)
         self.ucb_min[nstep] += ((min_q - self.ucb_min[nstep]) * self.ucb_alpha)
         self.ucb_max[nstep] += ((max_q - self.ucb_max[nstep]) * self.ucb_alpha)
 
-        self.ucb_pref[nstep] += self.ucb_alpha * (std_q - self.ucb_std[
+        self.ucb_pref[nstep] += self.ucb_alpha * (-var_q - self.ucb_std[
             nstep]) * (1 - self._ucb_prob(nstep))
         for i in range(self._max_nstep):
             if i != nstep:
-                self.ucb_pref[i] = self.ucb_alpha * (std_q - self.ucb_std[
-                    i]) * (-self._ucb_prob(i))
+                self.ucb_pref[i] -= self.ucb_alpha * (-var_q - self.ucb_std[
+                    nstep]) * (-self._ucb_prob(i))
+        
+        # normalize ucb_pref to avoid numerical issues!
+        self.ucb_pref = self.ucb_pref / np.sum(np.abs(self.ucb_pref))
 
     def _ucb_nstep_for_indices(self, indices):
         if np.any(self.ucb_second_nstep_count < 1):
@@ -298,18 +297,13 @@ class MultiStepReplayBuffer(object):
                 else:
                     raise ValueError("Unknown nstep_distribution: {}".format(
                         self._nstep_distribution))
-                if self._nstep_distribution == "ucb_gradient_bandit":
-                    nstep = np.argmin(ucb) + 1
-                else:
-                    nstep = np.argmax(ucb) + 1
+                nstep = np.argmax(ucb) + 1
 
                 nsteps.append(nstep)
                 self.ucb_nstep_count[nsteps[-1] - 1] += 1
                 self.ucb_second_nstep_count[nsteps[-1] - 1] += 1
-                self._ucb_total_steps += len(indices)
-
-            if (not self._nstep_distribution == "ucb_gradient_bandit" and
-                    self._ucb_total_steps % 50000 == 0):
+            self._ucb_total_steps += len(indices)
+            if self._ucb_total_steps % 50000 == 0:
                 self.ucb_second_nstep_count = np.zeros(self._max_nstep)
             return np.array(nsteps)
 
