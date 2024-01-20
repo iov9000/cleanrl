@@ -33,7 +33,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from irl.gail import GailReward, GAILDiscriminator
 from irl.utils import load_hf_demos, load_hf_demos_name, evaluate_model, prepare_batch_update_irl,\
-     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper, FrankaObsWrapper
+     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper, FrankaObsWrapper, MujocoTestWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -78,6 +78,9 @@ def parse_args():
     parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
     parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
     
+    parser.add_argument('--perturb_dynamics', type=float, default=0.0, help="perturb dynamics") 
+    parser.add_argument("--perturb_parameters", type=str, default=['body_mass'], nargs='+', help="which dynamics params to perturb")
+
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--buffer-size", type=int, default=int(1e6),
@@ -196,6 +199,9 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos, env_k
         else:
             env = gym.make(env_id, render_mode='rgb_array')        
         
+        if opt.perturb_dynamics > 0.0:
+            env = MujocoTestWrapper(env, eps0=0.0, epsdyn=opt.perturb_dynamics, params=opt.perturb_parameters)
+
         if opt.use_absorb_wrapper: # DAC
             env = AbsorbAfterDoneWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -354,6 +360,8 @@ if __name__ == "__main__":
         test_env = FrankaObsWrapper(test_env)
     else:
         test_env = gym.make(args.env_id, **env_kwargs) 
+    if args.perturb_dynamics > 0.0:
+        test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
     disc = GAILDiscriminator(test_env, args)
 
     # env setup

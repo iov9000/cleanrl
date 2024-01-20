@@ -33,7 +33,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from irl.meirl import MeirlReward, MEIRLDiscriminator
 from irl.utils import load_hf_demos, load_hf_demos_name, evaluate_model, prepare_batch_update_irl,\
-     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper
+     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper, FrankaObsWrapper, MujocoTestWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -74,6 +74,8 @@ def parse_args():
         help="the id of the environment")
     parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
     parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
+    parser.add_argument('--perturb_dynamics', type=float, default=0.0, help="perturb dynamics") 
+    parser.add_argument("--perturb_parameters", type=str, default=['body_mass'], nargs='+', help="which dynamics params to perturb")
 
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
@@ -186,6 +188,9 @@ def parse_args():
 def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
     def thunk():
         env = gym.make(env_id)
+        if opt.perturb_dynamics > 0.0:
+            env = MujocoTestWrapper(env, eps0=0.0, epsdyn=opt.perturb_dynamics, params=opt.perturb_parameters)
+
         if opt.use_absorb_wrapper: # DAC
             env = AbsorbAfterDoneWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -325,6 +330,8 @@ if __name__ == "__main__":
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
     test_env = gym.make(args.env_id)
+    if args.perturb_dynamics > 0.0:
+        test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
     disc = MEIRLDiscriminator(test_env, args)
 
     # env setup
