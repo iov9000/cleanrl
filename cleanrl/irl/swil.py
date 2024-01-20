@@ -17,6 +17,8 @@ from irl.utils import ResNetAIRLDisc, MiniGridCNN, AtariCNNBase, gaussian_kld
 from irl.gsw_utils import gsw, get_slice
 from tqdm import tqdm
 
+import ot
+
 def get_random_projections(latent_dim: int, num_samples: int, proj_dist='normal') -> torch.Tensor:
     """
     Returns random samples from latent distribution's (Gaussian)

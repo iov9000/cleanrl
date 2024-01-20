@@ -213,7 +213,7 @@ if __name__ == "__main__":
     run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_{id_string}"
     if len(run_name) > 220:
         run_name = run_name[:220]
-        
+    
     if 'Safety' in args.env_id:
         import safety_gymnasium
         from safety.utils import SafetyGymWrapper
@@ -236,6 +236,8 @@ if __name__ == "__main__":
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
+    import pickle 
+    pickle.dump(vars(args),open(f"runs/{run_name}/hparams.pkl",'wb'))
 
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)

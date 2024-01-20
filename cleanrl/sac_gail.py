@@ -325,6 +325,9 @@ if __name__ == "__main__":
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
+    import pickle 
+    pickle.dump(vars(args),open(f"runs/{run_name}/hparams.pkl",'wb'))
+
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
