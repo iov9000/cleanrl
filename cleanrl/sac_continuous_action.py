@@ -270,7 +270,7 @@ if __name__ == "__main__":
         test_env = SafetyGymWrapper(test_env)
     else:
         test_env = gym.make(args.env_id, **env_kwargs) 
-    
+
     max_action = float(envs.single_action_space.high[0])
 
     actor = Actor(envs).to(device)

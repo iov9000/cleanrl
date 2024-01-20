@@ -614,7 +614,7 @@ class AntCFWrapper(gym.Wrapper):
     def step(self, action):
         o, r, d, i = self.env.step(action)
         return o[:27], r, d, i
-
+        
 
 class MujocoTestWrapper(gym.Wrapper):
     def __init__(self, env, eps0=0.0, epsdyn=0.0, params=[]):
