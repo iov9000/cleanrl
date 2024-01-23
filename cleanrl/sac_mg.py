@@ -75,6 +75,10 @@ def parse_args():
     parser.add_argument("--n_ensemble", type=int, default=10, help="ensemble size")
     parser.add_argument("--ucb_reset_interval", type=int, default=50000, help="when to reset / update UCB arms")
     parser.add_argument("--ucb_update_rule", type=str, default='minvar', required=False, help='minvar/maxvar/else')  
+    parser.add_argument("--ucb_alpha", type=float, default=0.5, required=False, 
+                        help='ucb lambda hyperparameter')
+    parser.add_argument("--ucb_lambda", type=float, default=0.1, required=False, 
+                        help='ucb lambda hyperparameter')
     parser.add_argument("--ucb_polyak_avg", type=float, default=1.0, required=False, 
                         help='Polyak averaging update for n-step arms')
     parser.add_argument("--prioritized_replay", default=False, 

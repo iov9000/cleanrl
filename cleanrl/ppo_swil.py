@@ -130,6 +130,7 @@ def parse_args():
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
     parser.add_argument("--swil_rew", type=str, default='repl_loss', help="mean or replacement")
     parser.add_argument("--repl_loss_type", type=str, default='diff', help="replacement type: diff or a")
+    parser.add_argument("--atom_weight", type=str, default='1/n', help="atom weight: 1/n or 1")
     parser.add_argument("--aligned_index", default=False, required=False, action='store_true', help="replacement type: diff or a")
 
     parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")

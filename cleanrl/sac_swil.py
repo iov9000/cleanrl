@@ -114,7 +114,9 @@ def parse_args():
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
     parser.add_argument("--swil_rew", type=str, default='repl_loss', help="mean or replacement")
     parser.add_argument("--repl_loss_type", type=str, default='diff', help="replacement type: diff or a")
-    parser.add_argument("--aligned_index", default=False, required=False, action='store_true', help="replacement type: diff or a")
+    parser.add_argument("--atom_weight", type=str, default='1/n', help="atom weight: 1/n or 1")
+
+    parser.add_argument("--aligned_index", default=False, required=False, action='store_true', help="align replacement indices")
 
     parser.add_argument("--max_gsw", default=False, required=False, action='store_true', help="use max GSW loss")
     parser.add_argument("--swil_loss", default='surr_loss', type=str, required=False, help="loss_type:")
@@ -160,6 +162,8 @@ def parse_args():
     parser.add_argument('--irm_coeff', default=0, type=float, 
         required=False, help='use IRM penalty on discriminator')
     parser.add_argument('--irl_batch_size', default=64, type=int, required=False, help='batch size for discriminator updates')
+    parser.add_argument('--shuffle_irl_batches', default=False, required=False, 
+        action='store_true', help='use actions in discriminator')
     parser.add_argument('--irl_init_epochs', default=1  , type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
     parser.add_argument('--swil_period', default=100, type=float, required=False, help='number of discriminator updates')
@@ -637,7 +641,7 @@ if __name__ == "__main__":
                 if irl_condition and global_step < args.max_swil_step:
                     for epoch in range(n_irl_epochs):            
                         # SWIL Discriminator Update 
-                        gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+                        gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=args.shuffle_irl_batches)
                         for d in gen_demos:
                             if len(d['obs']) < args.batch_size:
                                 if args.drop_batch:

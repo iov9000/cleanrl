@@ -410,6 +410,9 @@ class SWILDiscriminator(nn.Module):
 
                 ## if idx is not in sorted list, use nearest neighbours
 
+
+                #if self.opt.repl_loss_type == 'diff':                
+                #    idx -= 1
                 idx[idx==0] +=1
                 idx[idx==n] -=1
                 # shift extreme indices
@@ -417,8 +420,12 @@ class SWILDiscriminator(nn.Module):
 
                 # calculate weight based on position in queue
                 weight = len(self.pi_atoms_sorted)
-                #w = 1/n
-                w = 1
+                ### TODO: this is important?
+                if self.opt.atom_weight == '1/n':
+                    w = 1/n
+                else:
+                    w = 1
+
                 # TODO: what if target CDF is left or mixed?
                 if self.opt.aligned_index:
                     i = torch.where(idxs==idx)[0]

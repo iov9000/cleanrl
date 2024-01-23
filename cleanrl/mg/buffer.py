@@ -217,13 +217,15 @@ class MultiStepReplayBuffer(object):
         self.ucb_max = np.zeros(self._max_nstep)
         self.ucb_pref = np.zeros(self._max_nstep)
         self.ucb_prob_cache = np.zeros(self._max_nstep)
-        self.ucb_alpha = 0.1
+        self.ucb_alpha = opt.ucb_alpha
+
+        self._diff = np.zeros(self._max_nstep)
 
         self.ucb_nstep_count = np.zeros(self._max_nstep)
         self.ucb_second_nstep_count = np.zeros(self._max_nstep)
         self.ucb = np.zeros(self._max_nstep)
         self._ucb_total_steps = 0
-        self._ucb_lambda = 0.1
+        self._ucb_lambda = opt.ucb_lambda
 
     def update_nstep(self, new_nstep):
         self._update_horizon = new_nstep
@@ -241,6 +243,15 @@ class MultiStepReplayBuffer(object):
     def update_mean_std(self, mean_q, var_q, min_q, max_q, nstep):
         nstep = nstep - 1
 
+        ucb_pref = self.ucb_pref.copy()
+        diff = -(var_q - self.ucb_std[nstep])
+        diff = np.clip(diff, -1, 1)
+        ucb_pref[nstep] = self.ucb_pref[nstep] + self._ucb_lambda * diff * (1 - self._ucb_prob(nstep))
+        for i in range(self._max_nstep):
+            if i != nstep:
+                ucb_pref[i] = self.ucb_pref[i] - self._ucb_lambda * diff * self._ucb_prob(i)
+        self.ucb_pref = ucb_pref
+
         # TODO: mean_q here is an estimate of the q, not the reward.
         #  shouldn't we use the reward instead?
         self.ucb_mean[nstep] += ((mean_q - self.ucb_mean[nstep]) *
@@ -248,19 +259,20 @@ class MultiStepReplayBuffer(object):
         self.ucb_std[nstep] += ((var_q - self.ucb_std[nstep]) * self.ucb_alpha)
         self.ucb_min[nstep] += ((min_q - self.ucb_min[nstep]) * self.ucb_alpha)
         self.ucb_max[nstep] += ((max_q - self.ucb_max[nstep]) * self.ucb_alpha)
+        self._diff[nstep] += ((diff - self._diff[nstep]) * self.ucb_alpha)
 
-        self.ucb_pref[nstep] += self.ucb_alpha * (-var_q - self.ucb_std[
-            nstep]) * (1 - self._ucb_prob(nstep))
-        for i in range(self._max_nstep):
-            if i != nstep:
-                self.ucb_pref[i] -= self.ucb_alpha * (-var_q - self.ucb_std[
-                    nstep]) * (-self._ucb_prob(i))
+        # self.ucb_pref[nstep] += self.ucb_alpha * (-var_q - self.ucb_std[
+            # nstep]) * (1 - self._ucb_prob(nstep))
+        # for i in range(self._max_nstep):
+            # if i != nstep:
+                # self.ucb_pref[i] -= self.ucb_alpha * (-var_q - self.ucb_std[
+                    # nstep]) * (-self._ucb_prob(i))
         
-        # normalize ucb_pref to avoid numerical issues!
-        self.ucb_pref = self.ucb_pref / np.sum(np.abs(self.ucb_pref))
+        
 
     def _ucb_nstep_for_indices(self, indices):
-        if np.any(self.ucb_second_nstep_count < 1):
+        if (np.any(self.ucb_second_nstep_count < 1) and
+                self._nstep_distribution != "ucb_gradient_bandit"):
 
             start_range = self._ucb_total_steps % self._max_nstep + 1
             nsteps = np.tile(
@@ -275,8 +287,9 @@ class MultiStepReplayBuffer(object):
         else:
             nsteps = []
             for _ in indices:
-                self.ucb = np.sqrt(2 * np.log(
-                    self._ucb_total_steps) / self.ucb_nstep_count)
+                if self._nstep_distribution != "ucb_gradient_bandit":
+                    self.ucb = np.sqrt(2 * np.log(
+                        self._ucb_total_steps) / self.ucb_nstep_count)
 
                 if self._nstep_distribution == "ucb_classic":
                     ucb = self.ucb_mean + self.ucb
@@ -297,15 +310,18 @@ class MultiStepReplayBuffer(object):
                 else:
                     raise ValueError("Unknown nstep_distribution: {}".format(
                         self._nstep_distribution))
-                nstep = np.argmax(ucb) + 1
+
+                # nstep = np.argmax(ucb) + 1
+                # take last occurrence of max
+                nstep = len(ucb) - np.argmax(ucb[::-1])
 
                 nsteps.append(nstep)
                 self.ucb_nstep_count[nsteps[-1] - 1] += 1
                 self.ucb_second_nstep_count[nsteps[-1] - 1] += 1
             self._ucb_total_steps += len(indices)
-            if self._ucb_total_steps % 50000 == 0:
-                self.ucb_second_nstep_count = np.zeros(self._max_nstep)
-            return np.array(nsteps)
+        if self._ucb_total_steps % 50000 == 0:
+            self.ucb_second_nstep_count = np.zeros(self._max_nstep)
+        return np.array(nsteps)
 
     def _sample_nstep_for_indices(self, indices):
         """For each index in `indices` sample a different n as its

@@ -604,9 +604,11 @@ if __name__ == "__main__":
             if 'Move' in args.env_id and 'mud' in args.diverse_demos:
                 import matplotlib.pyplot as plt
                 rew_grid = test_env.get_reward_grid()[-1]
+                print(rew_grid)
                 rew_grid_t = torch.from_numpy(rew_grid).type(torch.get_default_dtype())
                 rew = disc.reward(disc.base(rew_grid_t)).detach().numpy()
                 fig = plt.figure(figsize=(20,5))
+                print(rew.shape)
                 rew = rew.reshape(test_env.shape)
                 x_ = np.arange(0,test_env.shape[0])
                 y_ = np.arange(0,test_env.shape[1])
