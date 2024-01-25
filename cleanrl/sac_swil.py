@@ -202,8 +202,8 @@ def parse_args():
     parser.add_argument("--eval_test_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
-    parser.add_argument('--drop_batch', default=True, required=False, 
-        action='store_false', help='drop batch in irl epochs')   
+    parser.add_argument('--drop_batch', default=False, required=False, 
+        action='store_true', help='drop batch in irl epochs')   
 
     args = parser.parse_args()
     # fmt: on
