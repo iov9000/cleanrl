@@ -192,7 +192,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos, env_k
     def thunk():
         if 'Adroit' in env_id:
             env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
-            env.set_env_state(demos['all']['init_state_dict'][0])
+            #env.set_env_state(demos['all']['init_state_dict'][0])
         elif 'Franka' in env_id:
             env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'], render_mode='rgb_array')
             env = FrankaObsWrapper(env)
@@ -357,7 +357,7 @@ if __name__ == "__main__":
     # get env specs
     if 'Adroit' in args.env_id:
         test_env = gym.make(args.env_id, max_episode_steps=500)
-        test_env.set_env_state(demos['all']['init_state_dict'][0])
+        #test_env.set_env_state(demos['all']['init_state_dict'][0])
     elif 'Franka' in args.env_id:
         test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
         test_env = FrankaObsWrapper(test_env)

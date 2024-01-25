@@ -185,7 +185,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, agent, disc, demos
     def thunk():
         if 'Adroit' in env_id:
             env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
-            env.set_env_state(demos['all']['init_state_dict'][0])
+            #env.set_env_state(demos['all']['init_state_dict'][0])
         elif 'Franka' in env_id:
             env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'], render_mode='rgb_array')
             env = FrankaObsWrapper(env)
@@ -344,7 +344,15 @@ if __name__ == "__main__":
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
-    test_env = gym.make(args.env_id, **env_kwargs)
+    if 'Adroit' in args.env_id:
+        test_env = gym.make(args.env_id, max_episode_steps=500, render_mode='rgb_array')
+        #env.set_env_state(demos['all']['init_state_dict'][0])
+    elif 'Franka' in args.env_id:
+        test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'], render_mode='rgb_array')
+        test_env = FrankaObsWrapper(test_env)
+    else:
+        test_env = gym.make(args.env_id, render_mode='rgb_array', **env_kwargs)      
+
     if args.perturb_dynamics > 0.0:
         test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
     actor = Actor(test_env).to(device)
