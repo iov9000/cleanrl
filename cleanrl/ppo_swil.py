@@ -533,7 +533,6 @@ if __name__ == "__main__":
             # Optimizing the policy and value network
             b_inds = np.arange(args.batch_size)
             clipfracs = []
-            cnt_on_policy_updates += 1
             for epoch in range(args.update_epochs):
                 np.random.shuffle(b_inds)
                 for start in range(0, args.batch_size, args.minibatch_size):
@@ -598,8 +597,10 @@ if __name__ == "__main__":
             init = False
 
             # SWIL updates
-            #print(">>>>>>>> MOD ", cnt_on_policy_updates%args.swil_period)
-            if cnt_on_policy_updates % args.swil_period == 1:
+            #print(cnt_on_policy_updates, args.swil_period)
+            print(">>>>>>>> MOD ", cnt_on_policy_updates%args.swil_period)
+            if cnt_on_policy_updates % args.swil_period == 0:
+                #print(update % int(np.ceil(1/(n_irl_epochs+1))))
                 if update % int(np.ceil(1/(n_irl_epochs+1))) == 0:
                     k = int(n_irl_epochs) if n_irl_epochs >=0 else 1
                     total_swil_updates+=1
@@ -665,6 +666,8 @@ if __name__ == "__main__":
                                     writer.add_scalar(
                                         'irl/swil_vib_loss', loss_dict['ib_loss'], global_step)
 
+            cnt_on_policy_updates += 1
+
             #  evaluate at regular intervals and save
             if global_step % args.eval_interval == 0:
                 if isinstance(test_env.action_space, gym.spaces.Box):
@@ -697,7 +700,7 @@ if __name__ == "__main__":
 
                     # calculate batch SW distance # asymmetric?
                     dist = ot.sliced_wasserstein_distance(
-                        obs_.squeeze().detach().cpu().numpy(), d['obs'], n_projections=100, seed=args.seed)
+                        agent_obs, demos_obs, n_projections=100, seed=args.seed)
 
                     # turn off ticks for scatter plot
                     ax[0].get_xaxis().set_ticks([])

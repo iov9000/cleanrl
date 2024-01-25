@@ -33,7 +33,7 @@ import ot
 
 from irl.swil import SwilReward, SWILDiscriminator
 from irl.utils import load_hf_demos, load_hf_demos_name, evaluate_model, prepare_batch_update_irl,\
-     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, FrankaObsWrapper
+     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, FrankaObsWrapper, AdroitResetWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -218,8 +218,8 @@ def parse_args():
 def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos, env_kwargs):
     def thunk():
         if 'Adroit' in env_id:
-            env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
-            env.set_env_state(demos['all']['init_state_dict'][0])
+            env = AdroitResetWrapper(gym.make(env_id, max_episode_steps=500, render_mode='rgb_array'), demos)
+            #env.set_env_state(demos['all']['init_state_dict'][0])
         elif 'Franka' in env_id:
             env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'], render_mode='rgb_array')
             env = FrankaObsWrapper(env)
@@ -409,8 +409,8 @@ if __name__ == "__main__":
         demos = enhance_demos_with_barycenters(demos)
     # get env specs
     if 'Adroit' in args.env_id:
-        test_env = gym.make(args.env_id, max_episode_steps=500)
-        test_env.set_env_state(demos['all']['init_state_dict'][0])
+        test_env = AdroitResetWrapper(gym.make(args.env_id, max_episode_steps=500), demos)
+        #test_env.set_env_state(demos['all']['init_state_dict'][0])
     elif 'Franka' in args.env_id:
         test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
         test_env = FrankaObsWrapper(test_env)
@@ -644,6 +644,7 @@ if __name__ == "__main__":
                         gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=args.shuffle_irl_batches)
                         for d in gen_demos:
                             if len(d['obs']) < args.batch_size:
+                                #print(d['obs'].shape, args.batch_size)
                                 if args.drop_batch:
                                     break
                                 else:

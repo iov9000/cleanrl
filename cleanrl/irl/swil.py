@@ -405,15 +405,16 @@ class SWILDiscriminator(nn.Module):
                     #idx[idx==n] -=1
 
                 idxs = self.pi_atoms_sorted_idx[p]
-                
-                #print(idxs, idx, torch.where(idxs==idx)[0])
+                idxs_e = self.exp_atoms_sorted_idx[p]
+
+                #print(idxs, idxs_e, idx, torch.where(idxs==idx)[0])
 
                 ## if idx is not in sorted list, use nearest neighbours
 
 
                 #if self.opt.repl_loss_type == 'diff':                
                 #    idx -= 1
-                idx[idx==0] +=1
+                #idx[idx==0] +=1
                 idx[idx==n] -=1
                 # shift extreme indices
                 #print(n)
@@ -444,6 +445,8 @@ class SWILDiscriminator(nn.Module):
                 else:
                     for j,i in enumerate(idx):
                         rew_j = 0
+                        #print(j,i)
+                        #print(sorted_proj.shape)
                         if self.opt.swil_rew == 'insertion_loss':
                             w = 1/(n*(n+1))
                             # new atom contribution
@@ -473,6 +476,8 @@ class SWILDiscriminator(nn.Module):
                             rew_decr = torch.abs(sorted_proj[i-1,j] - obs_t_slice[0,j])
                             #w = 1/ (n + a_prev) # more reward if closer
 
+                            #print(sorted_proj[i,j] > sorted_proj_tgt[i,j])
+
                             rew_j = a_new - a_prev
                             if self.opt.repl_loss_type == 'diff':
                                 rew_j = a_new-a_prev
@@ -500,6 +505,7 @@ class SWILDiscriminator(nn.Module):
                                     rew_j = a_new_i-a_i
                                 if rew_j > 0: # > 0 bc we flip it later
                                     rew_j = 0
+                                # XXX: sign problems!!!???
                                 rew += w*(rew_j)  
 
                             elif self.opt.repl_loss_type == 'diff3':

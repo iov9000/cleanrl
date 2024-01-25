@@ -937,6 +937,24 @@ class FrankaObsWrapper(gym.ObservationWrapper):
         #return np.concatenate((obs_, v_),-1)
         return obs_
 
+
+class AdroitResetWrapper(gym.Wrapper):
+    def __init__(
+        self,
+        env: gym.Env,
+        demos
+    ):
+        super().__init__(env)
+        self.demos = demos
+
+    def reset(self, *args, **kwargs):
+        """Reset the environment."""
+
+        obs, info = self.env.reset(*args, **kwargs)
+        self.env.set_env_state(self.demos['all']['init_state_dict'][0])
+        return obs, info
+
+
 def drq_weight_init(m):
     if isinstance(m, nn.Linear):
         nn.init.orthogonal_(m.weight.data)

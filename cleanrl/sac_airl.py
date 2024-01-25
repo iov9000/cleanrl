@@ -139,6 +139,8 @@ def parse_args():
     parser.add_argument('--airl_resnet', default=False, action='store_true', help='use resnet for discriminator')
     parser.add_argument('--airl_reward_type', default='reward_term', type=str, help='options: disc/shaping_term/shaped_reward/reward_term')    
     parser.add_argument('--irl_epochs', default=1, type=float, required=False, help='number of discriminator updates')
+    parser.add_argument('--shuffle_irl_batches', default=False, required=False, 
+        action='store_true', help='shuffle batches when sampling from expert buffer')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
@@ -522,8 +524,7 @@ if __name__ == "__main__":
                 if irl_condition:                    
                     for epoch in range(args.irl_epochs):            
                         # AIRL Discriminator Update
-                                    
-                        gen_demos = demos_gen_dict(demos['all'], args.batch_size)
+                        gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=args.shuffle_irl_batches)
                         for d in gen_demos:
                             if len(d['obs']) < args.batch_size:
                                 if args.drop_batch:
