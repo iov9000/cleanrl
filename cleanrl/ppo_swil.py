@@ -615,7 +615,7 @@ if __name__ == "__main__":
                         # GAIL Discriminator Update 
                         gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=args.shuffle_irl_batches)
                         for d in gen_demos:
-                            #print(len(d['obs']), obs.shape)
+                            print(len(d['obs']), obs.shape, args.batch_size)
                             if len(d['obs']) < args.batch_size:
                                 obs_ = obs[:len(d['obs'])]
                                 actions_ = actions[:len(d['obs'])]
@@ -689,40 +689,50 @@ if __name__ == "__main__":
                 if "MoveP-v0" in args.env_id:
                     demos_obs = demos['all']['obs']
                     agent_obs = d['obs']
-                    fig, ax = plt.subplots(1,3,figsize=(15,5))
-                    ax[0].scatter(test_env.init_pos[0], test_env.init_pos[1], s=200, c='b', marker='o',alpha=1.0)
-                    ax[0].scatter(test_env.waypoints[-1][0], test_env.waypoints[-1][1], s=200, c='r', marker='*', alpha=1.0)
-                    ax[0].scatter(demos_obs[:,0], demos_obs[:,1], s=20, c='g', alpha=0.3, label='expert')
-                    ax[0].scatter(agent_obs[:,0], agent_obs[:,1], s=20, c='m', alpha=0.3, label='agent')
-                    ax[0].axis('equal')
+
+                    rho0 = disc.policy_obs.detach().numpy()
+                    #fig, ax = plt.subplots(1,3,figsize=(15,5))
+                    fig, ax = plt.subplot_mosaic([['left', 'upper mid', 'right'],
+                               ['left', 'lower mid', 'right']],
+                              figsize=(12, 4), layout="constrained")
+
+                    ax['left'].scatter(test_env.init_pos[0], test_env.init_pos[1], s=200, c='b', marker='o',alpha=1.0)
+                    ax['left'].scatter(test_env.waypoints[-1][0], test_env.waypoints[-1][1], s=200, c='r', marker='*', alpha=1.0)
+                    ax['left'].scatter(demos_obs[:,0], demos_obs[:,1], s=20, c='g', alpha=0.2, label='expert')
+                    ax['left'].scatter(agent_obs[:,0], agent_obs[:,1], s=20, c='m', alpha=0.2, label='agent')
+                    ax['left'].scatter(rho0[:,0], rho0[:,1], s=20, c='y', alpha=0.2, label='rho0')
+                    ax['left'].axis('equal')
                     plt.tight_layout()
                     f = plt.gca()
 
                     # calculate batch SW distance # asymmetric?
                     dist = ot.sliced_wasserstein_distance(
-                        agent_obs, demos_obs, n_projections=100, seed=args.seed)
+                        demos_obs, agent_obs, n_projections=100, seed=args.seed)
 
                     # turn off ticks for scatter plot
-                    ax[0].get_xaxis().set_ticks([])
-                    ax[0].get_yaxis().set_ticks([])
-                    ax[0].xaxis.set_ticklabels([])
-                    ax[0].yaxis.set_ticklabels([])
+                    ax['left'].get_xaxis().set_ticks([])
+                    ax['left'].get_yaxis().set_ticks([])
+                    ax['left'].xaxis.set_ticklabels([])
+                    ax['left'].yaxis.set_ticklabels([])
 
                     val_grid = test_env.get_reward_grid()[-1]
                     val_grid_t = torch.from_numpy(val_grid).type(torch.get_default_dtype())
+                    #val = disc.get_reward(val_grid_t).detach().numpy()
                     val = agent.get_value(val_grid_t).detach().numpy()
                     val = val.reshape(test_env.shape)
                     x_ = np.arange(0,test_env.shape[0])
                     y_ = np.arange(0,test_env.shape[1])
-                    ax[1].pcolormesh(x_,y_,val.T)
+                    ax['upper mid'].pcolormesh(x_,y_,val.T)
+                    ax['lower mid'].pcolormesh(x_,y_,val.T)
+
                     #plt.colorbar()
                     #plt.savefig(f"runs/{run_name}/reward_{global_step}.png")
 
                     sw_dists.append(dist)
 
-                    ax[2].plot(sw_dists)
-                    ax[2].axis('equal')
-                    ax[2].set_title('SW2 dist, 10 proj.')
+                    ax['right'].plot(sw_dists)
+                    ax['right'].axis('equal')
+                    ax['right'].set_title('SW2 dist, 10 proj.')
                     # plt.legend()
                     plt.savefig(
                         f"runs/{run_name}/swil_scatter_{global_step}.png")

@@ -68,7 +68,7 @@ def train_expert(args, env, algo, n_timesteps, fname, n_traj, model=None, min_to
             model = SAC.load(model)
 
     model.save('model_' + fname + str(n_timesteps))
-    save_expert_traj_dict('CMoveP-v0', env, model, nr_trajectories=n_traj, min_total_rew=min_total_rew, label=args.label)
+    save_expert_traj_dict(args.env_name, env, model, nr_trajectories=n_traj, min_total_rew=min_total_rew, label=args.label)
     
     return model
 
@@ -98,7 +98,7 @@ def save_expert_traj_dict(env_name, env, model, nr_trajectories=10, min_total_re
             done = term or trunc
             ob = next_ob
             total_reward += reward
-            episode_obs.append(ob)
+            episode_obs.append(next_ob)
             episode_acs.append(ac)
             episode_rew.append(reward)
             episode_done.append(done)
@@ -150,14 +150,19 @@ if __name__ == '__main__':
                         required=False, help="additional label for demo file")
     args = parser.parse_args()
 
+    gc = True
+
     if args.label == 'down':
         waypoints=[(100, 0),(190, 30)]
     elif args.label == 'up':
         waypoints=[(100, 60),(190, 30)]
+    elif args.label == 'nowp':
+        waypoints=[(190,30)]
+        gc = False
     else:
         waypoints=[(100, 30),(190, 30)]
 
-    env = gym.make(args.env_name, shape=(200, 60), init_pos = (10,30), waypoints=waypoints)
+    env = gym.make(args.env_name, shape=(200, 60), init_pos = (10,30), waypoints=waypoints, goal_conditioning=gc)
     train_expert(args, env, args.algo, n_timesteps=args.n_timesteps, 
                                 fname=args.env_name, 
                                 n_traj=args.nr_traj, 

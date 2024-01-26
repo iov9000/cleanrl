@@ -768,7 +768,7 @@ class SWILDiscriminator(nn.Module):
 
     def compute_loss(self, update_dict):
         # compute sliced Wasserstein distance here 
-        self.policy_obs = update_dict['policy_obs']
+        self.policy_obs = copy.deepcopy(update_dict['policy_obs'])
         self.policy_acs = update_dict['policy_acs']
         policy_obs_next = update_dict['policy_obs_next']
         policy_dones = update_dict['policy_dones']

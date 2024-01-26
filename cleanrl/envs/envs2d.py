@@ -393,7 +393,10 @@ class MoveP(Env):
         self.agent = np.array([x,y])
         
         curr_tgt = np.array(self.waypoints[self.curr_tgt])
-        state = np.concatenate([self.agent, curr_tgt],0)
+        if self.goal_conditioning:
+            state = np.concatenate([self.agent, curr_tgt],0)
+        else:
+            state = self.agent
         
         self.needs_reset = False
         # return the observation
@@ -424,7 +427,10 @@ class MoveP(Env):
 
         grids = []
         for wp in self.waypoints:
-            grids.append(np.concatenate([point_list, np.tile(wp, (point_list.shape[0],1))],-1))
+            if self.goal_conditioning:
+                grids.append(np.concatenate([point_list, np.tile(wp, (point_list.shape[0],1))],-1))
+            else:
+                grids.append(point_list)
 
         return grids
 
@@ -568,7 +574,10 @@ class CMoveP(Env):
         self.agent = np.array([x,y])
         
         curr_tgt = np.array(self.waypoints[self.curr_tgt])
-        state = np.concatenate([self.agent, curr_tgt],0)
+        if self.goal_conditioning:
+            state = np.concatenate([self.agent, curr_tgt],0)
+        else:
+            state = self.agent
         
         self.needs_reset = False
         # return the observation
@@ -606,7 +615,10 @@ class CMoveP(Env):
 
         grids = []
         for wp in self.waypoints:
-            grids.append(np.concatenate([point_list, np.tile(wp, (point_list.shape[0],1))],-1))
+            if self.goal_conditioning:
+                grids.append(np.concatenate([point_list, np.tile(wp, (point_list.shape[0],1))],-1))
+            else:
+                grids.append(point_list)
 
         return grids
 

@@ -44,7 +44,7 @@ gym.envs.register(
 )
 
 from irl.gail import GailReward, GAILDiscriminator
-from irl.utils import load_hf_demos, load_lap_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
+from irl.utils import load_hf_demos, load_hf_demos_name, load_lap_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
                    demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model, FrankaObsWrapper
 
 import ot
@@ -136,8 +136,12 @@ def parse_args():
         help="number of demos to use")
     parser.add_argument("--n_demos", type=int, default=10,
         help="number of demos to use")
-    parser.add_argument('--enhance_barys', default=0, required=False, 
-        type=int, help='enhance demos using W2 barycenters')
+    parser.add_argument('--enhance_demos', default=False, required=False, 
+        action='store_true', help='enhance demos using W2 barycenters')
+    parser.add_argument("--diverse_demos", type=str, default=None,
+        help="diverse demos for generalization experiments")
+
+
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--use_dones', default=False, required=False, 
@@ -360,10 +364,15 @@ if __name__ == "__main__":
     for i, comp in enumerate(args.env_kwargs):
         env_kwargs[comp] = args.env_kwargs_values[i]
 
-    if args.env_id == 'Lap-v0':
-        demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
+    if args.diverse_demos is not None:
+        demo_list = [f for f in os.listdir(args.demo_dir) if args.diverse_demos in f and args.env_id in f]
+        print("-> Training on union of demos:", demo_list)
+        demos = load_hf_demos_name(args, demo_list)
     else:
-        demos = load_hf_demos(args, args.n_demos, args.demo_eps)
+        if args.env_id == 'Lap-v0':
+            demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
+        else:
+            demos = load_hf_demos(args, args.n_demos, args.demo_eps)
 
     if 'Adroit' in args.env_id:
         test_env = gym.make(args.env_id, max_episode_steps=500)
@@ -380,7 +389,7 @@ if __name__ == "__main__":
     if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
         test_env = gym.wrappers.ClipAction(test_env)
 
-    if args.enhance_barys > 0:
+    if args.enhance_demos:
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(args, demos, test_env)
         
