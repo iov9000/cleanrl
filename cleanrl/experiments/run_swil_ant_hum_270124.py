@@ -68,17 +68,22 @@ if __name__ == '__main__':
     # f"--gpus=gtx_1080:1 "
     
     for seed in seeds:
-        for lin in lins:
-            for disc in disc_types:
-                for ua in usenobs:
-                    for n_demo in n_demos:
-                        for d_nl in disc_nonlins:
-                            for per in periods:
-                                for algo in algos:
-                                    for ql in qlens:
-                                        for ss in subsamplings:
-                                            for rlt in repl_loss_types:
-                                                for env_name in envs:
+        for disc in disc_types:
+            for ua in usenobs:
+                for n_demo in n_demos:
+                    for d_nl in disc_nonlins:
+                        for per in periods:
+                            for algo in algos:
+                                for ql in qlens:
+                                    for ss in subsamplings:
+                                        for rlt in repl_loss_types:
+                                            for env_name in envs:
+                                                if 'Humanoid' in env_name and ss > 1:
+                                                    lins = ['', '--shuffle_irl_batches', '--use_curr_traj_only']
+                                                else:
+                                                    lins = ['', '--shuffle_irl_batches']
+
+                                                for lin in lins:
                                                     ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
                                                     ua_rbl = ua.replace(" ", "")
                                                     lin_rbl = lin.replace(" ", "")
