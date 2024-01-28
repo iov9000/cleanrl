@@ -5,7 +5,7 @@ import random
 import time
 from datetime import datetime
 from distutils.util import strtobool
-
+import sys
 import gymnasium as gym
 
 gym.envs.register(
@@ -177,8 +177,9 @@ def parse_args():
         for opt in parser._option_string_actions.values()
         if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
     }
+    cli = str(sys.argv).replace('--','').replace('verbose','').replace("'","").replace(" ","_").replace(",","").replace(".py","")
 
-    return args, non_default
+    return args, non_default, cli
 
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, agent, disc, demos, env_kwargs):
@@ -286,12 +287,13 @@ class Actor(nn.Module):
 
 
 if __name__ == "__main__":
-    args, non_default = parse_args()
+    args, non_default, cli = parse_args()
     ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     ua = 'ua' if args.use_actions else ''
     # create output folder with non default arguments in the name
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
-    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    #run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    run_name = f"{ts}_{cli}"
     if len(run_name) > 220:
         run_name = run_name[:220]
     results_dict = {'eval_mu': [], 'eval_std': []}
