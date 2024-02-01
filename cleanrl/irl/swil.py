@@ -154,6 +154,8 @@ class SWILDiscriminator(nn.Module):
         self.beta = torch.tensor(opt.min_beta, dtype=torch.float)
         self.alpha_beta = opt.vb_coeff
 
+        self.buffer_empty_cnt = 0
+
         if opt.disc_nonlin == 'relu':
             nonlin = nn.ReLU()
         elif opt.disc_nonlin == 'leakyrelu':
@@ -265,7 +267,11 @@ class SWILDiscriminator(nn.Module):
 
         # init sorted atom queues
         self.pi_atoms_sorted = deque(maxlen=opt.max_q_len)
+        self.pi_atoms_sorted_bkp = copy.deepcopy(self.pi_atoms_sorted)
+
         self.exp_atoms_sorted = deque(maxlen=opt.max_q_len)
+        self.exp_atoms_sorted_bkp = copy.deepcopy(self.exp_atoms_sorted)
+
         self.pi_atoms_sorted_idx = deque(maxlen=opt.max_q_len)
         self.exp_atoms_sorted_idx = deque(maxlen=opt.max_q_len)
 
@@ -395,133 +401,147 @@ class SWILDiscriminator(nn.Module):
 
                 n = len(sorted_proj)
 
-                #idx = torch.searchsorted(sorted_proj.T.contiguous(), obs_t_slice.T.contiguous())#, right=True)
-                # determine slice index in previously sorted atoms used for SWD computation
-                if self.opt.aligned_index:
-                    idx = torch.tensor(step).unsqueeze(0).unsqueeze(0)
-                else:
-                    idx = torch.searchsorted(sorted_proj.T, obs_t_slice.T)#, right=True)
-                    #idx[idx==0] +=1
-                    #idx[idx==n] -=1
-
-                idxs = self.pi_atoms_sorted_idx[p]
-                idxs_e = self.exp_atoms_sorted_idx[p]
-
-                #print(idxs, idxs_e, idx, torch.where(idxs==idx)[0])
-
-                ## if idx is not in sorted list, use nearest neighbours
-
-
-                #if self.opt.repl_loss_type == 'diff':                
-                #    idx -= 1
-                #idx[idx==0] +=1
-                idx[idx==n] -=1
-                # shift extreme indices
-                #print(n)
-
-                # calculate weight based on position in queue
-                weight = len(self.pi_atoms_sorted)
-                ### TODO: this is important?
-                if self.opt.atom_weight == '1/n':
-                    w = 1/n
-                else:
-                    w = 1
-
-                # TODO: what if target CDF is left or mixed?
-                if self.opt.aligned_index:
-                    i = torch.where(idxs==idx)[0]
-                    j = 0
-                    a_i = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
-                    a_h = (sorted_proj_tgt[i-1,j] - sorted_proj[i-1,j])**2
-                    a_new_i = (sorted_proj_tgt[i,j] - obs_t_slice[0,j])**2
-                    a_new_h = (sorted_proj_tgt[i-1,j] - obs_t_slice[0,j])**2
-                    rew_incr = torch.abs(sorted_proj[i,j] - obs_t_slice[0,j])
-                    rew_decr = torch.abs(sorted_proj[i-1,j] - obs_t_slice[0,j])
-                    rew += torch.where(idxs==idx)[0]
-                    if rew_incr > rew_decr:
-                        rew += w*(a_new_h)  
+                if n > 0:
+                    #idx = torch.searchsorted(sorted_proj.T.contiguous(), obs_t_slice.T.contiguous())#, right=True)
+                    # determine slice index in previously sorted atoms used for SWD computation
+                    if self.opt.aligned_index:
+                        idx = torch.tensor(step).unsqueeze(0).unsqueeze(0)
                     else:
-                        rew += w*(a_new_i)
-                else:
-                    for j,i in enumerate(idx):
-                        rew_j = 0
-                        #print(j,i)
-                        #print(sorted_proj.shape)
-                        if self.opt.swil_rew == 'insertion_loss':
-                            w = 1/(n*(n+1))
-                            # new atom contribution
-                            diff = sorted_proj[1:]-sorted_proj[:-1]
+                        idx = torch.searchsorted(sorted_proj.T, obs_t_slice.T)#, right=True)
+                        #idx[idx==0] +=1
+                        #idx[idx==n] -=1
 
-                            rew += w*torch.sum(sorted_proj[i,j]-obs_t_slice[0,j] +
-                                            sorted_proj[i-1,j]-obs_t_slice[0,j])
-                            # reweighting of integrals
-                            rew_j = diff
-                            rew -= torch.sum(w*diff[:i-1,j])
-                            rew += torch.sum(w*diff[i:,j])
+                    idxs = self.pi_atoms_sorted_idx[p]
+                    idxs_e = self.exp_atoms_sorted_idx[p]
+
+                    #print(idxs, idxs_e, idx, torch.where(idxs==idx)[0])
+
+                    ## if idx is not in sorted list, use nearest neighbours
+
+
+                    #if self.opt.repl_loss_type == 'diff':                
+                    #    idx -= 1
+                    #idx[idx==0] +=1
+                    idx[idx==n] -=1
+                    # shift extreme indices
+                    #print(n)
+
+                    #print("Number of atoms in buffer", n)
+                    # calculate weight based on position in queue
+                    weight = len(self.pi_atoms_sorted)
+                    ### TODO: this is important?
+                    if self.opt.atom_weight == '1/n':
+                        w = 1/n
+                    else:
+                        w = 1
+
+                    # TODO: what if target CDF is left or mixed?
+                    if self.opt.aligned_index:
+                        i = torch.where(idxs==idx)[0]
+                        j = 0
+                        a_i = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
+                        a_h = (sorted_proj_tgt[i-1,j] - sorted_proj[i-1,j])**2
+                        a_new_i = (sorted_proj_tgt[i,j] - obs_t_slice[0,j])**2
+                        a_new_h = (sorted_proj_tgt[i-1,j] - obs_t_slice[0,j])**2
+                        rew_incr = torch.abs(sorted_proj[i,j] - obs_t_slice[0,j])
+                        rew_decr = torch.abs(sorted_proj[i-1,j] - obs_t_slice[0,j])
+                        rew += torch.where(idxs==idx)[0]
+                        if rew_incr > rew_decr:
+                            rew += w*(a_new_h)  
                         else:
-                            # calculate diff when replacing atom
-                            a_prev = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
-                            a_prev_2 = (sorted_proj_tgt[i-1,j] - sorted_proj[i-1,j])**2
+                            rew += w*(a_new_i)
+                    else:
+                        for j,i in enumerate(idx):
+                            rew_j = 0
+                            #print(j,i)
+                            #print(sorted_proj.shape)
+                            if self.opt.swil_rew == 'insertion_loss':
+                                w = 1/(n*(n+1))
+                                # new atom contribution
+                                diff = sorted_proj[1:]-sorted_proj[:-1]
 
-                            a_new = (sorted_proj_tgt[i,j] - obs_t_slice[0,j])**2
-                            a_new_2 = (sorted_proj_tgt[i-1,j] - obs_t_slice[0,j])**2
-
-
-                            a_i = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
-                            a_h = (sorted_proj_tgt[i-1,j] - sorted_proj[i-1,j])**2
-                            a_new_i = (sorted_proj_tgt[i,j] - obs_t_slice[0,j])**2
-                            a_new_h = (sorted_proj_tgt[i-1,j] - obs_t_slice[0,j])**2
-
-                            rew_incr = torch.abs(sorted_proj[i,j] - obs_t_slice[0,j])
-                            rew_decr = torch.abs(sorted_proj[i-1,j] - obs_t_slice[0,j])
-                            #w = 1/ (n + a_prev) # more reward if closer
-
-                            #print(sorted_proj[i,j] > sorted_proj_tgt[i,j])
-
-                            rew_j = a_new - a_prev
-                            if self.opt.repl_loss_type == 'diff':
-                                rew_j = a_new-a_prev
-                                rew += w*(rew_j)
-                            elif self.opt.repl_loss_type == 'diffmax0':
-                                rew_j = a_new-a_prev
-                                if rew_j > 0: # > 0 bc we flip it later
-                                    rew_j = 0
-                                rew += w*(rew_j)
-                            elif self.opt.repl_loss_type == 'diff2':
-                                #if sorted_proj[i,j] > sorted_proj_tgt[i,j]:
-                                    #print("api>ae")
-                                if rew_incr > rew_decr:
-                                    rew += w*(a_new_h-a_h)  
-                                    rew_j = a_new_h-a_h
-                                else:
-                                    rew += w*(a_new_i-a_i)
-                                    rew_j = a_new_i-a_i
-                                    #rew += w*(a_new - a_prev)
-                            elif self.opt.repl_loss_type == 'diff2max0':
-                                #print(sorted_proj[i,j] > sorted_proj_tgt[i,j])
-                                if rew_incr > rew_decr:
-                                    rew_j = a_new_h-a_h
-                                else:
-                                    rew_j = a_new_i-a_i
-                                if rew_j > 0: # > 0 bc we flip it later
-                                    rew_j = 0
-                                # XXX: sign problems!!!???
-                                rew += w*(rew_j)  
-
-                            elif self.opt.repl_loss_type == 'diff3':
-                                if sorted_proj[i,j] > sorted_proj_tgt[i,j]:
-                                    rew += w*(a_new - a_prev)
-                                else:
-                                    rew -= w*(a_new - a_prev)
+                                rew += w*torch.sum(sorted_proj[i,j]-obs_t_slice[0,j] +
+                                                sorted_proj[i-1,j]-obs_t_slice[0,j])
+                                # reweighting of integrals
+                                rew_j = diff
+                                rew -= torch.sum(w*diff[:i-1,j])
+                                rew += torch.sum(w*diff[i:,j])
                             else:
-                                if rew_incr > rew_decr:
-                                    rew += w*(a_new_h)  
-                                else:
-                                    rew += w*(a_new_i)
+                                # calculate diff when replacing atom
+                                a_prev = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
+                                a_prev_2 = (sorted_proj_tgt[i-1,j] - sorted_proj[i-1,j])**2
 
-                        # replace stored atoms in queue if we're getting closer
-                        if self.opt.replace_atoms and rew_j < 0:
-                            self.pi_atoms_sorted[p][idx] = obs_t_slice
+                                a_new = (sorted_proj_tgt[i,j] - obs_t_slice[0,j])**2
+                                a_new_2 = (sorted_proj_tgt[i-1,j] - obs_t_slice[0,j])**2
+
+
+                                a_i = (sorted_proj_tgt[i,j] - sorted_proj[i,j])**2
+                                a_h = (sorted_proj_tgt[i-1,j] - sorted_proj[i-1,j])**2
+                                a_new_i = (sorted_proj_tgt[i,j] - obs_t_slice[0,j])**2
+                                a_new_h = (sorted_proj_tgt[i-1,j] - obs_t_slice[0,j])**2
+
+                                rew_incr = torch.abs(sorted_proj[i,j] - obs_t_slice[0,j])
+                                rew_decr = torch.abs(sorted_proj[i-1,j] - obs_t_slice[0,j])
+                                #w = 1/ (n + a_prev) # more reward if closer
+
+                                #print(sorted_proj[i,j] > sorted_proj_tgt[i,j])
+
+                                rew_j = a_new - a_prev
+                                if self.opt.repl_loss_type == 'diff':
+                                    rew_j = a_new-a_prev
+                                    rew += w*(rew_j)
+                                elif self.opt.repl_loss_type == 'diffmax0':
+                                    rew_j = a_new-a_prev
+                                    if rew_j > 0: # > 0 bc we flip it later
+                                        rew_j = 0
+                                    rew += w*(rew_j)
+                                elif self.opt.repl_loss_type == 'diff2':
+                                    #if sorted_proj[i,j] > sorted_proj_tgt[i,j]:
+                                        #print("api>ae")
+                                    if rew_incr > rew_decr:
+                                        rew += w*(a_new_h-a_h)  
+                                        rew_j = a_new_h-a_h
+                                    else:
+                                        rew += w*(a_new_i-a_i)
+                                        rew_j = a_new_i-a_i
+                                        #rew += w*(a_new - a_prev)
+                                elif self.opt.repl_loss_type == 'diff2max0':
+                                    #print(sorted_proj[i,j] > sorted_proj_tgt[i,j])
+                                    if rew_incr > rew_decr:
+                                        rew_j = a_new_h-a_h
+                                    else:
+                                        rew_j = a_new_i-a_i
+                                    if rew_j > 0: # > 0 bc we flip it later
+                                        rew_j = 0
+                                    # XXX: sign problems!!!???
+                                    rew += w*(rew_j)  
+
+                                elif self.opt.repl_loss_type == 'diff3':
+                                    if sorted_proj[i,j] > sorted_proj_tgt[i,j]:
+                                        rew += w*(a_new - a_prev)
+                                    else:
+                                        rew -= w*(a_new - a_prev)
+                                else:
+                                    if rew_incr > rew_decr:
+                                        rew += w*(a_new_h)  
+                                    else:
+                                        rew += w*(a_new_i)
+
+                            # replace stored atoms in queue if we're getting closer
+                            if self.opt.replace_atoms and rew_j < 0:
+                                self.pi_atoms_sorted[p][idx] = obs_t_slice
+                            
+                            if self.opt.replace_atoms_ouo :
+                                #assert self.opt.swil_period == '-1.0', 'full trajectories required'
+                                self.pi_atoms_sorted[p] = torch.cat([self.pi_atoms_sorted[p][:idx],
+                                                                    self.pi_atoms_sorted[p][idx+1:-1]])
+                                self.exp_atoms_sorted[p] = torch.cat([self.exp_atoms_sorted[p][:idx],
+                                                                    self.exp_atoms_sorted[p][idx+1:-1]])
+                else:
+                    self.buffer_empty_cnt+=1
+                    print("Atom buffer empty", self.buffer_empty_cnt)
+                    self.pi_atoms_sorted = copy.deepcopy(self.pi_atoms_sorted_bkp)
+                    self.exp_atoms_sorted = copy.deepcopy(self.exp_atoms_sorted_bkp)
 
             rew = -rew
         
@@ -772,6 +792,7 @@ class SWILDiscriminator(nn.Module):
         self.policy_acs = update_dict['policy_acs']
         policy_obs_next = update_dict['policy_obs_next']
         policy_dones = update_dict['policy_dones']
+        self.buffer_empty_cnt = 0
 
         exp_obs = update_dict['expert_obs']
         exp_acs = update_dict['expert_acs']
@@ -793,10 +814,13 @@ class SWILDiscriminator(nn.Module):
             exp_slices_sorted, exp_slices_sorted_idx = torch.sort(expert_out, dim=0, stable=True)
 
             # save to FIFO queue of sorted atoms
-            self.pi_atoms_sorted.append(pi_slices_sorted)
-            self.exp_atoms_sorted.append(exp_slices_sorted)
+            self.pi_atoms_sorted.append(pi_slices_sorted.detach())
+            self.exp_atoms_sorted.append(exp_slices_sorted.detach())
             self.pi_atoms_sorted_idx.append(pi_slices_sorted_idx)
             self.exp_atoms_sorted_idx.append(exp_slices_sorted_idx)
+            self.pi_atoms_sorted_bkp = copy.deepcopy(self.pi_atoms_sorted)
+            self.exp_atoms_sorted_bkp = copy.deepcopy(self.pi_atoms_sorted)
+
             #self.pi_atoms_sorted_ = copy.deepcopy(self.pi_atoms_sorted)
 
             d_out = torch.cat([expert_out, policy_out])

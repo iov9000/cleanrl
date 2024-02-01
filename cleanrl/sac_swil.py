@@ -135,6 +135,8 @@ def parse_args():
     parser.add_argument("--max_q_len", type=int, default=1, help="max number of projected atom sets in queue")
     parser.add_argument("--max_swil_step", type=int, default=100000000, help="only update projections until some timestep")
     parser.add_argument("--replace_atoms", default=False, required=False, action='store_true', help="actually replace atoms with policy samples")
+    parser.add_argument("--replace_atoms_ouo", default=False, required=False, action='store_true', help="remove replaced atoms (only use once)")
+
     parser.add_argument('--use_curr_traj_only', default=False, required=False, 
         action='store_true', help='only used last sampled trajectory to do matching')
 
@@ -201,6 +203,8 @@ def parse_args():
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--eval_test_eps", type=float, default=0.0, help="test perturbation eps")
+    parser.add_argument('--eval_on_different_seed', default=False, required=False, 
+        action='store_true', help='verbose output')
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
     parser.add_argument('--drop_batch', default=False, required=False, 

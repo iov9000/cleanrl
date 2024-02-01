@@ -769,7 +769,11 @@ def save_traj_dict(opt, env_name, env, model, device,
     cnt = 0
     ep_rew = []
     while cnt < nr_trajectories:
-        ob, _ = env.reset(seed=opt.seed + np.random.randint(0,1000))
+        if opt.eval_on_different_seed:
+            ob, _ = env.reset(seed=opt.seed + np.random.randint(0,1000))
+        else:
+            ob, _ = env.reset(seed=opt.seed)
+
         done = False
         total_reward = 0
         episode_obs = []

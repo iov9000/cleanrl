@@ -153,7 +153,8 @@ def parse_args():
     parser.add_argument("--max_q_len", type=int, default=1, help="max number of projected atom sets in queue")
     parser.add_argument("--max_swil_step", type=int, default=100000000, help="only update projections until some timestep")
     parser.add_argument("--replace_atoms", default=False, required=False, action='store_true', help="actually replace atoms with policy samples")
-    
+    parser.add_argument("--replace_atoms_ouo", default=False, required=False, action='store_true', help="remove replaced atoms (only use once)")
+
     ## testing (algo exploration) parameters
     parser.add_argument("--single_state_pi0", default=False, required=False, action='store_true', help="use single state initial measure")
     parser.add_argument("--load_init_rho", default=False, required=False, action='store_true', help="use single state initial measure")
@@ -218,7 +219,8 @@ def parse_args():
         action='store_false', help='use bias in disc arch')
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
-
+    parser.add_argument('--eval_on_different_seed', default=False, required=False, 
+        action='store_true', help='evaluate on random seed')
     parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
@@ -598,24 +600,24 @@ if __name__ == "__main__":
 
             # SWIL updates
             #print(cnt_on_policy_updates, args.swil_period)
-            print(">>>>>>>> MOD ", cnt_on_policy_updates%args.swil_period)
+            #print(">>>>>>>> MOD ", cnt_on_policy_updates%args.swil_period)
             if cnt_on_policy_updates % args.swil_period == 0:
                 #print(update % int(np.ceil(1/(n_irl_epochs+1))))
                 if update % int(np.ceil(1/(n_irl_epochs+1))) == 0:
                     k = int(n_irl_epochs) if n_irl_epochs >=0 else 1
                     total_swil_updates+=1
                     #print(">>>>>>>> SWIL update")
-                    print(len(demos['all']['obs']), obs.shape)
+                    #print(len(demos['all']['obs']), obs.shape)
 
                     #np.save("515_init_rho.npy", obs)
                     if args.load_init_rho:
                         obs = torch.tensor(np.load("515_init_rho.npy"))
 
-                    for epoch in tqdm(range(k)):            
+                    for epoch in range(k):            
                         # GAIL Discriminator Update 
                         gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=args.shuffle_irl_batches)
                         for d in gen_demos:
-                            print(len(d['obs']), obs.shape, args.batch_size)
+                            #print(len(d['obs']), obs.shape, args.batch_size)
                             if len(d['obs']) < args.batch_size:
                                 obs_ = obs[:len(d['obs'])]
                                 actions_ = actions[:len(d['obs'])]
