@@ -55,7 +55,7 @@ def parse_args():
         help="the id of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
-    parser.add_argument("--logging_interval", type=int, default=200,
+    parser.add_argument("--logging_interval", type=int, default=500,
         help="logging interval")
     parser.add_argument("--eval_interval", type=int, default=10000,
         help="evaluation interval")
@@ -279,6 +279,8 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
+LOG_STD_MAX = 2
+LOG_STD_MIN = -5
 
 class Agent(nn.Module):
     def __init__(self, envs, hidden_size=64, nonlin='tanh', discrete=False):        
@@ -324,8 +326,9 @@ class Agent(nn.Module):
 
     def get_action_and_value_c(self, x, action=None, eval=False):
         action_mean = self.actor_mean(x)
-        action_logstd = self.actor_logstd.expand_as(action_mean)
-        action_std = torch.exp(action_logstd)
+        action_logstd = torch.tanh(self.actor_logstd.expand_as(action_mean))
+        log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (action_logstd + 1)
+        action_std = torch.exp(log_std)
         probs = Normal(action_mean, action_std)
         if action is None:
             action = probs.sample()
@@ -369,6 +372,9 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
+
+    print(args.normalize_obs)
+
 
     writer = SummaryWriter(f"runs/{run_name}")
     writer.add_text(
@@ -420,8 +426,8 @@ if __name__ == "__main__":
         test_env = gym.make(args.env_id, **env_kwargs)        
 
     if args.normalize_obs and isinstance(test_env.action_space, gym.spaces.Box):
-            env = gym.wrappers.NormalizeObservation(test_env)
-            env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        test_env = gym.wrappers.NormalizeObservation(test_env)
+        test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
     if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
         test_env = gym.wrappers.ClipAction(test_env)
 

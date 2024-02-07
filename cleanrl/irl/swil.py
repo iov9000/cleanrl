@@ -537,6 +537,8 @@ class SWILDiscriminator(nn.Module):
                                                                     self.pi_atoms_sorted[p][idx+1:-1]])
                                 self.exp_atoms_sorted[p] = torch.cat([self.exp_atoms_sorted[p][:idx],
                                                                     self.exp_atoms_sorted[p][idx+1:-1]])
+
+                            ## TODO: hierarchy of multiple batches?
                 else:
                     self.buffer_empty_cnt+=1
                     print("Atom buffer empty", self.buffer_empty_cnt)

@@ -171,6 +171,8 @@ def parse_args():
     parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
+    parser.add_argument('--eval_on_different_seed', default=False, required=False, 
+        action='store_true', help='evaluate on random seed')
     parser.add_argument("--disc_nonlin", type=str, default="tanh",
         help="divergence type")
     parser.add_argument('--normalize_irl_rewards', default=False, 
@@ -220,6 +222,8 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
+LOG_STD_MAX = 2
+LOG_STD_MIN = -5
 
 class Agent(nn.Module):
     def __init__(self, env, hidden_size=64, nonlin='tanh', discrete=False):        
@@ -262,8 +266,9 @@ class Agent(nn.Module):
 
     def get_action_and_value_c(self, x, action=None, eval=False):
         action_mean = self.actor_mean(x)
-        action_logstd = self.actor_logstd.expand_as(action_mean)
-        action_std = torch.exp(action_logstd)
+        action_logstd = torch.tanh(self.actor_logstd.expand_as(action_mean))
+        log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (action_logstd + 1)
+        action_std = torch.exp(log_std)
         probs = Normal(action_mean, action_std)
         if action is None:
             action = probs.sample()

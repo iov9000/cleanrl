@@ -29,7 +29,6 @@ import torch.optim as optim
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
-from irl.gail import GailReward, GAILDiscriminator
 from irl.utils import load_hf_demos, evaluate_model, prepare_batch_update_irl,\
      enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict,\
      demos_sample_batch, get_concat_samples, AbsorbAfterDoneWrapper
@@ -158,6 +157,8 @@ def parse_args():
         action='store_true', help='use bias in disc arch')
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
+    parser.add_argument('--eval_on_different_seed', default=True, required=False, 
+        action='store_false', help='verbose output')
     parser.add_argument("--test_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument("--perturbation_parameters", type=str, nargs='+', default='', help="which env parameter to perturb")
 

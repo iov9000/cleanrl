@@ -187,7 +187,8 @@ def parse_args():
         action='store_false', help='use bias in disc arch')
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
-
+    parser.add_argument('--eval_on_different_seed', default=False, required=False, 
+        action='store_true', help='evaluate on random seed')
     parser.add_argument("--test_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument("--perturbation_parameters", type=str, nargs='+', default='', help="which env parameter to perturb")
     parser.add_argument('--verbose', default=False, required=False, 
@@ -244,6 +245,8 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
+LOG_STD_MAX = 2
+LOG_STD_MIN = -5
 
 class Agent(nn.Module):
     def __init__(self, envs, hidden_size=64, nonlin='tanh', discrete=False):        
@@ -289,8 +292,9 @@ class Agent(nn.Module):
 
     def get_action_and_value_c(self, x, action=None, eval=False):
         action_mean = self.actor_mean(x)
-        action_logstd = self.actor_logstd.expand_as(action_mean)
-        action_std = torch.exp(action_logstd)
+        action_logstd = torch.tanh(self.actor_logstd.expand_as(action_mean))
+        log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (action_logstd + 1)
+        action_std = torch.exp(log_std)
         probs = Normal(action_mean, action_std)
         if action is None:
             action = probs.sample()
@@ -337,6 +341,8 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
+
+    print(args.normalize_obs)
 
     writer = SummaryWriter(f"runs/{run_name}")
     #writer.add_hparams(vars(args))

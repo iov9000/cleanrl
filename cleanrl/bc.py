@@ -25,7 +25,8 @@ from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.utils import load_hf_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
-                    demos_gen_dict, AntCFWrapper, MujocoTestWrapper, save_traj_dict, evaluate_model
+                    demos_gen_dict, AntCFWrapper, MujocoTestWrapper, save_traj_dict, evaluate_model,\
+                        FrankaObsWrapper, load_hf_demos_name, load_fast_demos, load_lap_demos
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -320,6 +321,18 @@ if __name__ == "__main__":
     # Behavioural cloning loop:
     global_step = 0
     #args.batch_size = 128
+
+    if 'Adroit' in args.env_id:
+        test_env = gym.make(args.env_id, max_episode_steps=500, render_mode='rgb_array')
+        #env.set_env_state(demos['all']['init_state_dict'][0])
+    elif 'Franka' in args.env_id:
+        test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'], render_mode='rgb_array')
+        test_env = FrankaObsWrapper(test_env)
+    else:
+        test_env = gym.make(args.env_id, render_mode='rgb_array', **env_kwargs)      
+
+    if args.perturb_dynamics > 0.0:
+        test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
 
     for epoch in tqdm(range(args.update_epochs)):            
         # GAIL Discriminator Update (exhaust demos)
