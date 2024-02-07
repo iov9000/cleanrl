@@ -180,6 +180,8 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
+LOG_STD_MAX = 2
+LOG_STD_MIN = -5
 
 class Agent(nn.Module):
     def __init__(self, envs, hidden_size=64, nonlin='tanh', discrete=False):
@@ -222,8 +224,9 @@ class Agent(nn.Module):
 
     def get_action_and_value_c(self, x, action=None, eval=False):
         action_mean = self.actor_mean(x)
-        action_logstd = self.actor_logstd.expand_as(action_mean)
-        action_std = torch.exp(action_logstd)
+        action_logstd = torch.tanh(self.actor_logstd.expand_as(action_mean))
+        log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (action_logstd + 1)
+        action_std = torch.exp(log_std)
         probs = Normal(action_mean, action_std)
         if action is None:
             action = probs.sample()
