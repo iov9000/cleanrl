@@ -171,6 +171,8 @@ def parse_args():
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
+    parser.add_argument('--eval_on_different_seed', default=False, required=False, 
+        action='store_true', help='evaluate on random seed')
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
     parser.add_argument('--drop_batch', default=False, required=False, 

@@ -1,6 +1,7 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/td3/#td3_continuous_actionpy
 import argparse
 import os
+import sys
 import random
 import time
 from datetime import datetime
@@ -150,6 +151,8 @@ def parse_args():
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
+    parser.add_argument('--eval_on_different_seed', default=False, required=False, 
+        action='store_true', help='evaluate on random seed')
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
     parser.add_argument('--drop_batch', default=False, required=False, 
@@ -163,12 +166,23 @@ def parse_args():
         if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
     }
 
-    return args, non_default
+    cli = str(sys.argv).replace('--','').replace('verbose','').replace("'","").replace(" ","_").replace(",","").replace(".py","")
 
+    return args, non_default, cli
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, demos):
     def thunk():
-        env = gym.make(env_id)
+        if 'Adroit' in env_id:
+            #env = AdroitResetWrapper(gym.make(env_id, max_episode_steps=500, render_mode='rgb_array'), demos)
+            env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
+
+            #env.set_env_state(demos['all']['init_state_dict'][0])
+        elif 'Franka' in env_id:
+            env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'], render_mode='rgb_array')
+            env = FrankaObsWrapper(env)
+        else:
+            env = gym.make(env_id, render_mode='rgb_array', **env_kwargs)          
+        
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
@@ -238,12 +252,14 @@ class Actor(nn.Module):
         return action, log_prob, mean
 
 if __name__ == "__main__":
-    args, non_default = parse_args()
+    args, non_default, cli = parse_args()
     ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     ua = 'ua' if args.use_actions else ''
     # create output folder with non default arguments in the name
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
-    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    #run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    run_name = f"{ts}_{cli}"
+
     results_dict = {'eval_mu': [], 'eval_std': []}
 
     if args.track:
@@ -282,7 +298,15 @@ if __name__ == "__main__":
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
     #  get env specs
-    test_env = gym.make(args.env_id)
+    if 'Adroit' in args.env_id:
+        #test_env = AdroitResetWrapper(gym.make(args.env_id, max_episode_steps=500), demos)
+        test_env = gym.make(args.env_id, max_episode_steps=500)
+        #test_env.set_env_state(demos['all']['init_state_dict'][0])
+    elif 'Franka' in args.env_id:
+        test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+        test_env = FrankaObsWrapper(test_env)
+    else:
+        test_env = gym.make(args.env_id)     
 
     # env setup
     envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, demos)])
@@ -415,7 +439,7 @@ if __name__ == "__main__":
                 
                 #  evaluate at regular intervals and save
                 if global_step % args.eval_interval == 0:
-                    mu, std, d = evaluate_model(args, actor, device)
+                    mu, std, d = evaluate_model(args, actor, device, test_env)
                     print(f"Evaluation at {global_step}: {mu}, {std}")
                     writer.add_scalar('eval/mu', mu, global_step)
                     writer.add_scalar('eval/std', std, global_step)

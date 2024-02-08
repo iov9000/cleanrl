@@ -160,6 +160,8 @@ class SWILDiscriminator(nn.Module):
             nonlin = nn.ReLU()
         elif opt.disc_nonlin == 'leakyrelu':
             nonlin = nn.LeakyReLU()
+        elif opt.disc_nonlin == 'prelu':
+            nonlin = nn.PReLU()
         elif opt.disc_nonlin == 'tanh':
             nonlin = nn.Tanh()
         elif opt.disc_nonlin == 'id':
