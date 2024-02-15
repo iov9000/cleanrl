@@ -50,6 +50,13 @@ gym.envs.register(
      max_episode_steps=1000,
 )
 
+gym.envs.register(
+     id='LapLiver-v0',
+     entry_point='envs.env_lap_liver:LapLiver',
+     max_episode_steps=1000,
+)
+
+
 from irl.gail import GailReward, GAILDiscriminator
 from irl.utils import load_hf_demos, load_lap_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
                    demos_gen_dict, MujocoTestWrapper, save_traj_dict
@@ -79,6 +86,26 @@ def parse_args():
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # environment specific arguments
+    parser.add_argument('--goal_conditioning', default=False, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument('--condition_on_n_tasks_completed', default=False, 
+        action='store_true', required=False, help='add num tasks completed as conditioner')  
+    parser.add_argument('--done_on_collision', default=True, 
+        action='store_false', required=False, help='end episode on collision') 
+    parser.add_argument('--collision_loss', default=False, 
+        action='store_true', required=False, help='end episode on collision')  
+    parser.add_argument('--hard_collisions', default=True, 
+        action='store_false', required=False, help='dont progress on collision')  
+    parser.add_argument('--continuous_actions', default=True, 
+        action='store_false', required=False, help='normalize irl rewards')  
+    parser.add_argument('--render_meshes', default=True, 
+        action='store_true', required=False, help='normalize irl rewards')  
+    parser.add_argument("--step_size", type=float, default=0.3,
+        help="step magnitude")
+    parser.add_argument("--state_spec", type=str, default="r3",
+        help="state spec (r3/r3so3)")
+
+    # environment specific arguments
     parser.add_argument('--normalize_obs', default=True, 
         action='store_true', required=False, help='normalize irl rewards')  
     parser.add_argument('--clip_action', default=True, 
@@ -87,7 +114,7 @@ def parse_args():
         action='store_true', required=False, help='normalize irl rewards')  
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
+    parser.add_argument("--env-id", type=str, default="LapLiver-v0",
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
@@ -134,6 +161,10 @@ def parse_args():
         type=int, help='enhance demos using W2 barycenters')
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
+    parser.add_argument('--use_dones', default=False, required=False, 
+        action='store_true', help='use actions in discriminator')
+    parser.add_argument('--use_next_obs', default=False, required=False, 
+        action='store_true', help='use actions in discriminator')
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
                    help='discriminator MLP layer dimensions')
     parser.add_argument('--irm_coeff', default=0, type=float, 
@@ -150,6 +181,16 @@ def parse_args():
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
+
+    parser.add_argument('--use_weight_norm', default=False, required=False, 
+        action='store_true', help='use weight norm')
+    parser.add_argument('--use_spectral_norm', default=False, required=False, 
+        action='store_true', help='use spectral_norm')
+    parser.add_argument('--use_absorb_wrapper', default=False, required=False, 
+        action='store_true', help='use_absorb_wrapper')
+    parser.add_argument('--use_curr_traj_only', default=False, required=False, 
+        action='store_true', help='only used last sampled trajectory to do matching')
+
     parser.add_argument('--use_disc_bias', default=True, required=False, 
         action='store_false', help='use bias in disc arch')
     parser.add_argument("--div", type=str, default="rkl",
@@ -163,7 +204,8 @@ def parse_args():
         action='store_false', help='use bias in disc arch')
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
-
+    parser.add_argument('--eval_on_different_seed', default=False, required=False, 
+        action='store_true', help='evaluate on random seed')
     parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
@@ -180,9 +222,18 @@ def parse_args():
 
     return args, non_default
 
-def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc, demos):
+def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
     def thunk():
-        env = gym.make(env_id, demos=demos)
+        env = gym.make(args.env_id, gc=opt.goal_conditioning, 
+                             state_spec=opt.state_spec, 
+                             step_size=opt.step_size,
+                             done_on_collision=opt.done_on_collision,
+                             hard_collisions=opt.hard_collisions,
+                             plot_meshes=opt.render_meshes,
+                             continuous_actions=opt.continuous_actions,
+                             condition_on_n_tasks_completed=opt.condition_on_n_tasks_completed,
+                             collision_loss=opt.collision_loss)        
+
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if opt.time_aware:
             env = gym.wrappers.TimeAwareObservation(env)
@@ -211,6 +262,8 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
+LOG_STD_MAX = 2
+LOG_STD_MIN = -5
 
 class Agent(nn.Module):
     def __init__(self, envs, hidden_size=64, nonlin='tanh', discrete=False):        
@@ -249,14 +302,19 @@ class Agent(nn.Module):
     def get_value(self, x):
         return self.critic(x)
 
-    def get_action_and_value_c(self, x, action=None):
+    def get_action_and_value_c(self, x, action=None, eval=False):
         action_mean = self.actor_mean(x)
-        action_logstd = self.actor_logstd.expand_as(action_mean)
-        action_std = torch.exp(action_logstd)
+        action_logstd = torch.tanh(self.actor_logstd.expand_as(action_mean))
+        log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (action_logstd + 1)
+        action_std = torch.exp(log_std)
         probs = Normal(action_mean, action_std)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+
+        if eval:
+            return action_mean, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+        else:
+            return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
     def get_action_and_value_d(self, x, action=None):
         logits = self.actor_mean(x)
@@ -313,12 +371,20 @@ if __name__ == "__main__":
         torch.set_default_tensor_type(torch.FloatTensor)
 
 
-    if args.env_id == 'Lap-v0':
+    if 'Lap' in args.env_id:
         demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
     else:
         demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
 
-    test_env = gym.make(args.env_id)
+    test_env = gym.make(args.env_id, gc=args.goal_conditioning, 
+                             state_spec=args.state_spec, 
+                             step_size=args.step_size,
+                             done_on_collision=args.done_on_collision,
+                             hard_collisions=args.hard_collisions,
+                             plot_meshes=args.render_meshes,
+                             continuous_actions=args.continuous_actions,
+                             condition_on_n_tasks_completed=args.condition_on_n_tasks_completed,
+                             collision_loss=args.collision_loss)        
 
     if args.enhance_barys > 0:
         print("Enhancing demos by computing Wasserstein barycenters")

@@ -184,7 +184,8 @@ def parse_args():
     parser.add_argument("--div", type=str, default="rkl", help="divergence type")
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--mode", type=str, default='training', help="training / inference")
-
+    parser.add_argument('--eval_on_different_seed', default=False, required=False, 
+        action='store_true', help='evaluate on random seed')
     parser.add_argument('--drop_batch', default=False, required=False, 
         action='store_true', help='drop batch in irl epochs')   
     parser.add_argument('--on_policy', default=False, required=False, 

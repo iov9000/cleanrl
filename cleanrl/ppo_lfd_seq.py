@@ -179,7 +179,8 @@ def parse_args():
         action='store_false', help='use bias in disc arch')
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
-
+    parser.add_argument('--eval_on_different_seed', default=False, required=False, 
+        action='store_true', help='evaluate on random seed')
     parser.add_argument("--test_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument("--perturbation_parameters", type=str, nargs='+', default='', help="which env parameter to perturb")
     parser.add_argument('--verbose', default=False, required=False, 
@@ -228,6 +229,8 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
+LOG_STD_MAX = 2
+LOG_STD_MIN = -5
 
 class Agent(nn.Module):
     def __init__(self, envs, hidden_size=64, nonlin='tanh', discrete=False):        
@@ -268,8 +271,9 @@ class Agent(nn.Module):
 
     def get_action_and_value_c(self, x, action=None, eval=False):
         action_mean = self.actor_mean(x)
-        action_logstd = self.actor_logstd.expand_as(action_mean)
-        action_std = torch.exp(action_logstd)
+        action_logstd = torch.tanh(self.actor_logstd.expand_as(action_mean))
+        log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (action_logstd + 1)
+        action_std = torch.exp(log_std)
         probs = Normal(action_mean, action_std)
         if action is None:
             action = probs.sample()
@@ -528,11 +532,51 @@ if __name__ == "__main__":
                 det = True
             else:
                 det = False
-            mu, std, d = evaluate_model(args, agent, device, test_env, deterministic = det, wrap_mujoco=args.test_eps > 0)
+            mu, std, d = evaluate_model(args, agent, device, test_env, 
+                        deterministic = det, wrap_mujoco=args.test_eps > 0)
             print(f"Evaluation at {global_step}: {mu}, {std}")
             writer.add_scalar('eval/mu', mu, global_step)
             writer.add_scalar('eval/std', std, global_step)
+            ref_dist = ot.sliced_wasserstein_distance(
+                d['obs'], demos['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
+            # plot rollouts
+            if "MoveP-v0" in args.env_id:
+                demos_obs = demos['obs']
+                agent_obs = d['obs']
 
+                #rho0 = disc.policy_obs.detach().numpy()
+                fig, ax = plt.subplots(1,2,figsize=(6,3), dpi=400)
+
+                ax[0].scatter(test_env.init_pos[0], test_env.init_pos[1], s=200, c='b', marker='o',alpha=1.0)
+                ax[0].scatter(test_env.waypoints[-1][0], test_env.waypoints[-1][1], s=200, c='r', marker='*', alpha=1.0)
+                ax[0].scatter(demos_obs[:,0], demos_obs[:,1], s=20, c='g', alpha=0.2, label='expert')
+                ax[0].scatter(agent_obs[:,0], agent_obs[:,1], s=20, c='m', alpha=0.2, label='agent')
+                ax[0].axis('equal')
+                plt.tight_layout()
+                f = plt.gca()
+
+                # calculate batch SW distance # asymmetric?
+                dist = ot.sliced_wasserstein_distance(
+                    demos_obs, agent_obs, n_projections=100, seed=args.seed)
+
+                # turn off ticks for scatter plot
+                ax[0].get_xaxis().set_ticks([])
+                ax[0].get_yaxis().set_ticks([])
+                ax[0].xaxis.set_ticklabels([])
+                ax[0].yaxis.set_ticklabels([])
+
+                sw_dists.append(dist)
+
+                ax[1].plot(sw_dists)
+                ax[1].axis('equal')
+                ax[1].set_title('SW2 dist, 100 proj.')
+                #plt.colorbar()
+                #plt.savefig(f"runs/{run_name}/reward_{global_step}.png")
+
+                sw_dists.append(dist)
+                # plt.legend()
+                plt.savefig(
+                    f"runs/{run_name}/lfdseq_scatter_{global_step}.png")
     envs.close()
 
     print("Total IRL steps:", irl_count)

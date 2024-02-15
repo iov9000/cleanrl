@@ -470,30 +470,6 @@ if __name__ == "__main__":
                 ## use orthogonal reg on actor
                 alpha = torch.rand((expert_inputs.shape[0], 1))
 
-                #   nu_inter = alpha * expert_inputs + (1 - alpha) * rb_inputs
-                #   nu_next_inter = alpha * expert_next_inputs + (1 - alpha) * rb_next_inputs
-
-                #   nu_inter = torch.cat([nu_inter, nu_next_inter], 0)
-
-                #   with torch.GradientTape(watch_accessed_variables=False) as tape2:
-                #     tape2.watch(nu_inter)
-                #     nu_output = self.nu_net(nu_inter)
-                #   nu_grad = tape2.gradient(nu_output, [nu_inter])[0] + EPS
-                #   nu_grad_penalty = torch.reduce_mean(
-                #       torch.square(torch.norm(nu_grad, axis=-1, keepdims=True) - 1))
-
-                #   nu_loss = loss + nu_grad_penalty * nu_reg
-                #   pi_loss = -loss + keras_utils.orthogonal_regularization(self.actor.trunk)
-
-                # apply to nu and pi
-                # nu_grads = tape.gradient(nu_loss, self.nu_net.variables)
-                # pi_grads = tape.gradient(pi_loss, self.actor.variables)
-
-                # self.nu_optimizer.apply_gradients(zip(nu_grads, self.nu_net.variables))
-                # self.actor_optimizer.apply_gradients(zip(pi_grads, self.actor.variables))
-
-                # del tape
-
                 q_optimizer.zero_grad()
                 loss.backward()
                 q_optimizer.step()

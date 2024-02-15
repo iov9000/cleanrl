@@ -7,8 +7,25 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.autograd as autograd
 from torch.optim import Adam
-from torch.nn.utils import spectral_norm
+from torch.nn.utils import spectral_norm, weight_norm
 from irl.utils import ResNetAIRLDisc, MiniGridCNN
+
+
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    # torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
+
+
+def linlayer(in_dim, out_dim, bias=True, wnorm=False, snorm=False):
+    # return layer_init(nn.Linear(in_dim, out_dim, bias=bias))
+    if wnorm:
+        return weight_norm(nn.Linear(in_dim, out_dim, bias=bias), 'weight')
+    elif snorm:
+        return spectral_norm(nn.Linear(in_dim, out_dim, bias=bias), 'weight')
+    else:
+        nn.Linear(in_dim, out_dim, bias=bias)
+
 
 class fIRLDiscriminator(nn.Module):
     def __init__(self, env, opt):
@@ -16,35 +33,48 @@ class fIRLDiscriminator(nn.Module):
 
         # parse options
         self.env = env
+        self.opt = opt
         self.layer_dims = opt.d_layer_dims
         self.lr = opt.disc_lr
         self.use_actions = opt.use_actions
+        self.use_dones = opt.use_dones
+        self.use_next_obs = opt.use_next_obs        
         self.irm_coeff = opt.irm_coeff
         self.l2_coeff = opt.l2_coeff
         self.lip_coeff = opt.lip_coeff
         self.use_cnn_base = opt.use_cnn_base
         self.bias = opt.use_disc_bias
-        self.use_resnet = opt.firl_use_disc_resnet
-
+        self.is_atari = 'atari' in self.opt.exp_name
+        self.snorm = opt.use_spectral_norm
+        self.wnorm = opt.use_weight_norm
         self.clamp_magnitude = 10
 
-        ob_shapes = list(env.observation_space.shape)
+        if opt.disc_nonlin == 'relu':
+            nonlin = nn.ReLU()
+        elif opt.disc_nonlin == 'tanh':
+            nonlin = nn.Tanh()
+        else:
+            nonlin = nn.PReLU()
+
+        if isinstance(env.observation_space, gym.spaces.Dict):
+            ob_shapes = list(env.observation_space['observation'].shape)
+        else:
+            ob_shapes = list(env.observation_space.shape)
+        #ob_shapes = list(env.observation_space.shape)
         ac_shapes = list(env.action_space.shape)
 
-        if not ac_shapes:
-            ac_shapes = [1]
+        dim0 = ob_shapes[-1]
         if self.use_actions:
-            self.layer_dims = [ob_shapes[-1] + ac_shapes[-1]] + self.layer_dims
-        else:
-            self.layer_dims = [ob_shapes[-1]] + self.layer_dims
+            dim0 = dim0 + ac_shapes[-1]
+        if opt.use_dones:
+            dim0 = dim0 + 1
+        if opt.use_next_obs:
+            dim0 = dim0 + ob_shapes[-1]
+
+        self.layer_dims = [dim0] + self.layer_dims
         ac_len = ac_shapes[0]
 
         layer_dims = self.layer_dims
-
-        if self.lip_coeff > 0:
-            f = lambda x: spectral_norm(x)
-        else:
-            f = lambda x: x
 
         # reward function g_\psi
         if self.use_cnn_base:

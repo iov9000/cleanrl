@@ -384,14 +384,14 @@ if __name__ == "__main__":
                     qf1_pi = qf1(data.observations, pi)
                     qf2_pi = qf2(data.observations, pi)
                     min_qf_pi = torch.min(qf1_pi, qf2_pi).view(-1)
-                    actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
+                    actor_loss = ((alpha * log_pi) - min_qf_pi).mean() # modify pi update using PA?
 
                     actor_optimizer.zero_grad()
                     actor_loss.backward()
                     actor_optimizer.step()
 
                     if args.autotune:
-                        data2 = rb.sample(args.batch_size)
+                        data2 = rb.sample(args.batch_size) # second data sample 
 
                         with torch.no_grad():
                             _, log_pi, _ = actor.get_action(data.observations)
