@@ -98,7 +98,8 @@ def parse_args():
     # additional arguments for compatibility (TODO: cleanup)
     parser.add_argument("--ent-coef", type=float, default=0.0,
         help="coefficient of the entropy")
-
+    parser.add_argument('--eval_on_different_seed', default=False, required=False, 
+        action='store_true', help='evaluate on random seed')
 
     parser.add_argument('--on_policy', default=False, required=False, 
         action='store_true', help='use bias in disc arch')

@@ -361,6 +361,8 @@ if __name__ == "__main__":
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
     #run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
     run_name = f"{ts}_{cli}"
+    run_name = f"{ts}_{cli}".replace('/','_')
+
     if len(run_name) > 220:
         run_name = run_name[:220]
         

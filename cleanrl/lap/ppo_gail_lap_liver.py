@@ -53,13 +53,13 @@ gym.envs.register(
 gym.envs.register(
      id='LapLiver-v0',
      entry_point='envs.env_lap_liver:LapLiver',
-     max_episode_steps=1000,
+     max_episode_steps=500,
 )
 
 
 from irl.gail import GailReward, GAILDiscriminator
-from irl.utils import load_hf_demos, load_lap_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
-                   demos_gen_dict, MujocoTestWrapper, save_traj_dict
+from irl.utils import load_hf_demos, load_hf_demos_name, load_lap_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
+                   demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -70,8 +70,10 @@ def parse_args():
         help="the name of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
-    parser.add_argument("--logging_interval", type=int, default=128,
+    parser.add_argument("--logging_interval", type=int, default=500,
         help="logging interval")
+    parser.add_argument("--eval_interval", type=int, default=10000,
+        help="evaluation interval")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -100,7 +102,9 @@ def parse_args():
         action='store_false', required=False, help='use continuous actions')  
     parser.add_argument('--render_meshes', default=True, 
         action='store_true', required=False, help='render meshes when using env.render')  
-    parser.add_argument("--step_size", type=float, default=0.3,
+    parser.add_argument("--step_size", type=float, default=3.0,
+        help="step magnitude")
+    parser.add_argument("--vis_threshold_factor", type=float, default=100.0,
         help="step magnitude")
     parser.add_argument("--state_spec", type=str, default="r3",
         help="state spec (r3/r3so3)")
@@ -119,14 +123,14 @@ def parse_args():
     parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
     parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
 
-    parser.add_argument("--total-timesteps", type=int, default=1000000,
+    parser.add_argument("--total-timesteps", type=int, default=3000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=3e-4,
         help="the learning rate of the optimizer")
     parser.add_argument("--agent_size", type=int, default=64, help='actor-critic network size')
     parser.add_argument("--num-envs", type=int, default=1,
         help="the number of parallel game environments")
-    parser.add_argument("--num-steps", type=int, default=2048,
+    parser.add_argument("--num-steps", type=int, default=2000,
         help="the number of steps to run in each environment per policy rollout")
     parser.add_argument('--anneal_lr', default=True, required=False, 
         action='store_false', help='anneal policy lr')
@@ -184,6 +188,8 @@ def parse_args():
     parser.add_argument('--irl_epochs', default=1, type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--irl_init_epochs', default=1, type=int, required=False, help='number of discriminator updates')
     parser.add_argument('--lip_coeff', default=0, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
+    parser.add_argument('--lip_p', default=1, type=float, required=False, help='use gradient (spectral/mixup) penalty on discriminator')
+
     parser.add_argument('--l2_coeff', default=0, type=float, required=False, help='use l2 penalty on discriminator')
     parser.add_argument('--disc_lr', default=3e-4, type=float, required=False, help='discriminator learning rate')
     parser.add_argument('--use_cnn_base', default=False, required=False, 
@@ -234,7 +240,7 @@ def parse_args():
     return args, non_default, cli
 
 
-def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
+def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc, demos):
     def thunk():
         env = gym.make(args.env_id, gc=opt.goal_conditioning, 
                              state_spec=opt.state_spec, 
@@ -244,14 +250,17 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
                              plot_meshes=opt.render_meshes,
                              continuous_actions=opt.continuous_actions,
                              condition_on_n_tasks_completed=opt.condition_on_n_tasks_completed,
-                             collision_loss=opt.collision_loss)        
+                             collision_loss=opt.collision_loss,
+                             ref_demo = demos,
+                             vis_threshold_factor = opt.vis_threshold_factor,
+                             render_mode='rgb_array')        
 
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if opt.time_aware:
             env = gym.wrappers.TimeAwareObservation(env)
         if capture_video:
             if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % 200 == 0)
+                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % 500 == 0)
         if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env)
         if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
@@ -335,7 +344,7 @@ class Agent(nn.Module):
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy(), self.critic(x)
 
-    def get_action_and_value(self, x, action=None):
+    def get_action_and_value(self, x, action=None, eval=False):
         if self.discrete:
             return self.get_action_and_value_d(x, action)
         else:
@@ -349,7 +358,7 @@ if __name__ == "__main__":
     # create output folder with non default arguments in the name
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
     #run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
-    run_name = f"{ts}_{cli}"
+    run_name = f"{ts}_{cli}".replace('/','_')
     if len(run_name) > 220:
         run_name = run_name[:220]
     
@@ -398,9 +407,10 @@ if __name__ == "__main__":
         demos = load_hf_demos_name(args, demo_list)
     else:
         if 'Lap' in args.env_id:
-            demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
+            demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3, offset=100)
         else:
             demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
+
 
     test_env = gym.make(args.env_id, gc=args.goal_conditioning, 
                              state_spec=args.state_spec, 
@@ -410,7 +420,14 @@ if __name__ == "__main__":
                              plot_meshes=args.render_meshes,
                              continuous_actions=args.continuous_actions,
                              condition_on_n_tasks_completed=args.condition_on_n_tasks_completed,
-                             collision_loss=args.collision_loss)        
+                             collision_loss=args.collision_loss,
+                             vis_threshold_factor = args.vis_threshold_factor,
+)        
+    if args.normalize_obs and isinstance(test_env.action_space, gym.spaces.Box):
+            env = gym.wrappers.NormalizeObservation(test_env)
+            env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+    if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
+        test_env = gym.wrappers.ClipAction(test_env)
 
     if args.enhance_barys > 0:
         print("Enhancing demos by computing Wasserstein barycenters")
@@ -424,7 +441,7 @@ if __name__ == "__main__":
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args, args.env_id, args.seed + i, i, args.capture_video, run_name, args.gamma, disc) for i in range(args.num_envs)]
+        [make_env(args, args.env_id, args.seed + i, i, args.capture_video, run_name, args.gamma, disc, demos) for i in range(args.num_envs)]
     )
     #assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
@@ -586,15 +603,7 @@ if __name__ == "__main__":
 
         irl_count += 1
         for epoch in range(n_irl_epochs):            
-            # GAIL Discriminator Update
-            # gen_demos = demos_gen(demos['all'], args.batch_size)
-            # for d in gen_demos:
-            #     if len(d) < args.batch_size:
-            #         break
-
             gen_demos = demos_gen_dict(demos['all'], args.batch_size)
-            if args.env_id == "MoveP-v0":
-                fig = plt.figure(figsize=(10,10))
             for d in gen_demos:
                 if len(d['obs']) < args.batch_size:
                     if args.drop_batch:
@@ -607,22 +616,6 @@ if __name__ == "__main__":
                     obs_ = obs
                     actions_ = actions
                     dones_ = dones
-
-                if args.env_id == "MoveP-v0":
-                    # TODO: add second plot with W2-distance / KL-div / JS-div
-                    plt.scatter(10, 10, s=200, c='b', marker='o',alpha=1.0)
-                    plt.scatter(190, 190, s=200, c='r', marker='*', alpha=1.0)
-                    plt.scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
-                    plt.scatter(obs_[:,:,0], obs_[:,:,1], s=20, c='m', alpha=0.3, label='agent')
-                    plt.axis('equal')
-                    plt.tight_layout()
-                    f = plt.gca()
-                    f.axes.get_xaxis().set_ticks([])
-                    f.axes.get_yaxis().set_ticks([])
-                    f.axes.xaxis.set_ticklabels([])
-                    f.axes.yaxis.set_ticklabels([])
-                    #plt.legend()
-                    plt.savefig(f"runs/{run_name}/gail_scatter_{global_step}.png")
 
                 update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
 
@@ -653,6 +646,14 @@ if __name__ == "__main__":
             if args.verbose:
                 print("SPS:", int(global_step / (time.time() - start_time)))
             writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        
+        #  evaluate at regular intervals and save
+        if global_step % args.eval_interval == 0:
+            mu, std, d = evaluate_model(args, agent, device, test_env)
+
+            print(f"Evaluation at {global_step}: {mu}, {std}")
+            writer.add_scalar('eval/mu', mu, global_step)
+            writer.add_scalar('eval/std', std, global_step)
 
     envs.close()
     writer.close()
@@ -663,39 +664,3 @@ if __name__ == "__main__":
     torch.save(agent.state_dict(), f"runs/{run_name}/agent.pt")
     torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
 
-    ## test model and save trajectories
-    ## if movep, save scatter plot
-    if args.env_id == "MoveP-v0":
-        test_env = gym.make(args.env_id)
-    else:
-        ## test model and save trajectories
-        test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
-
-    if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
-        test_env = gym.wrappers.ClipAction(test_env)
-    if args.normalize_obs:
-        test_env = gym.wrappers.NormalizeObservation(test_env)
-        test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
-    mu, std, d_policy = save_traj_dict(args.env_id, test_env, agent, device)
-
-    if args.env_id == "MoveP-v0":
-        # convert all pngs to gif
-        import imageio
-        images = []
-        for filename in os.listdir(f"runs/{run_name}"):
-            if '.png' in filename:
-                images.append(imageio.imread(f"runs/{run_name}/{filename}"))
-        imageio.mimsave(f"runs/{run_name}/gail_training.gif", images)
-
-        gen_demos = demos_gen_dict(demos['all'], args.batch_size)
-        for d in gen_demos:
-            plt.scatter(d['obs'][:,0], d['obs'][:,1], s=5, c='g', alpha=0.3)
-        plt.scatter(d_policy['obs'][:,0], d_policy['obs'][:,1], s=5, c='m', alpha=0.3)
-        plt.savefig(f"runs/{run_name}/gail_scatter.png")
-
-    # save df for easier parsing
-    if args.total_timesteps > 0:    
-        ea = read_tb_file(f"runs/{run_name}")
-        df = create_df_from_ea(ea, "charts/episodic_return")
-        df["mu"] = mu
-        df.to_pickle(f"results_{run_name}_df.pkl")

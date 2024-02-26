@@ -103,9 +103,10 @@ def load_fast_demos(args, filename, n_demos=1, bary_enhance=False, offset=100, o
     return {'all': expert_demos}
 
 
-def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, offset=100, obs_shape=3):
+def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, offset=500, obs_shape=3):
     expert_demos = {}
     obs = []
+    obs_full = []
     acs = []
     rew = []
     dones = []
@@ -115,13 +116,16 @@ def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, off
         cnt += 1
         if 'npy' in f:
             demo = {}
-            o = np.load(os.path.join(folder, f))[offset:-offset, :obs_shape]
-            a = np.zeros([len(o)])
-            r = np.zeros([len(o)])
-            d = np.zeros([len(o)]) 
+            o = np.load(os.path.join(folder, f))
+            o_tr = o[offset:-offset, :obs_shape]
+            o_full = o[offset:-offset, :]
+            a = np.zeros([len(o_tr)])
+            r = np.zeros([len(o_tr)])
+            d = np.zeros([len(o_tr)]) 
             d[-1] = 1
 
-            obs.append(o)
+            obs.append(o_tr)
+            obs_full.append(o_full)
             acs.append(a)
             rew.append(r)
             dones.append(d)
@@ -129,6 +133,7 @@ def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, off
             break
 
     expert_demos['obs'] = np.concatenate(obs,0)
+    expert_demos['obs_full'] = np.concatenate(obs_full,0)
     expert_demos['acs'] = np.concatenate(acs,0)
     expert_demos['rew'] = np.concatenate(rew,0)
     expert_demos['done'] = np.concatenate(dones,0)
@@ -151,6 +156,7 @@ def get_trajectory_list(demos, oa_cat=False):
             oa = np.concatenate([o,a])
         else:
             oa = o
+            
         ep.append(oa.astype(np.float32))
         if int(d) == 1:
             done_cnt += 1
@@ -196,6 +202,18 @@ def compute_sw_barycenter(a,b,lr=1e3,nb_iter_max=1000,bary_size=1000,n_proj=100)
     xb = xbary_torch.clone().detach().cpu().numpy()
     
     return xb
+
+def enhance_demos_with_eps_balls(args, demos):
+    add_obs_list = []
+    test_env = gym.make(args.env_id)
+    for obs in demos['all']['obs']:
+        init_obs = test_env.reset(args.seed, initial_state = obs)
+        for i in range(args.eps_ball_size):
+            o,r,t,tr,i = test_env.step(test_env.action_space.sample())
+            add_obs_list.append(o)
+
+    return add_obs_list
+
 
 def enhance_demos_with_barycenters(args, demos, test_env, lr=1e3,nb_iter_max=1000,bary_size=1000,n_proj=100):
     demo_list = get_trajectory_list(demos['all'], args.use_actions)
@@ -398,7 +416,11 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy, co
                         _, _, expert_lprobs_t = policy.policy.forward(expert_obs_t)
                         _, _, policy_lprobs_t = policy.policy.forward(obs_t)
                     else:
-                        _, expert_lprobs_t, _, _ = policy.get_action_and_value(expert_obs_t, expert_acs_t)
+                        if not opt.use_actions:
+                            _, expert_lprobs_t, _, _ = policy.get_action_and_value(expert_obs_t)
+                        else:
+                            _, expert_lprobs_t, _, _ = policy.get_action_and_value(expert_obs_t, expert_acs_t)
+
                         _, policy_lprobs_t, _, _ = policy.get_action_and_value(obs_t, acs_t)
                 else:
                     _, expert_lprobs_t, _ = policy.get_action(expert_obs_t)
@@ -656,7 +678,7 @@ class MujocoTestWrapper(gym.Wrapper):
         getattr(self.env.model, parameter)[:] = param_mod
 
     def reset(self, seed=1, options=None):
-        o = self.env.reset()[0]
+        o = self.env.reset(seed, options)[0]
         # reset mass to default value otherwise accum.
         for k, v in self.default_params.items():
             getattr(self.env.model, k)[:] = v
@@ -714,7 +736,7 @@ class Box2dTestWrapper(gym.Wrapper):
         getattr(self.env.model, parameter)[:] = param_mod
 
     def reset(self, seed=1, options=None):
-        o = self.env.reset()[0]
+        o = self.env.reset(seed, options)[0]
         # reset mass to default value otherwise accum.
         for k, v in self.default_params.items():
             getattr(self.env.model, k)[:] = v
@@ -732,7 +754,7 @@ class Box2dTestWrapper(gym.Wrapper):
         return o, r, t, tr, i
 
 
-def evaluate_model(args, actor, device, test_env=None, deterministic=False, wrap_mujoco=False, n_traj=10, save_eval=None):
+def evaluate_model(args, actor, device, test_env=None, deterministic=False, wrap_mujoco=False, n_traj=10, save_eval=None, max_step=1e7):
     if test_env is None:
         test_env = gym.make(args.env_id)
         if wrap_mujoco:
@@ -747,14 +769,14 @@ def evaluate_model(args, actor, device, test_env=None, deterministic=False, wrap
                 test_env, lambda obs: np.clip(obs, -10, 10))
 
     mu, std, d = save_traj_dict(args, args.env_id, test_env, 
-                                actor, device, deterministic=deterministic, nr_trajectories=n_traj, save_eval=save_eval)
+                                actor, device, deterministic=deterministic, nr_trajectories=n_traj, save_eval=save_eval, max_step=max_step)
 
     test_env.close()
 
     return mu, std, d
 
 def save_traj_dict(opt, env_name, env, model, device, 
-                    nr_trajectories=10, min_total_rew=-1e6, deterministic=True, save_eval=None):
+                    nr_trajectories=10, min_total_rew=-1e6, deterministic=True, save_eval=None, max_step=1e7):
     num_steps = 0
     expert_obs = []
     expert_acs = []
@@ -781,7 +803,8 @@ def save_traj_dict(opt, env_name, env, model, device,
         episode_rew = []
         episode_done = []
 
-        while not done:
+        traj_len_cnt = 0
+        while not done: 
             with torch.no_grad():
                 if 'ppo' in opt.exp_name or 'bc' in opt.exp_name:
                     action, logprob, _, value = model.get_action_and_value(torch.Tensor(ob).to(device).unsqueeze(0), 
@@ -805,8 +828,14 @@ def save_traj_dict(opt, env_name, env, model, device,
             episode_acs.append(action)
             episode_rew.append(reward)
             episode_done.append(done)
-
+            
             num_steps += 1
+
+            traj_len_cnt += 1
+            if traj_len_cnt < max_step:
+                break
+
+
 
         ep_rew.append(total_reward)
         print("episode:", cnt, "reward:", total_reward)
@@ -1009,7 +1038,7 @@ class DemoStateSeqWrapper(gym.Wrapper):
                                                      high = np.tile(obs_space.high,2))
 
     def reset(self, seed=1, options=None):
-        obs, info = self.env.reset()
+        obs, info = self.env.reset(seed, options)
         exp_obs_0 = self.demos['obs'][0]
         o = np.concatenate([obs, exp_obs_0], -1)
 
@@ -1047,3 +1076,23 @@ class DemoStateSeqWrapper(gym.Wrapper):
             
         return next_obs, reward, term, trunc, info
     
+
+class ResetToStateWrapper(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env=env)
+        # self.reward_fn = make_network(**reward_fn_spec)
+
+    def reset(self, seed=1, options=None, state=None):
+        obs, info = self.env.reset()
+
+        print(obs)
+
+        if state is not None:
+            self.env.unwrapped.set_state(state)
+
+        o,r,t,tr,i = self.env.step(self.env.action_space.sample()*0.0)
+        print(o)
+
+
+
+        return o, info

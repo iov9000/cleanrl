@@ -90,6 +90,9 @@ def parse_args():
         # help="automatic tuning of the entropy coefficient")
     parser.add_argument('--autotune', default=True, required=False, 
         action='store_false', help='verbose output')
+
+    parser.add_argument('--eval_on_different_seed', default=False, required=False, 
+        action='store_true', help='evaluate on random seed')
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
 
