@@ -179,7 +179,7 @@ class LapLiver(Env):
         for belly_vtx in self.meshes['Belly.obj'].vertices:
             dists.append(np.linalg.norm(self.belly_centroid-belly_vtx))
 
-        self.max_belly_dist = np.max(dists)
+        self.max_belly_dist = np.max(dists)-10
 
         self.initial_position = np.array((10,17,0)) # XXX: check offsets
 
@@ -526,9 +526,13 @@ class LapLiver(Env):
         # plot demos?
         if mode == "human":
             plt.show()
+            plt.close()
+
 
         elif mode == "rgb_array":
             fig.canvas.draw()
             data = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
             data = data.reshape(fig.canvas.get_width_height()[::-1] + (4,))
+            plt.close()
             return data[:,:,:3]
+

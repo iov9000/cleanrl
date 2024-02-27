@@ -33,18 +33,6 @@ from torch.utils.tensorboard import SummaryWriter
 import gymnasium as gym
 
 gym.envs.register(
-     id='MoveP-v0',
-     entry_point='envs.envs2d:MoveP',
-     max_episode_steps=1000,
-)
-
-gym.envs.register(
-     id='CMoveP-v0',
-     entry_point='envs.envs2d:CMoveP',
-     max_episode_steps=1000,
-)
-
-gym.envs.register(
      id='Lap-v0',
      entry_point='envs.env_lap:Laparos',
      max_episode_steps=1000,
@@ -58,8 +46,8 @@ gym.envs.register(
 
 
 from irl.gail import GailReward, GAILDiscriminator
-from irl.utils import load_hf_demos, load_hf_demos_name, load_lap_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
-                   demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model
+from irl.utils import load_hf_demos, load_hf_demos_name, load_lap_demos, prepare_batch_update_irl,\
+                    enhance_demos_with_barycenters, demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -123,7 +111,7 @@ def parse_args():
     parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
     parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
 
-    parser.add_argument("--total-timesteps", type=int, default=3000000,
+    parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=3e-4,
         help="the learning rate of the optimizer")

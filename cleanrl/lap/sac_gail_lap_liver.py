@@ -17,6 +17,12 @@ gym.envs.register(
     max_episode_steps=10000,
 )
 
+gym.envs.register(
+     id='LapLiver-v0',
+     entry_point='envs.env_lap_liver:LapLiver',
+     max_episode_steps=500,
+)
+
 module_path = os.path.abspath(os.path.join('..'))
 if module_path not in sys.path:
     sys.path.append(module_path)
@@ -33,7 +39,7 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.gail import GailReward, GAILDiscriminator
-from irl.utils import load_hf_demos, load_lap_demos, evaluate_model, prepare_batch_update_irl,\
+from irl.utils import load_hf_demos, load_hf_demos_name, load_lap_demos, evaluate_model, prepare_batch_update_irl,\
      enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
@@ -71,7 +77,7 @@ def parse_args():
 
     # environment specific arguments
     parser.add_argument('--goal_conditioning', default=False, 
-        action='store_true', required=False, help='normalize irl rewards')  
+        action='store_true', required=False, help='concatenate target to state')  
     parser.add_argument('--condition_on_n_tasks_completed', default=False, 
         action='store_true', required=False, help='add num tasks completed as conditioner')  
     parser.add_argument('--done_on_collision', default=True, 
@@ -81,10 +87,12 @@ def parse_args():
     parser.add_argument('--hard_collisions', default=True, 
         action='store_false', required=False, help='dont progress on collision')  
     parser.add_argument('--continuous_actions', default=True, 
-        action='store_false', required=False, help='normalize irl rewards')  
+        action='store_false', required=False, help='use continuous actions')  
     parser.add_argument('--render_meshes', default=True, 
-        action='store_true', required=False, help='normalize irl rewards')  
-    parser.add_argument("--step_size", type=float, default=0.3,
+        action='store_true', required=False, help='render meshes when using env.render')  
+    parser.add_argument("--step_size", type=float, default=3.0,
+        help="step magnitude")
+    parser.add_argument("--vis_threshold_factor", type=float, default=100.0,
         help="step magnitude")
     parser.add_argument("--state_spec", type=str, default="r3",
         help="state spec (r3/r3so3)")
@@ -98,8 +106,11 @@ def parse_args():
         action='store_true', required=False, help='clip actions')
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="Lap-v0",
+    parser.add_argument("--env-id", type=str, default="LapLiver-v0",
         help="the id of the environment")
+    parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
+    parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
+    
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--buffer-size", type=int, default=int(1e6),
@@ -144,6 +155,8 @@ def parse_args():
         help="number of demos to use")
     parser.add_argument('--enhance_demos', default=False, required=False, 
         action='store_true', help='enhance demos using W2 barycenters')
+    parser.add_argument("--diverse_demos", type=str, default=None,
+        help="diverse demos for generalization experiments")
     parser.add_argument('--init_rb_with_demos', default=False, required=False, 
         action='store_true', help='init replay buffer with demo transitions (with actor actions and disc rewards)')
 
@@ -182,7 +195,9 @@ def parse_args():
 
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
     parser.add_argument("--div", type=str, default="rkl", help="divergence type")
-    parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
+    parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")    
+    parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
+
     parser.add_argument("--mode", type=str, default='training', help="training / inference")
     parser.add_argument('--eval_on_different_seed', default=False, required=False, 
         action='store_true', help='evaluate on random seed')
@@ -203,26 +218,31 @@ def parse_args():
         if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
     }
 
-    return args, non_default
+    cli = str(sys.argv).replace('--','').replace('verbose','').replace("'","").replace(" ","_").replace(",","").replace(".py","")
 
+    return args, non_default, cli
 
-def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
+def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos):
     def thunk():
-        env = gym.make(env_id, gc=args.goal_conditioning, 
-                             state_spec=args.state_spec, 
-                             step_size=args.step_size,
-                             condition_on_n_tasks_completed=args.condition_on_n_tasks_completed,
-                             done_on_collision=args.done_on_collision,
-                             hard_collisions=args.hard_collisions,
-                             plot_meshes=args.render_meshes,
-                             continuous_actions=args.continuous_actions,
-                             collision_loss=args.collision_loss)        
+        env = gym.make(args.env_id, gc=opt.goal_conditioning, 
+                             state_spec=opt.state_spec, 
+                             step_size=opt.step_size,
+                             done_on_collision=opt.done_on_collision,
+                             hard_collisions=opt.hard_collisions,
+                             plot_meshes=opt.render_meshes,
+                             continuous_actions=opt.continuous_actions,
+                             condition_on_n_tasks_completed=opt.condition_on_n_tasks_completed,
+                             collision_loss=opt.collision_loss,
+                             ref_demo = demos,
+                             vis_threshold_factor = opt.vis_threshold_factor,
+                             render_mode='rgb_array')       
+
         if opt.use_absorb_wrapper: # DAC
             env = AbsorbAfterDoneWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % 500 == 0)
         if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env)
         if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
@@ -299,12 +319,13 @@ class Actor(nn.Module):
 
 
 if __name__ == "__main__":
-    args, non_default = parse_args()
+    args, non_default, cli = parse_args()
     ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     ua = 'ua' if args.use_actions else ''
     # create output folder with non default arguments in the name
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
-    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+
+    run_name = f"{ts}_{cli}".replace('/','_')
     if len(run_name) > 220:
         run_name = run_name[:220]
     results_dict = {'eval_mu': [], 'eval_std': []}
@@ -344,14 +365,20 @@ if __name__ == "__main__":
         torch.set_default_tensor_type(torch.FloatTensor)
 
 
-    if args.env_id == 'Lap-v0':
-        demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
-    else:
-        demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
+    env_kwargs = {}
+    for i, comp in enumerate(args.env_kwargs):
+        env_kwargs[comp] = args.env_kwargs_values[i]
 
-    if args.enhance_demos:
-        print("Enhancing demos by computing Wasserstein barycenters")
-        demos = enhance_demos_with_barycenters(demos)
+    if args.diverse_demos is not None:
+        demo_list = [f for f in os.listdir(args.demo_dir) if args.diverse_demos in f and args.env_id in f]
+        print("-> Training on union of demos:", demo_list)
+        demos = load_hf_demos_name(args, demo_list)
+    else:
+        if 'Lap' in args.env_id:
+            demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3, offset=100)
+        else:
+            demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
+
     # get env specs
     test_env = gym.make(args.env_id, gc=args.goal_conditioning, 
                              state_spec=args.state_spec, 
@@ -361,14 +388,22 @@ if __name__ == "__main__":
                              plot_meshes=args.render_meshes,
                              continuous_actions=args.continuous_actions,
                              condition_on_n_tasks_completed=args.condition_on_n_tasks_completed,
-                             collision_loss=args.collision_loss)        
+                             collision_loss=args.collision_loss,
+                             vis_threshold_factor = args.vis_threshold_factor)
 
-    print(test_env.observation_space)
+    if args.normalize_obs and isinstance(test_env.action_space, gym.spaces.Box):
+            env = gym.wrappers.NormalizeObservation(test_env)
+            env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+    if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
+        test_env = gym.wrappers.ClipAction(test_env)
 
+    discrete = not isinstance(test_env.action_space, gym.spaces.Box)
     disc = GAILDiscriminator(test_env, args)
+    if args.load_disc:
+        disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
 
     # env setup
-    envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, disc)])
+    envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, disc, demos)])
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     max_action = float(envs.single_action_space.high[0])
@@ -608,15 +643,16 @@ if __name__ == "__main__":
 
                     #  evaluate at regular intervals and save
                     if global_step % args.eval_interval == 0:
-                        mu, std, d = evaluate_model(args, actor, device, test_env, deterministic=True, n_traj=1, save_eval=f"runs/{run_name}/eval_{global_step}.pkl")
+                        #mu, std, d = evaluate_model(args, actor, device, test_env, deterministic=True, n_traj=1, save_eval=f"runs/{run_name}/eval_{global_step}.pkl")
+                        mu, std, d = evaluate_model(args, actor, device, test_env)
                         print(f"Evaluation at {global_step}: {mu}, {std}")
                         writer.add_scalar('eval/mu', mu, global_step)
                         writer.add_scalar('eval/std', std, global_step)
                         results_dict['eval_mu'].append(mu)
                         results_dict['eval_std'].append(std)
-                        ref_dist = ot.sliced_wasserstein_distance(
-                            d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
-                        writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
+                        #ref_dist = ot.sliced_wasserstein_distance(
+                        #    d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
+                        #writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
 
 
             except KeyboardInterrupt:
