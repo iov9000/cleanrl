@@ -62,6 +62,9 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
+    parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
+    parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
+
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=3e-4,
@@ -128,6 +131,9 @@ def parse_args():
     parser.add_argument("--test_perturbation_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')
+    parser.add_argument('--eval_on_different_seed', default=False, required=False, 
+        action='store_true', help='verbose output')
+        
     parser.add_argument("--disc_nonlin", type=str, default="prelu",
         help="divergence type")
     parser.add_argument('--normalize_irl_rewards', default=True, 
@@ -135,6 +141,8 @@ def parse_args():
 
     parser.add_argument("--test_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument("--perturbation_parameters", type=str, nargs='+', default='', help="which env parameter to perturb")
+    parser.add_argument('--perturb_dynamics', type=float, default=0.0, help="perturb dynamics") 
+    parser.add_argument("--perturb_parameters", type=str, default=['body_mass'], nargs='+', help="which dynamics params to perturb")
 
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
@@ -146,7 +154,9 @@ def parse_args():
         if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
     }
 
-    return args, non_default
+    cli = str(sys.argv).replace('--','').replace('verbose','').replace("'","").replace(" ","_").replace(",","").replace(".py","")
+
+    return args, non_default, cli
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma):
     def thunk():
@@ -252,12 +262,14 @@ class Agent(nn.Module):
 
 
 if __name__ == "__main__":
-    args, non_default = parse_args()
+    args, non_default, cli = parse_args()
     ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     ua = 'ua' if args.use_actions else ''
     # create output folder with non default arguments in the name
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
-    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    #run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    run_name = f"{ts}_{cli}"
+
     if args.track:
         import wandb
 
@@ -289,6 +301,10 @@ if __name__ == "__main__":
         torch.set_default_tensor_type(torch.cuda.FloatTensor)
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
+
+    env_kwargs = {}
+    for i, comp in enumerate(args.env_kwargs):
+        env_kwargs[comp] = args.env_kwargs_values[i]
 
     demos = load_hf_demos(args, args.n_demos)
     if args.enhance_demos:
@@ -334,8 +350,8 @@ if __name__ == "__main__":
     else:
         test_env = gym.make(args.env_id, render_mode='rgb_array', **env_kwargs)      
 
-    if args.perturb_dynamics > 0.0:
-        test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
+    #if args.perturb_dynamics > 0.0:
+    #    test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
 
     for epoch in tqdm(range(args.update_epochs)):            
         # GAIL Discriminator Update (exhaust demos)
@@ -372,7 +388,7 @@ if __name__ == "__main__":
                     det = True
                 else:
                     det = False
-                mu, std, d = evaluate_model(args, agent, device, deterministic = det, wrap_mujoco=args.test_eps > 0)
+                mu, std, d = evaluate_model(args, agent, device, test_env, deterministic = det, wrap_mujoco=args.test_eps > 0)
                 print(f"Evaluation at {global_step}: {mu}, {std}")
                 writer.add_scalar('eval/mu', mu, global_step)
                 writer.add_scalar('eval/std', std, global_step)
@@ -383,13 +399,8 @@ if __name__ == "__main__":
     torch.save(agent.state_dict(), f"runs/{run_name}/agent.pt")
 
     ## test model and save trajectories
-    test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
-    if args.clip_action:
-        test_env = gym.wrappers.ClipAction(test_env)
-    if args.normalize_obs:
-        test_env = gym.wrappers.NormalizeObservation(test_env)
-        test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
-    save_traj_dict(args.env_id, test_env, agent, device)
+    #test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
+    mu, std, d = evaluate_model(args, agent, device, test_env)
 
     writer.close()
 
