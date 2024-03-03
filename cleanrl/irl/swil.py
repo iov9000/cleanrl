@@ -298,6 +298,8 @@ class SWILDiscriminator(nn.Module):
         return gsw_dist
 
     def proj(self, ob, ac, nob=None, d=None, noise=False):
+        if self.opt.n_proj>1 and not self.opt.linear_proj:
+            self.reset_all_weights()
         base_out = self.base_fwd(ob, ac, nob, d)
 
         if self.swil_vb > 0:

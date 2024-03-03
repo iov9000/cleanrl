@@ -57,7 +57,7 @@ if __name__ == '__main__':
                                                 # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
                                                 exp_cmd = (f"python {algo}_swil.py --exp-id={args.exp_id} --n_demos={n_demo} "
                                                         f"--swil_period={per} --atom_weight {aw} --repl_loss_type diff2max0 {lin} --subsample={ss} --disc_nonlin={d_nl} --verbose "
-                                                        f"--seed={seed} {ua} --env-id {env_name}")
+                                                        f"--seed={seed} {ua} --drop_batch --env-id {env_name}")
                                                 cluster_cmd = euler_slurm + exp_cmd 
                                                 print("Running command: ", cluster_cmd)
                                                 # subprocess.run(cluster_cmd, shell=True)

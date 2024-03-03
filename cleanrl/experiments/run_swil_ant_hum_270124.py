@@ -57,11 +57,11 @@ if __name__ == '__main__':
     # ent_coeffs = [0.0, 0.01]
     # disc_nonlins = ['tanh', 'prelu', 'relu']
     repl_loss_types = ['diff2max0']
-    disc_nonlins = ['tanh', 'leakyrelu']
+    disc_nonlins = ['tanh']
     # lip_coeffs = [1.0]
     # lip_coeffs = [0.0, 1.0]
     # lip_coeff = ['--use_actions']
-    MEM_PER_CPU = 8000
+    MEM_PER_CPU = 4000
     GPU_PER_CPU = 1
     # gpu_string = f"--gpus={GPU_PER_CPU} " if args.gpu else ""
     gpu_string = f"--gpus={GPU_PER_CPU} " if args.gpu else ""
