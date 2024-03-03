@@ -516,7 +516,8 @@ if __name__ == "__main__":
         if args.irm_coeff > 1.0:
             loss /= args.irm_coeff
 
-        disc.update(loss)
+        if args.n_proj == 1:
+            disc.update(loss)
 
     #####
     obs = envs.reset(seed=args.seed)[0]

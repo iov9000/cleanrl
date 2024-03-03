@@ -113,9 +113,10 @@ def compute_swd(z_expert: torch.Tensor,
     return reg_weight * w_dist.mean()
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    torch.nn.init.orthogonal_(layer.weight, std)
+    if isinstance(layer, nn.Linear):
+        torch.nn.init.orthogonal_(layer.weight, std)
     #torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
+    #return layer
 
 def linlayer(in_dim, out_dim, bias=True, wnorm=False, snorm=False):
     #return layer_init(nn.Linear(in_dim, out_dim, bias=bias))
@@ -298,8 +299,11 @@ class SWILDiscriminator(nn.Module):
         return gsw_dist
 
     def proj(self, ob, ac, nob=None, d=None, noise=False):
-        if self.opt.n_proj>1 and not self.opt.linear_proj:
-            self.reset_all_weights()
+        if self.opt.n_proj > 1 and not self.opt.linear_proj:
+            with torch.no_grad():
+                self.base.apply(layer_init)
+                self.reward.apply(layer_init)
+
         base_out = self.base_fwd(ob, ac, nob, d)
 
         if self.swil_vb > 0:
