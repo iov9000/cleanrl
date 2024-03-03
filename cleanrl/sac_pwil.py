@@ -123,6 +123,10 @@ def parse_args():
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
 
     parser.add_argument("--subsampling", type=int, default=20, help="subsampling factor for demos")
+    # PWIL specific
+    parser.add_argument('--pwil_alpha', default=5.0, type=float, required=False, help='PWIL reward scale')
+    parser.add_argument('--pwil_beta', default=5.0, type=float, required=False, help='PWIL reward bandwidth')
+    parser.add_argument('--random_offset', default=1, type=int, required=False, help='random offset')
 
     # Discriminator specific arguments
     parser.add_argument("--demo_dir", type=str, default="./demos",

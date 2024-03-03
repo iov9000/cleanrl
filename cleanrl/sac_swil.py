@@ -690,7 +690,8 @@ if __name__ == "__main__":
                             if args.irm_coeff > 1.0:
                                 loss /= args.irm_coeff
 
-                            disc.update(loss)
+                            if args.n_proj == 1:
+                                disc.update(loss)
                     
                             if global_step % args.logging_interval == 0:
                                 writer.add_scalar('irl/swil_gsw_dist', loss_dict['d_loss'], global_step)

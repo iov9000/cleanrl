@@ -832,7 +832,7 @@ def save_traj_dict(opt, env_name, env, model, device,
             num_steps += 1
 
             traj_len_cnt += 1
-            if traj_len_cnt < max_step:
+            if traj_len_cnt > max_step:
                 break
 
 

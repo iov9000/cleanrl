@@ -59,7 +59,8 @@ class PWILRewarder(object):
                  time_horizon=1000.,
                  alpha=5.,
                  beta=5.,
-                 observation_only=False):
+                 observation_only=False,
+                 random_offset=1):
 
         if num_demonstrations == -1:
             self.num_demonstrations = len(demonstrations['obs'])
@@ -67,6 +68,7 @@ class PWILRewarder(object):
             self.num_demonstrations = num_demonstrations 
         self.time_horizon = time_horizon
         self.subsampling = subsampling
+        self.random_offset = random_offset
 
         # Observations and actions are flat.
         ob_shapes = list(env.observation_space.shape)
@@ -98,6 +100,7 @@ class PWILRewarder(object):
             self.vectorized_demonstrations = np.concatenate([demos['obs'],demos['acs']],-1)
 
         self.vectorized_demonstrations = np.reshape(self.vectorized_demonstrations, [-1,dim_demos])
+        print(self.vectorized_demonstrations.shape)
 
         self.scaler = self.get_scaler()
         self.reset()
@@ -111,7 +114,7 @@ class PWILRewarder(object):
             for episode in v[:self.num_demonstrations]:
                 # Random episode start.
                 #random_offset = np.random.randint(0, self.subsampling)
-                random_offset = 1
+                random_offset = self.random_offset
                 print("Random offset: ", random_offset)
                 # Subsampling.
                 print("Full episode length", len(episode))
@@ -216,7 +219,9 @@ class PWILReward(gym.Wrapper):
         self.obs = None
         self.pwil = PWILRewarder(demos, subsampling=self.subsampling, env=env, 
                                     num_demonstrations=self.n_demos, 
-                                    observation_only=(not opt.use_actions))
+                                    observation_only=(not opt.use_actions),
+                                    alpha=opt.pwil_alpha, beta=opt.pwil_beta,
+                                    random_offset=opt.random_offset)
 
     def step(self, action):
         # also, here, WANT state before applying action

@@ -162,6 +162,8 @@ def parse_args():
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--load_disc", type=str, default=None, help="load discriminator from checkpoint")
     parser.add_argument("--load_disc_timestep", type=int, default=None, help="(optional) load specific timestep")
+    parser.add_argument('--eval_on_different_seed', default=False, required=False, 
+        action='store_true', help='verbose output')
 
     parser.add_argument('--drop_batch', default=False, required=False, 
         action='store_true', help='drop batch in irl epochs')  

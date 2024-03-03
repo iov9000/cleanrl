@@ -111,9 +111,9 @@ def parse_args():
     parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
     parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
     
-    parser.add_argument("--total-timesteps", type=int, default=1000000,
+    parser.add_argument("--total-timesteps", type=int, default=200000,
         help="total timesteps of the experiments")
-    parser.add_argument("--buffer-size", type=int, default=int(1e6),
+    parser.add_argument("--buffer-size", type=int, default=int(4e5),
         help="the replay memory buffer size")
     parser.add_argument("--gamma", type=float, default=0.99,
         help="the discount factor gamma")
@@ -242,7 +242,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos):
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % 500 == 0)
+                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % 300 == 0)
         if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env)
         if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):

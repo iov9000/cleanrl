@@ -57,6 +57,9 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
+    parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
+    parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
+
     parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=3e-4,
@@ -145,6 +148,11 @@ def parse_args():
         help="divergence type")
     parser.add_argument('--normalize_irl_rewards', default=True, 
         action='store_true', required=False, help='normalize irl rewards')  
+
+    # PWIL specific
+    parser.add_argument('--pwil_alpha', default=5.0, type=float, required=False, help='PWIL reward scale')
+    parser.add_argument('--pwil_beta', default=5.0, type=float, required=False, help='PWIL reward bandwidth')
+    parser.add_argument('--random_offset', default=1, type=int, required=False, help='random offset')
 
     parser.add_argument('--on_policy', default=False, required=False, 
         action='store_true', help='use bias in disc arch')
@@ -292,6 +300,10 @@ if __name__ == "__main__":
         torch.set_default_tensor_type(torch.cuda.FloatTensor)
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
+
+    env_kwargs = {}
+    for i, comp in enumerate(args.env_kwargs):
+        env_kwargs[comp] = args.env_kwargs_values[i]
 
     demos = load_hf_demos(args, n_demos=args.n_demos)['all']
     if args.enhance_demos:
