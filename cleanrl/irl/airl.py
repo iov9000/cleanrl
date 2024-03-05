@@ -159,7 +159,11 @@ class AIRLDiscriminator(nn.Module):
         # log_pq = torch.log(torch.sum(torch.exp(torch.cat([log_p_tau, log_q_tau], dim=0))))
         # d_out = torch.exp(log_p_tau - log_pq)
         # TEST:
-        d_out = torch.sigmoid(log_p_tau - log_q_tau)
+        if self.use_actions:
+            d_out = torch.sigmoid(log_p_tau - log_q_tau)
+        else:
+            d_out = torch.sigmoid(log_p_tau)
+
         # d_out = torch.sigmoid(log_q_tau - log_p_tau)
 
         return reward, fitted_value, fitted_value_n, d_out
