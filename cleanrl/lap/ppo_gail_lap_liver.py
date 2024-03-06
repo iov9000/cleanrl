@@ -493,8 +493,6 @@ if __name__ == "__main__":
                     if item["final_info"][0]['episode']["r"] > best_rew:
                         best_rew = item["final_info"][0]['episode']["r"]
                         torch.save(agent.state_dict(), f"runs/{run_name}/best_actor.pt")
-                        torch.save(qf1.state_dict(), f"runs/{run_name}/best_qf1.pt")
-                        torch.save(qf2.state_dict(), f"runs/{run_name}/best_qf2.pt")
                         torch.save(disc.state_dict(), f"runs/{run_name}/best_disc.pt")
 
                     if args.verbose:

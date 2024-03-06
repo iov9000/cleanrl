@@ -238,12 +238,12 @@ class LapLiver(Env):
         self.continuous_actions = continuous_actions
         if self.continuous_actions:
             self.action_space = spaces.Box(
-                low=np.ones([3])*-2, high=np.ones([3])*2, dtype=np.float32)
+                low=np.ones([3])*-1, high=np.ones([3])*1, dtype=np.float32)
         
         # Define target points based on geometry
         
         # Maximum episode length
-        self.max_time = 2000
+        self.max_time = 1000
 
         self.step_size = step_size
         self.random_init = random_init
@@ -414,6 +414,7 @@ class LapLiver(Env):
         #print(self.curr_anatomy_reward, vis_thresh*100)
         #if self.curr_anatomy_reward >= self.anatomy_vis_threshold:
         #if self.curr_anatomy_reward >= vis_thresh*self.vis_threshold_factor:
+        print(self.curr_anatomy_reward)
         if self.curr_anatomy_reward >= self.vis_threshold_factor:
             print(f"Task solved: {self.anatomy_list[self.curr_tgt]} reached ")
 
