@@ -218,7 +218,8 @@ def parse_args():
         if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
     }
 
-    cli = str(sys.argv).replace('--','').replace('verbose','').replace("'","").replace(" ","_").replace(",","").replace(".py","")
+    cli = str(sys.argv).replace('--','').replace('verbose','').replace("'","")
+    cli = cli.replace(" ","_").replace(",","").replace(".py","").replace('[','').replace(']','')
 
     return args, non_default, cli
 
@@ -350,6 +351,8 @@ if __name__ == "__main__":
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
+    import pickle 
+    pickle.dump(vars(args),open(f"runs/{run_name}/hparams.pkl",'wb'))
 
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
@@ -459,7 +462,7 @@ if __name__ == "__main__":
 
     # TRY NOT TO MODIFY: start the game
     obs = envs.reset(seed=args.seed)[0]
-    best_len = 10000
+    best_rew = -10000
     traj = {'obs': [], 'acs': [], 'done': []} # traj_only IRL
     if args.mode == 'training':
         for global_step in range(args.total_timesteps):
@@ -491,8 +494,8 @@ if __name__ == "__main__":
                     # TODO: fix this for new Gymnasium
                     if "final_info" in item.keys():
                         irl_trigger = True
-                        if item["final_info"][0]['episode']["l"] < best_len:
-                            best_len = item["final_info"][0]['episode']["l"]
+                        if item["final_info"][0]['episode']["r"] > best_rew:
+                            best_len = item["final_info"][0]['episode']["r"]
                             torch.save(actor.state_dict(), f"runs/{run_name}/best_actor.pt")
                             torch.save(qf1.state_dict(), f"runs/{run_name}/best_qf1.pt")
                             torch.save(qf2.state_dict(), f"runs/{run_name}/best_qf2.pt")
@@ -501,7 +504,7 @@ if __name__ == "__main__":
                         if args.verbose:
                             print(
                                 f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}"
-                                f"episodic_return_irl={item['final_info'][0]['episode']['ep_rew_irl']}")
+                                f" episodic_return_irl={item['final_info'][0]['episode']['ep_rew_irl']}")
                         if global_step % 1 == 0:
                             writer.add_scalar(
                                 "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)

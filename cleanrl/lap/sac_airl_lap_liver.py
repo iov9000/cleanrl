@@ -223,7 +223,8 @@ def parse_args():
         if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
     }
 
-    cli = str(sys.argv).replace('--','').replace('verbose','').replace("'","").replace(" ","_").replace(",","").replace(".py","")
+    cli = str(sys.argv).replace('--','').replace('verbose','').replace("'","")
+    cli = cli.replace(" ","_").replace(",","").replace(".py","").replace('[','').replace(']','')
 
     return args, non_default, cli
 
@@ -508,8 +509,6 @@ if __name__ == "__main__":
                         if item["final_info"][0]['episode']["l"] < best_len:
                             best_len = item["final_info"][0]['episode']["l"]
                             torch.save(actor.state_dict(), f"runs/{run_name}/best_actor.pt")
-                            torch.save(qf1.state_dict(), f"runs/{run_name}/best_qf1.pt")
-                            torch.save(qf2.state_dict(), f"runs/{run_name}/best_qf2.pt")
                             torch.save(disc.state_dict(), f"runs/{run_name}/best_disc.pt")
 
                         if args.verbose:

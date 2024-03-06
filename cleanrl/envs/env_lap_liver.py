@@ -4,6 +4,7 @@ import sys
 from gymnasium import Env, spaces
 import trimesh
 
+from collections import deque
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
@@ -133,6 +134,7 @@ class LapLiver(Env):
         super(LapLiver, self).__init__()
 
         self.render_mode = render_mode
+        self.agent_render_q = deque(maxlen=100)
 
         self.name = 'lapliver'
         self.anatomy_list = ['LiverRight.obj', 'Falciform.obj', 'LiverLeft.obj']
@@ -153,6 +155,11 @@ class LapLiver(Env):
         self.occ_shell_specs = {'LiverRight.obj': [(0.0,np.pi), (np.pi/4,3*np.pi/2), 3,12], 
                                         'LiverLeft.obj': [(0.0,np.pi), (np.pi/3,3*np.pi/2), 8,20], 
                                         'Falciform.obj': [(0.0,np.pi), (np.pi/2,3*np.pi/2), 3,14]}
+
+        self.target_balls = {'LiverRight.obj': [ 5.991351,  24.504538,  -1.9299495], 
+                            'Falciform.obj': [ 5.056621,  22.632568,  -2.5371423],
+                            'LiverLeft.obj': [ 4.9135485, 23.361105,   1.7277693]}
+
         self.curr_anatomy_reward = 0
         self.anatomy_vis_threshold = 500
         self.vis_threshold_factor = vis_threshold_factor
@@ -272,6 +279,8 @@ class LapLiver(Env):
         self.curr_tgt = 0
         self.curr_anatomy_reward = 0
 
+        self.agent_render_q.clear()
+
         # Determine a place to intialise the agent in
         self.agent = self.initial_position
         if self.random_init:
@@ -327,6 +336,16 @@ class LapLiver(Env):
                 anatomy_reward += 1
 
         return anatomy_reward, len(h_idx)
+
+
+    def compute_ball_occupancy_reward(self, state, radius):
+        curr_tgt_anatomy = self.anatomy_list[self.curr_tgt]
+        ball_centroid = self.target_balls[curr_tgt_anatomy]
+
+        if np.linalg.norm(state - ball_centroid) < radius:
+            return 1
+        else:
+            return 0
 
     def step(self, action):
         assert self.action_space.contains(action), "Invalid Action"
@@ -386,13 +405,16 @@ class LapLiver(Env):
         # l2 distance as reward
         #reward += -np.linalg.norm(self.agent - curr_tgt)/1000
 
-        anatomy_reward, vis_thresh = self.compute_shell_occupancy_reward(self.agent)
+        #anatomy_reward, vis_thresh = self.compute_shell_occupancy_reward(self.agent)
+        anatomy_reward = self.compute_ball_occupancy_reward(self.agent, radius=3.5)
+
         self.curr_anatomy_reward += anatomy_reward
         reward += anatomy_reward
 
         #print(self.curr_anatomy_reward, vis_thresh*100)
         #if self.curr_anatomy_reward >= self.anatomy_vis_threshold:
-        if self.curr_anatomy_reward >= vis_thresh*self.vis_threshold_factor:
+        #if self.curr_anatomy_reward >= vis_thresh*self.vis_threshold_factor:
+        if self.curr_anatomy_reward >= self.vis_threshold_factor:
             print(f"Task solved: {self.anatomy_list[self.curr_tgt]} reached ")
 
             if self.curr_tgt == len(self.anatomy_list)-1:
@@ -507,11 +529,16 @@ class LapLiver(Env):
             idx = self.highlight_index_dict[curr_anat][0]
             v = np.array(self.meshes[curr_anat].vertices)
 
-            plt_sphere_section(ax, [(v[idx,0],v[idx,1]+9.8,v[idx,2])], [r1], color='yellow', u_range = u_range,  v_range = v_range)
-            plt_sphere_section(ax, [(v[idx,0],v[idx,1]+9.8,v[idx,2])], [r2], color='yellow', u_range = u_range,  v_range = v_range)
+            #plt_sphere_section(ax, [(v[idx,0],v[idx,1]+9.8,v[idx,2])], [r1], color='yellow', u_range = u_range,  v_range = v_range)
+            #plt_sphere_section(ax, [(v[idx,0],v[idx,1]+9.8,v[idx,2])], [r2], color='yellow', u_range = u_range,  v_range = v_range)
+
+            plt_sphere(ax, [self.target_balls[curr_anat]], [3.5], color='magenta')
 
             # plot agent
-            ax.scatter(self.agent[0], self.agent[1], self.agent[2], s=50, c='red')
+            self.agent_render_q.append(self.agent)
+            for i, agent in enumerate(self.agent_render_q):
+                ax.plot(agent[0], agent[1], agent[2], c='red')
+                ax.scatter(agent[0], agent[1], agent[2], s=20, c='red', alpha=(i+1)/(len(self.agent_render_q)+1))
 
             wp = np.array(self.waypoints)
             ax.scatter(wp[:, 0], wp[:, 1], wp[:, 2], s=30, c='green')

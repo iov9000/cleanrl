@@ -1,6 +1,7 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_continuous_actionpy
 import argparse
 import os
+import sys
 import random
 import time
 from datetime import datetime
@@ -163,8 +164,11 @@ def parse_args():
         for opt in parser._option_string_actions.values()
         if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
     }
+    cli = str(sys.argv).replace('--','').replace('verbose','').replace("'","")
+    cli = cli.replace(" ","_").replace(",","").replace(".py","").replace('[','').replace(']','')
 
-    return args, non_default
+
+    return args, non_default, cli
 
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name):

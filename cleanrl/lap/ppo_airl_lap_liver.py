@@ -240,7 +240,8 @@ def parse_args():
         for opt in parser._option_string_actions.values()
         if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
     }
-    cli = str(sys.argv).replace('--','').replace('verbose','').replace("'","").replace(" ","_").replace(",","").replace(".py","")
+    cli = str(sys.argv).replace('--','').replace('verbose','').replace("'","")
+    cli = cli.replace(" ","_").replace(",","").replace(".py","").replace('[','').replace(']','')
 
     return args, non_default, cli
 
@@ -446,7 +447,7 @@ if __name__ == "__main__":
 
     agent = Agent(test_env, args.agent_size, discrete=discrete).to(device)
     if args.resume:
-        agent.load_state_dict(torch.load(os.path.join(args.resume, "agent.pt") , map_location=device))
+        agent.load_state_dict(torch.load(os.path.join(args.resume, "best_actor.pt") , map_location=device))
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
@@ -478,6 +479,7 @@ if __name__ == "__main__":
 
     # logging variables
     irl_count = 0
+    best_rew = -10000
 
     for update in range(1, num_updates + 1):
         # Annealing the rate if instructed to do so.
@@ -510,6 +512,11 @@ if __name__ == "__main__":
             for item in info:
                 # TODO: fix this for new Gymnasium
                 if "final_info" in item.keys():
+                    if item["final_info"][0]['episode']["r"] > best_rew:
+                        best_rew = item["final_info"][0]['episode']["r"]
+                        torch.save(agent.state_dict(), f"runs/{run_name}/best_actor.pt")
+                        torch.save(disc.state_dict(), f"runs/{run_name}/best_disc.pt")
+
                     if args.verbose:
                         print(
                             f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")

@@ -220,7 +220,10 @@ def parse_args():
         if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
     }
 
-    return args, non_default
+    cli = str(sys.argv).replace('--','').replace('verbose','').replace("'","")
+    cli = cli.replace(" ","_").replace(",","").replace(".py","").replace('[','').replace(']','')
+
+    return args, non_default, cli
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
     def thunk():
