@@ -9,6 +9,7 @@ import gymnasium as gym
 import pickle
 from datetime import datetime
 import matplotlib.pyplot as plt
+import pandas as pd
 
 from typing import Optional
 
@@ -103,7 +104,7 @@ def load_fast_demos(args, filename, n_demos=1, bary_enhance=False, offset=100, o
     return {'all': expert_demos}
 
 
-def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, offset=500, obs_shape=3):
+def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, offset=500, obs_shape=3, filter_by_score=False):
     expert_demos = {}
     obs = []
     obs_full = []
@@ -112,9 +113,29 @@ def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, off
     dones = []
     cnt = 0
 
+    filter_name_list = []
+    if filter_by_score:
+        df1 = pd.read_excel('demos/davos_data/DiagnosticLaparoscopy_UnknownPathology_2021-18-10--14-48-56.xls')
+        df2 = pd.read_excel('demos/davos_data/DiagnosticLaparoscopy_UnknownPathology_2021-18-10--14-48-57.xls')
+
+        filter_name_list.extend([item[:8] for item in df1[df1['Total score'] >= 145]['Attachments:']])
+        filter_name_list.extend([item[:8] for item in df2[df2['Total score'] >= 145]['Attachments:']])
+
+    filtered_list = []
     for f in os.listdir(folder):
+        if len(filter_name_list) == 0:
+            filter_flag = True
+        else:
+            filter_flag = (f[:8] in filter_name_list)
+
+        if 'npy' in f and filter_flag:
+            filtered_list.append(f)
+
+    print("Training on best trajectories:", filtered_list)
+
+    for f in filtered_list:
         cnt += 1
-        if 'npy' in f:
+        if 'npy' in f and filter_flag:
             demo = {}
             o = np.load(os.path.join(folder, f))
             o_tr = o[offset:-offset, :obs_shape]

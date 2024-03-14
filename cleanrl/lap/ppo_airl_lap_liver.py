@@ -415,7 +415,7 @@ if __name__ == "__main__":
         demos = load_hf_demos_name(args, demo_list)
     else:
         if 'Lap' in args.env_id:
-            demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3, offset=100)
+            demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3, offset=100, filter_by_score=True)
         else:
             demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
 
@@ -428,7 +428,9 @@ if __name__ == "__main__":
                              plot_meshes=args.render_meshes,
                              continuous_actions=args.continuous_actions,
                              condition_on_n_tasks_completed=args.condition_on_n_tasks_completed,
-                             collision_loss=args.collision_loss)        
+                             collision_loss=args.collision_loss,
+                             ref_demo = demos)        
+
     if args.normalize_obs and isinstance(test_env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeObservation(test_env)
             env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
@@ -652,7 +654,6 @@ if __name__ == "__main__":
                     writer.add_scalar('irl/airl_v_p', loss_dict['policy_value'], global_step)
                     writer.add_scalar('irl/airl_r_e', loss_dict['expert_reward'], global_step)
                     writer.add_scalar('irl/airl_v_e', loss_dict['expert_value'], global_step)
-                    writer.add_scalar('irl/airl_bce_loss', loss_dict['d_loss'], global_step)
 
 
 

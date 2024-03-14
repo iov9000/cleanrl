@@ -347,6 +347,8 @@ class GAILDiscriminator(nn.Module):
         output_dict['d_loss'] = self.bce_loss
         output_dict['lip_penalty'] = lip_penalty
         output_dict['lip_grad_mix'] = grad_mix_norm
+        output_dict['expert_bce_loss'] = expert_loss
+        output_dict['policy_bce_loss'] = policy_loss
         #output_dict['lip_grad_e'] = grad_e
         #output_dict['lip_grad_p'] = grad_p
         output_dict['grad_penalty'] = self.grad_penalty

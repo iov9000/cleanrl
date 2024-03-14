@@ -9,6 +9,11 @@ import torch.autograd as autograd
 from torch.optim import Adam
 from torch.nn.utils import spectral_norm, weight_norm
 from irl.utils import ResNetAIRLDisc, MiniGridCNN, AtariCNNBase
+import torch
+from torch import nn
+import torch.nn.functional as F
+
+#from .utils import build_mlp
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -148,7 +153,7 @@ class AIRLDiscriminator(nn.Module):
         # forward the nn models
         fitted_value_n = self.value(self.base_v(next_ob))
         fitted_value = self.value(self.base_v(ob))
-        reward = self._get_reward(ob, ac)
+        reward = self._get_reward_net_output(ob, ac)
 
         # calculate discriminator probability according to AIRL structure
         qfn = reward + self.gamma * fitted_value_n
@@ -157,12 +162,9 @@ class AIRLDiscriminator(nn.Module):
         log_q_tau = lprobs
 
         # log_pq = torch.log(torch.sum(torch.exp(torch.cat([log_p_tau, log_q_tau], dim=0))))
-        # d_out = torch.exp(log_p_tau - log_pq)
+        # d_out = torch.exp(log_p_tau - log_pq) 
         # TEST:
-        if self.use_actions:
-            d_out = torch.sigmoid(log_p_tau - log_q_tau)
-        else:
-            d_out = torch.sigmoid(log_p_tau)
+        d_out = torch.sigmoid(log_p_tau - log_q_tau)
 
         # d_out = torch.sigmoid(log_q_tau - log_p_tau)
 
@@ -173,7 +175,7 @@ class AIRLDiscriminator(nn.Module):
             ob, next_ob, ac, lprobs)
         
         if self.opt.airl_reward_type == 'disc':
-            return torch.squeeze(torch.log(torch.sigmoid(d_out) + 1e-8) - torch.log(1-torch.sigmoid(d_out) + 1e-8))
+            return torch.squeeze(torch.log(torch.sigmoid(d_out) + 1e-8) - torch.log(1-torch.sigmoid(d_out) + 1e-8)) - lprobs
         elif self.opt.airl_reward_type == 'shaping_term':
             return fitted_value
         elif self.opt.airl_reward_type == 'shaped_reward':
@@ -182,7 +184,7 @@ class AIRLDiscriminator(nn.Module):
             return reward# + self.gamma*fitted_value_n
 
     # this computes the value of the reward fct instead of logD
-    def _get_reward(self, ob, ac):
+    def _get_reward_net_output(self, ob, ac):
         if self.use_actions and (self.use_cnn_base or self.is_atari):
             base_out = self.base(ob, ac)
         elif self.use_actions and not (self.use_cnn_base or self.is_atari):

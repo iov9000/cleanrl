@@ -25,6 +25,8 @@ import torch.optim as optim
 from torch.distributions.normal import Normal
 from torch.distributions.categorical import Categorical
 
+import ot
+
 from torch.utils.tensorboard import SummaryWriter
 # module_path = os.path.abspath(os.path.join('..'))
 # if module_path not in sys.path:
@@ -396,7 +398,7 @@ if __name__ == "__main__":
         demos = load_hf_demos_name(args, demo_list)
     else:
         if 'Lap' in args.env_id:
-            demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3, offset=100)
+            demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3, offset=100, filter_by_score=True)
         else:
             demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
 
@@ -490,14 +492,17 @@ if __name__ == "__main__":
 
             for item in info:
                 if "final_info" in item.keys():
-                    if item["final_info"][0]['episode']["r"] > best_rew:
+                    # Important, here ">=" because we want newer best actors
+                    if item["final_info"][0]['episode']["r"] >= best_rew:
                         best_rew = item["final_info"][0]['episode']["r"]
                         torch.save(agent.state_dict(), f"runs/{run_name}/best_actor.pt")
                         torch.save(disc.state_dict(), f"runs/{run_name}/best_disc.pt")
 
                     if args.verbose:
                         print(
-                            f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
+                            f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}"
+                            f" episodic_return_irl={item['final_info'][0]['episode']['ep_rew_irl']}")
+
                     if global_step % 1 == 0:
                         writer.add_scalar(
                             "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
@@ -623,6 +628,8 @@ if __name__ == "__main__":
             
                 if global_step % args.logging_interval  == 0:
                     writer.add_scalar('irl/gail_bce_loss', loss_dict['d_loss'], global_step)
+                    writer.add_scalar('irl/gail_expert_bce_loss', loss_dict['expert_bce_loss'], global_step)
+                    writer.add_scalar('irl/gail_policy_bce_loss', loss_dict['policy_bce_loss'], global_step)
                     if args.irm_coeff > 0:
                         writer.add_scalar('irl/gail_irm_loss', loss_dict['grad_penalty'], global_step)
 
@@ -648,6 +655,9 @@ if __name__ == "__main__":
             print(f"Evaluation at {global_step}: {mu}, {std}")
             writer.add_scalar('eval/mu', mu, global_step)
             writer.add_scalar('eval/std', std, global_step)
+            ref_dist = ot.sliced_wasserstein_distance(
+                d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
+            writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
 
     envs.close()
     writer.close()

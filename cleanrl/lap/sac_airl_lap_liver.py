@@ -268,7 +268,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, agent, disc, demos
 class SoftQNetwork(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape), 256)
+        self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod() + np.prod(env.action_space.shape), 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, 1)
 
@@ -391,7 +391,7 @@ if __name__ == "__main__":
         demos = load_hf_demos_name(args, demo_list)
     else:
         if 'Lap' in args.env_id:
-            demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3, offset=100)
+            demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3, offset=100, filter_by_score=True)
         else:
             demos = load_hf_demos(args.env_id, args.demo_dir, n_demos=args.n_demos)
 
@@ -426,8 +426,8 @@ if __name__ == "__main__":
 
     max_action = float(envs.single_action_space.high[0])
 
-    qf1 = SoftQNetwork(envs).to(device)
-    qf2 = SoftQNetwork(envs).to(device)
+    qf1 = SoftQNetwork(test_env).to(device)
+    qf2 = SoftQNetwork(test_env).to(device)
 
     if args.resume is not None:
         actor.load_state_dict(torch.load(os.path.join(args.resume, "best_actor.pt") , map_location=device))
@@ -476,7 +476,7 @@ if __name__ == "__main__":
 
     # TRY NOT TO MODIFY: start the game
     obs = envs.reset(seed=args.seed)[0]
-    best_len = 10000
+    best_rew = -10000
     traj = {'obs': [], 'acs': [], 'done': []} # traj_only IRL
     if args.mode == 'training':
         for global_step in range(args.total_timesteps):
@@ -508,9 +508,11 @@ if __name__ == "__main__":
                     # TODO: fix this for new Gymnasium
                     if "final_info" in item.keys():
                         irl_trigger = True
-                        if item["final_info"][0]['episode']["l"] < best_len:
-                            best_len = item["final_info"][0]['episode']["l"]
+                        if item["final_info"][0]['episode']["r"] >= best_rew:
+                            best_rew = item["final_info"][0]['episode']["r"]
                             torch.save(actor.state_dict(), f"runs/{run_name}/best_actor.pt")
+                            torch.save(qf1.state_dict(), f"runs/{run_name}/best_qf1.pt")
+                            torch.save(qf2.state_dict(), f"runs/{run_name}/best_qf2.pt")
                             torch.save(disc.state_dict(), f"runs/{run_name}/best_disc.pt")
 
                         if args.verbose:
@@ -665,9 +667,9 @@ if __name__ == "__main__":
                         writer.add_scalar('eval/std', std, global_step)
                         results_dict['eval_mu'].append(mu)
                         results_dict['eval_std'].append(std)
-                        #ref_dist = ot.sliced_wasserstein_distance(
-                        #    d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
-                        #writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
+                        ref_dist = ot.sliced_wasserstein_distance(
+                            d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
+                        writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
 
 
             except KeyboardInterrupt:
