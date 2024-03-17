@@ -135,7 +135,7 @@ def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, off
 
     for f in filtered_list:
         cnt += 1
-        if 'npy' in f and filter_flag:
+        if 'npy' in f:
             demo = {}
             o = np.load(os.path.join(folder, f))
             o_tr = o[offset:-offset, :obs_shape]
@@ -162,6 +162,7 @@ def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, off
     expert_demos['acs'] = np.concatenate(acs,0)
     expert_demos['rew'] = np.concatenate(rew,0)
     expert_demos['done'] = np.concatenate(dones,0)
+
 
     return {'all': expert_demos}
 
