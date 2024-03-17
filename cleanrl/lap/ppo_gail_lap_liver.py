@@ -413,7 +413,8 @@ if __name__ == "__main__":
                              condition_on_n_tasks_completed=args.condition_on_n_tasks_completed,
                              collision_loss=args.collision_loss,
                              vis_threshold_factor = args.vis_threshold_factor,
-)        
+                             ref_demo = demos)
+                                     
     if args.normalize_obs and isinstance(test_env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeObservation(test_env)
             env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))

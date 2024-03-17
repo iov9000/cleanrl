@@ -25,6 +25,8 @@ import torch.optim as optim
 from torch.distributions.normal import Normal
 from torch.distributions.categorical import Categorical
 
+import ot
+
 from torch.utils.tensorboard import SummaryWriter
 # module_path = os.path.abspath(os.path.join('..'))
 # if module_path not in sys.path:
@@ -678,6 +680,9 @@ if __name__ == "__main__":
             print(f"Evaluation at {global_step}: {mu}, {std}")
             writer.add_scalar('eval/mu', mu, global_step)
             writer.add_scalar('eval/std', std, global_step)
+            ref_dist = ot.sliced_wasserstein_distance(
+                d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
+            writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
 
     envs.close()
     writer.close()

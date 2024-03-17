@@ -48,8 +48,9 @@ def load_meshes_tri(folder, anatomy_list, simplify_mesh=False, scale=100):
                 mesh = mesh.simplify_quadratic_decimation(2000)
 
             # shift all meshes along the y direction except Belly mesh
-            if 'Belly' not in f:
-                mesh.vertices = mesh.vertices + np.array([0,-2,0])
+            # TODO: do this properly (Y-offset!)
+            #if 'Belly' not in f:
+            mesh.vertices = mesh.vertices + np.array([0,9.8,0])
             meshes[f] = mesh
             #if 'Belly' not in f:
             vertices.append(np.array(mesh.vertices))
@@ -141,7 +142,7 @@ class LapLiver(Env):
         self.render_mode = render_mode
         self.agent_render_q = deque(maxlen=100)
 
-        self.valid_radius = 5.0
+        self.valid_radius = [4.5, 4.5, 5.5]
 
         self.name = 'lapliver'
         self.anatomy_list = ['LiverRight.obj', 'Falciform.obj', 'LiverLeft.obj']
@@ -370,7 +371,7 @@ class LapLiver(Env):
             return 0
 
     def step(self, action):
-        assert self.action_space.contains(action), "Invalid Action"
+        #assert self.action_space.contains(action), "Invalid Action"
         self.time -= 1 
 
         # apply the action to the agent
@@ -428,7 +429,7 @@ class LapLiver(Env):
         #reward += -np.linalg.norm(self.agent - curr_tgt)/1000
 
         #anatomy_reward, vis_thresh = self.compute_shell_occupancy_reward(self.agent)
-        anatomy_reward = self.compute_ball_occupancy_reward(self.agent, radius=self.valid_radius)
+        anatomy_reward = self.compute_ball_occupancy_reward(self.agent, radius=self.valid_radius[self.curr_tgt])
 
         self.curr_anatomy_reward += anatomy_reward
         reward += anatomy_reward
@@ -512,7 +513,7 @@ class LapLiver(Env):
                 #bb_c = np.array(v.get_oriented_bounding_box().get_center())
                 bb = np.array(v.bounding_box_oriented.vertices)*scale
                 bb_c = np.array(v.centroid)*scale
-                y_offset = 9.8
+                y_offset = 0.0 #9.8
                 if self.plot_meshes:
                     if k in self.anatomy_list:
                         idx = self.highlight_index_dict[k]
@@ -542,8 +543,8 @@ class LapLiver(Env):
                 v_f = self.ref_demo['all']['obs_full']
 
                 liver_states = v[np.where(v_f[:,-1]==12+self.curr_tgt),:].squeeze()
-                ax.scatter(liver_states[:,0],liver_states[:,1],-liver_states[:,2], s=3, c='blue', alpha=0.3)
-                ax.plot(liver_states[:,0],liver_states[:,1],-liver_states[:,2])
+                ax.scatter(liver_states[:,0],liver_states[:,1],liver_states[:,2], s=3, c='blue', alpha=0.3)
+                ax.plot(liver_states[:,0],liver_states[:,1],liver_states[:,2])
 
             # plot target areas:
             curr_anat = self.anatomy_list[self.curr_tgt]
@@ -559,7 +560,7 @@ class LapLiver(Env):
 
             # plot target sphere in a color corresponding to occupancy completion
             target_sphere_color = self.cm(1.*self.curr_anatomy_reward/self.anatomy_vis_threshold)
-            plt_sphere(ax, [self.target_balls[curr_anat]], [self.valid_radius], color=target_sphere_color)
+            plt_sphere(ax, [self.target_balls[curr_anat]], [self.valid_radius[self.curr_tgt]], color=target_sphere_color)
 
             ## Plot agent
             self.agent_render_q.append(self.agent)

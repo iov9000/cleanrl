@@ -104,7 +104,7 @@ def load_fast_demos(args, filename, n_demos=1, bary_enhance=False, offset=100, o
     return {'all': expert_demos}
 
 
-def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, offset=500, obs_shape=3, filter_by_score=False):
+def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, offset=500, obs_shape=3, filter_by_score=False, flip_z=False):
     expert_demos = {}
     obs = []
     obs_full = []
@@ -115,8 +115,8 @@ def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, off
 
     filter_name_list = []
     if filter_by_score:
-        df1 = pd.read_excel('demos/davos_data/DiagnosticLaparoscopy_UnknownPathology_2021-18-10--14-48-56.xls')
-        df2 = pd.read_excel('demos/davos_data/DiagnosticLaparoscopy_UnknownPathology_2021-18-10--14-48-57.xls')
+        df1 = pd.read_excel(os.path.join(folder,'DiagnosticLaparoscopy_UnknownPathology_2021-18-10--14-48-56.xls'))
+        df2 = pd.read_excel(os.path.join(folder,'DiagnosticLaparoscopy_UnknownPathology_2021-18-10--14-48-57.xls'))
 
         filter_name_list.extend([item[:8] for item in df1[df1['Total score'] >= 145]['Attachments:']])
         filter_name_list.extend([item[:8] for item in df2[df2['Total score'] >= 145]['Attachments:']])
@@ -140,6 +140,10 @@ def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, off
             o = np.load(os.path.join(folder, f))
             o_tr = o[offset:-offset, :obs_shape]
             o_full = o[offset:-offset, :]
+            if flip_z:
+                o_tr[:,2] = -o_tr[:,2]
+                o_full[:,2] = -o_full[:,2]
+
             a = np.zeros([len(o_tr)])
             r = np.zeros([len(o_tr)])
             d = np.zeros([len(o_tr)]) 
