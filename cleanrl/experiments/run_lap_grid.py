@@ -45,7 +45,7 @@ if __name__ == '__main__':
                             for algo in algos:
                                 ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
                                 lin_rbl = lin.replace(" ", "")
-                                exp_id = (f"{ts}_{algo}_{disc}_{env_name}_seed_{seed}_{args.exp_id}_{lin_rbl}")
+                                exp_id = (f"{ts}_lap_ppo_{disc}_seed_{seed}_{args.exp_id}_{lin_rbl}")
                                 euler_slurm = (f"sbatch --mem-per-cpu={MEM_PER_CPU} {gpu_string} " 
                                             f"-o {args.output_dir / exp_id} "
                                             f"--time={args.time}:00:00 --wrap ")
@@ -53,7 +53,7 @@ if __name__ == '__main__':
                                 # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
                                 exp_cmd = (f"python lap/ppo_{disc}_lap_liver.py --exp-id={args.exp_id} --n_demos={n_demo} "
                                         f" {lin} --disc_nonlin={d_nl} --verbose "
-                                        f"--seed={seed} --env-id {env_name} "
+                                        f"--seed={seed} "
                                         f"--collision_loss --step_size 1.0 "
                                         f"--vis_threshold_factor 50 --total-timesteps 1000000")
                                 cluster_cmd = euler_slurm + exp_cmd 
