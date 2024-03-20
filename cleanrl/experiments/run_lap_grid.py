@@ -16,14 +16,15 @@ if __name__ == '__main__':
     
     seeds = [515, 234, 894, 322, 72, 913, 76, 147, 410, 728]
     algos = ['sac']
-    disc_types = ['gail', 'airl']
+    disc_types = ['airl']
     # irm_coeffs = [0.0, 0.1, 1.0, 10.0, 100.0]
     irm_coeffs = [0.0, 1.0, 10.0]
     lip_coeffs = [0.0, 1.0, 10.0]
-    lins = ['',  '--use_spectral_norm']
+    # lins = ['',  '--use_spectral_norm']
+    lins = []
     for irm_c in irm_coeffs:
         for lip_c in lip_coeffs:
-            lins.append(f"--irm_coeff={irm_c} --lip_coeff={lip_c}")
+            lins.append(f"--irm_coeff={irm_c} --lip_coeff={lip_c} --airl_reward_type disc")
 
     usenobs = ['']
     use_acs = ['']
@@ -51,7 +52,7 @@ if __name__ == '__main__':
                                             f"--time={args.time}:00:00 --wrap ")
                                 euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
                                 # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
-                                exp_cmd = (f"python lap/ppo_{disc}_lap_liver.py --exp-id={args.exp_id} --n_demos={n_demo} "
+                                exp_cmd = (f"python lap/ppo_{disc}_lap_liver.py --n_demos={n_demo} "
                                         f" {lin} --disc_nonlin={d_nl} --verbose "
                                         f"--seed={seed} "
                                         f"--collision_loss --step_size 1.0 "

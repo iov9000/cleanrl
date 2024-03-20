@@ -696,7 +696,7 @@ class MujocoTestWrapper(gym.Wrapper):
 
     def perturb_parameter(self, parameter='body_mass'):
         param = np.array(getattr(self.env.model, parameter))
-        param_mod = param + np.random.randn(*param.shape)*self.epsdyn
+        param_mod = param + np.random.rand(*param.shape)*self.epsdyn
 
         #print(
         #    f">> Perturbed parameter {parameter}, default: {self.default_params[parameter]}, changed: {param_mod}")
@@ -704,7 +704,7 @@ class MujocoTestWrapper(gym.Wrapper):
         getattr(self.env.model, parameter)[:] = param_mod
 
     def reset(self, seed=1, options=None):
-        o = self.env.reset(seed, options)[0]
+        o = self.env.reset(seed=seed, options=options)[0]
         # reset mass to default value otherwise accum.
         for k, v in self.default_params.items():
             getattr(self.env.model, k)[:] = v
