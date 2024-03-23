@@ -347,7 +347,7 @@ def get_concat_samples(policy_batch, expert_batch):
 
 
 
-def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy, compute_lprobs=False):
+def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy, compute_lprobs=False, compute_safe_support=False):
     if opt.use_sb_ppo:
         ac_sample = env.action_space.sample()
     else:
@@ -500,6 +500,19 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy, co
     update_dict['expert_acs'] = expert_acs_t
     update_dict['expert_lprobs'] = expert_lprobs_t
     update_dict['expert_dones'] = expert_dones_t
+
+    if compute_safe_support:
+        update_dict['support_obs'] = expert_obs_t
+        update_dict['support_obs_next'] = expert_obs_next_t
+        update_dict['support_acs'] = expert_acs_t
+        update_dict['support_lprobs'] = expert_lprobs_t
+        update_dict['support_dones'] = expert_dones_t
+    else:
+        update_dict['support_obs'] = expert_obs_t
+        update_dict['support_obs_next'] = expert_obs_next_t
+        update_dict['support_acs'] = expert_acs_t
+        update_dict['support_lprobs'] = expert_lprobs_t
+        update_dict['support_dones'] = expert_dones_t
 
     update_dict['policy_obs'] = policy_obs_t
     update_dict['policy_obs_next'] = policy_obs_next_t
@@ -780,7 +793,8 @@ class Box2dTestWrapper(gym.Wrapper):
         return o, r, t, tr, i
 
 
-def evaluate_model(args, actor, device, test_env=None, deterministic=False, wrap_mujoco=False, n_traj=10, save_eval=None, max_step=1e7):
+def evaluate_model(args, actor, device, test_env=None, deterministic=False, 
+                wrap_mujoco=False, n_traj=10, save_eval=None, max_step=1e7):
     if test_env is None:
         test_env = gym.make(args.env_id)
         if wrap_mujoco:
@@ -795,14 +809,16 @@ def evaluate_model(args, actor, device, test_env=None, deterministic=False, wrap
                 test_env, lambda obs: np.clip(obs, -10, 10))
 
     mu, std, d = save_traj_dict(args, args.env_id, test_env, 
-                                actor, device, deterministic=deterministic, nr_trajectories=n_traj, save_eval=save_eval, max_step=max_step)
+                                actor, device, deterministic=deterministic, 
+                                nr_trajectories=n_traj, save_eval=save_eval, max_step=max_step)
 
-    test_env.close()
+    #test_env.close()
 
     return mu, std, d
 
 def save_traj_dict(opt, env_name, env, model, device, 
-                    nr_trajectories=10, min_total_rew=-1e6, deterministic=True, save_eval=None, max_step=1e7):
+                    nr_trajectories=10, min_total_rew=-1e6, 
+                    deterministic=True, save_eval=None, max_step=1e7):
     num_steps = 0
     expert_obs = []
     expert_acs = []

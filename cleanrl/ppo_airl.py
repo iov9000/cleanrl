@@ -26,6 +26,12 @@ gym.envs.register(
      max_episode_steps=1000,
 )
 
+gym.envs.register(
+     id='CMovePND-v0',
+     entry_point='envs.envs2d:CMovePND',
+     max_episode_steps=1000,
+)
+
 import numpy as np
 #import pybullet_envs  # noqa
 import torch
@@ -79,7 +85,7 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v3",
         help="the id of the environment")
-    parser.add_argument("--env_kwargs", type=str, default="", nargs='+',  help="env kwargs")
+    parser.add_argument("--env_kwargs", type=str, default="", nargs='+', help="env kwargs")
     parser.add_argument("--env_kwargs_values", type=float, nargs='+', help="env kwargs values")
     parser.add_argument('--perturb_dynamics', type=float, default=0.0, help="perturb dynamics") 
     parser.add_argument("--perturb_parameters", type=str, default=['body_mass'], nargs='+', help="which dynamics params to perturb")
@@ -187,9 +193,10 @@ def parse_args():
         for opt in parser._option_string_actions.values()
         if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
     }
+    cli = str(sys.argv).replace('--','').replace('verbose','').replace("'","")
+    cli = cli.replace(" ","_").replace(",","").replace(".py","").replace('[','').replace(']','')
 
-    return args, non_default
-
+    return args, non_default, cli
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, agent, disc, env_kwargs):
     def thunk():

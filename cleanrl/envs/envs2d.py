@@ -4,8 +4,11 @@ import cv2
 import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
 import random
 import torch
+from collections import deque
 
 def plot_reward(discriminator, shape=(200,60), tgt_pos=(190,30), plot_value=False, env=None):
     # generate grid w/ two different targets:
@@ -686,12 +689,16 @@ class CMoveP(Env):
 
 # continuous movepoint with obstacles
 class CMovePND(Env):
-    metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 10}
+    metadata = {"render.modes": ["human", "rgb_array"], "render_fps": 30}
 
-    def __init__(self, waypoints, D=2, size=20, 
-            n_obstacles=1, random_init=False, goal_conditioning=True, render_mode="rgb_array"):
+    def __init__(self, waypoints=[(198,198)], D=2, size=200, 
+            n_obstacles=1, random_obstacles=False, hard_obstacles=False, safety_reward_coeff = 0.0, 
+            random_init=False, goal_conditioning=True, render_mode="rgb_array"):
         super(CMovePND, self).__init__()
         
+
+        self.render_mode = render_mode
+
         self.dim = D
         self.goal_conditioning = goal_conditioning
         if goal_conditioning:
@@ -716,33 +723,54 @@ class CMovePND(Env):
         self.random_init = random_init
         # Maximum episode length
         self.max_time = 1000
-        
+        self.safety_reward_coeff = safety_reward_coeff
+        self.agent_render_q = deque(maxlen=100)
+        self.hard_obstacles = bool(hard_obstacles)
+
+        self.collision_flag = False
+
         # Add targets
         self.n_tgt = len(waypoints)
         self.waypoints = waypoints
-        self.obstacles = self.gen_random_obstacles(n_obstacles)
+        if random_obstacles:
+            self.obstacles = self.gen_random_obstacles(n_obstacles)
+        else:
+            self.obstacles = self.gen_fixed_obstacles([(np.array((size/4, size/8)), np.array((size/5, size/5))), 
+                                                       (np.array((size/2, size/8*3)), np.array((size/4, size/4)))])
         
     def gen_random_obstacles(self, n_obstacles):
         self.obstacles = []
         for i in range(n_obstacles):
-            x0 = np.clip(np.random.randint(0.3*self.size,0.7*self.size,self.dim),self.min, self.max)
+            x0 = np.clip(np.random.randint(0.3*self.size,0.7*self.size, self.dim),self.min, self.max)
             xlen = np.clip(np.random.randint(0, 0.2*self.size, self.dim), self.min, self.max)
+            self.obstacles.append((x0, xlen))
+        
+        return self.obstacles
+
+    def gen_fixed_obstacles(self, obstacle_specs):
+        self.obstacles = []
+        for (x0,xlen) in obstacle_specs:
             self.obstacles.append((x0, xlen))
         
         return self.obstacles
         
     def check_obstacles(self, state, action):
         res = state+action
+        safety_rew = 0
         for i, j in self.obstacles:
             mask0 = state+action > i
             mask1 = state+action < i+j
-            
+
             if np.all(mask0) and np.all(mask1):
-                res = state
+                if self.hard_obstacles:
+                    res = state
+                    
+                safety_rew = -1
+
             #mask = np.logical_or(mask0, mask1)
             #res = mask*(state+action) + np.logical_not(mask)*state
             
-        return res
+        return res, safety_rew
 
     def reset(self, seed=1, options=None):
         # Flag that marks the termination of an episode
@@ -780,7 +808,13 @@ class CMovePND(Env):
         # apply the action to the agent
         move = action
 
-        self.agent = self.clamp(self.check_obstacles(self.agent, move), self.min, self.max)
+        next_state, safety_rew = self.check_obstacles(self.agent, move)
+        if safety_rew < 0:
+            self.collision_flag = True
+        else:
+            self.collision_flag = False
+
+        self.agent = self.clamp(next_state, self.min, self.max)
         #self.agent = self.clamp(self.agent + move, self.min, self.max)
 
         # compute obstacles
@@ -791,8 +825,12 @@ class CMovePND(Env):
             
         curr_tgt = np.array(self.waypoints[self.curr_tgt])
         # l2 distance as reward
-        reward = self.get_reward(self.agent, curr_tgt)
-        
+        if self.safety_reward_coeff > 0.0:
+            reward = self.get_reward(self.agent, curr_tgt, 
+                                    safety_rew=self.safety_reward_coeff*safety_rew)
+        else:
+            reward = self.get_reward(self.agent, curr_tgt)
+
         if np.linalg.norm(self.agent - curr_tgt) < 3:
             #reward += 5
             if self.curr_tgt == len(self.waypoints)-1:
@@ -816,33 +854,57 @@ class CMovePND(Env):
 
         return state, reward, self.term, self.trunc, {}
                         
-
     def clamp(self, n, minn, maxn):
         return np.clip(n, minn, maxn)
 
-    def get_reward(self, state, tgt = (175,175)):
+    def get_reward(self, state, tgt = (175,175), safety_rew = 0):
         curr_tgt = np.array(tgt)
         # l2 distance as reward
-        reward = -np.linalg.norm(state-tgt)
+        reward = -np.linalg.norm(state-tgt) + safety_rew
         
         return reward
                             
     def render(self, mode = "rgb_array"):
         assert mode in ["human", "rgb_array"], "Invalid mode, must be either \"human\" or \"rgb_array\""
-        fig = plt.figure(figsize=(10,10))
-        plt.scatter(self.agent[0], self.agent[1], c='m',alpha=0.2)
+        fig = plt.figure(figsize=(8,8), dpi=200)
+        ax = plt.gca()
+
+
+        ## Plot agent
+        self.agent_render_q.append((self.agent, self.collision_flag))
+        for i, (agent, collision) in enumerate(self.agent_render_q):
+            ax.plot(agent[0], agent[1], c='red')
+            if collision:
+                marker = '*'
+                color = 'red'
+            else:
+                marker = '.'
+                color = 'green'
+            ax.scatter(agent[0], agent[1], s=20, c=color, marker=marker, alpha=(i+1)/(len(self.agent_render_q)+1))
+
         curr_tgt = self.waypoints[self.curr_tgt]
-        plt.scatter(curr_tgt[0], curr_tgt[1], c='r')
+        plt.scatter(curr_tgt[0], curr_tgt[1], c='k', s=10, marker='*')
         plt.axis('equal')
+
+
+        ax.set_ylim(0,self.size)
+        ax.set_xlim(0,self.size)
+        #ax.set_xticks([0, self.size/2, self.size])
+        #ax.set_yticks([0, self.size/2, self.size])
+        dim0, dim1 = 0,1
+        for i, j in self.obstacles:
+            rect = patches.Rectangle((i[dim0],i[dim1]), j[dim0], j[dim1], linewidth=2, edgecolor='m', facecolor='none')
+            ax.add_patch(rect)
+
         if mode == "human":
             plt.show()
-
         elif mode == "rgb_array":
             #return fig
             fig.canvas.draw()
-            data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-            data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-            return data
+            data = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+            data = data.reshape(fig.canvas.get_width_height()[::-1] + (4,))
+            plt.close()
+            return data[:,:,:3]
 
 
 def plot_reward(shape=(200,60), tgt_pos=(190,30), plot_value=False, env=None):
@@ -867,16 +929,17 @@ def plot_reward(shape=(200,60), tgt_pos=(190,30), plot_value=False, env=None):
 
     fig = plt.figure(figsize=(20,5))
     ax1 = plt.subplot(121)
-    plt.pcolormesh(x,y,r_gt_1.T)
+    plt.pcolormesh(x, y, r_gt_1.T)
     plt.colorbar()
     plt.scatter(tgt_pos[0], tgt_pos[1], c='r')
     plt.title(title + '_irl')
     ax2 = plt.subplot(122)
-    plt.pcolor(x,y,r_gt_1.T)
+    plt.pcolor(x, y, r_gt_1.T)
     plt.colorbar()
     plt.scatter(tgt_pos[0], tgt_pos[1], c='r')
     plt.title(title + '_gt')
     
+
     plt.tight_layout()
 
     fig.canvas.draw()
