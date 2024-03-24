@@ -221,7 +221,6 @@ if __name__ == "__main__":
         import safety_gymnasium
         from safety.utils import SafetyGymWrapper
 
-
     if args.track:
         import wandb
 

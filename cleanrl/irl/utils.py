@@ -347,7 +347,7 @@ def get_concat_samples(policy_batch, expert_batch):
 
 
 
-def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy, compute_lprobs=False, compute_safe_support=False):
+def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy, compute_lprobs=False, load_support=False):
     if opt.use_sb_ppo:
         ac_sample = env.action_space.sample()
     else:
@@ -501,17 +501,34 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy, co
     update_dict['expert_lprobs'] = expert_lprobs_t
     update_dict['expert_dones'] = expert_dones_t
 
-    if compute_safe_support:
-        update_dict['support_obs'] = expert_obs_t
-        update_dict['support_obs_next'] = expert_obs_next_t
-        update_dict['support_acs'] = expert_acs_t
-        update_dict['support_lprobs'] = expert_lprobs_t
-        update_dict['support_dones'] = expert_dones_t
+    if load_support:
+        if isinstance(expert_demos, dict):
+            support_obs = expert_demos['support_obs']
+            support_acs = expert_demos['support_acs']
+            support_done = expert_demos['support_done']
+            support_obs_next = np.concatenate([support_obs[1:], np.expand_dims(support_obs[-1], 0)],
+                                     axis=0)  # repeat last observation
+                                     
+        support_obs_t = torch.from_numpy(support_obs).type(torch.get_default_dtype())
+        support_acs_t = torch.from_numpy(support_acs).type(torch.get_default_dtype())   
+        support_dones_t = torch.from_numpy(support_done).type(torch.get_default_dtype())   
+        support_obs_next_t = torch.from_numpy(support_obs_next).type(torch.get_default_dtype())
+
+        if torch.cuda.is_available():
+            support_obs_t = support_obs_t.cuda()
+            support_obs_next_t = support_obs_next_t.cuda()
+            support_acs_t = support_acs_t.cuda()
+            support_dones_t = support_dones_t.cuda()
+
+        update_dict['support_obs'] = support_obs_t
+        update_dict['support_obs_next'] = support_obs_next_t
+        update_dict['support_acs'] = support_acs_t
+        update_dict['support_dones'] = support_dones_t
     else:
         update_dict['support_obs'] = expert_obs_t
         update_dict['support_obs_next'] = expert_obs_next_t
         update_dict['support_acs'] = expert_acs_t
-        update_dict['support_lprobs'] = expert_lprobs_t
+        #update_dict['support_lprobs'] = expert_lprobs_t
         update_dict['support_dones'] = expert_dones_t
 
     update_dict['policy_obs'] = policy_obs_t
