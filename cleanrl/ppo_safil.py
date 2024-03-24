@@ -26,24 +26,18 @@ from torch.utils.tensorboard import SummaryWriter
 import gymnasium as gym
 
 gym.envs.register(
-     id='MoveP-v0',
-     entry_point='envs.envs2d:MoveP',
+     id='CMovePND-v0',
+     entry_point='envs.envs2d:CMovePND',
      max_episode_steps=1000,
 )
 
 gym.envs.register(
-     id='CMoveP-v0',
-     entry_point='envs.envs2d:CMoveP',
-     max_episode_steps=1000,
+     id='LapLiver-v0',
+     entry_point='envs.env_lap_liver:LapLiver',
+     max_episode_steps=500,
 )
 
-gym.envs.register(
-     id='Lap-v0',
-     entry_point='envs.env_lap:Laparos',
-     max_episode_steps=1000,
-)
-
-from irl.gail import GailReward, GAILDiscriminator
+from irl.safil import SafilReward, SafILDiscriminator
 from irl.utils import load_hf_demos, load_hf_demos_name, load_lap_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
                    demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model, FrankaObsWrapper
 
@@ -148,6 +142,14 @@ def parse_args():
         action='store_true', help='use actions in discriminator')
     parser.add_argument('--use_next_obs', default=False, required=False, 
         action='store_true', help='use actions in discriminator')
+
+    ## Safety specific arguments
+    parser.add_argument('--use_safe_disc_rewards', default=False, required=False, 
+        action='store_true', help='use safety discriminator signal as reward')
+    parser.add_argument('--safety_coeff', default=1.0, type=float, 
+        required=False, help='use safety discriminator vs base measure')
+    ## / Safety specific arguments
+
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
                    help='discriminator MLP layer dimensions')
     parser.add_argument('--irm_coeff', default=0, type=float, 
@@ -217,6 +219,9 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
         elif 'Franka' in env_id:
             env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
             env = FrankaObsWrapper(env)
+        elif 'Safety' in env_id:
+            env = safety_gymnasium.make(env_id)
+            env = SafetyGymWrapper(env)
         else:
             env = gym.make(env_id, render_mode='rgb_array')        
         
@@ -231,7 +236,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
         if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeObservation(env)
             env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-        env = GailReward(env, opt, disc)
+        env = SafilReward(env, opt, disc)
         if opt.normalize_irl_rewards and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeReward(env, gamma=gamma)
             env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
@@ -333,7 +338,11 @@ if __name__ == "__main__":
 
     if len(run_name) > 220:
         run_name = run_name[:220]
-    
+        
+    if 'Safety' in args.env_id:
+        import safety_gymnasium
+        from safety.utils import SafetyGymWrapper
+
     if args.track:
         import wandb
 
@@ -346,8 +355,6 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
-
-    print(args.normalize_obs)
 
     writer = SummaryWriter(f"runs/{run_name}")
     #writer.add_hparams(vars(args))
@@ -406,7 +413,7 @@ if __name__ == "__main__":
         
     # get env specs
     discrete = not isinstance(test_env.action_space, gym.spaces.Box)
-    disc = GAILDiscriminator(test_env, args)
+    disc = SafILDiscriminator(test_env, args)
     if args.load_disc:
         disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
 
@@ -590,8 +597,6 @@ if __name__ == "__main__":
             #         break
 
             gen_demos = demos_gen_dict(demos['all'], args.batch_size)
-            if "MoveP-v0" in args.env_id:
-                fig, ax = plt.subplots(1,2,figsize=(10,5))
             for d in gen_demos:
                 if len(d['obs']) < args.batch_size:
                     if args.drop_batch:
@@ -605,57 +610,26 @@ if __name__ == "__main__":
                     actions_ = actions
                     dones_ = dones
 
-
-                if "MoveP-v0" in args.env_id:
-                    # TODO: add second plot with W2-distance / KL-div / JS-div
-                    ax[0].scatter(10, 10, s=200, c='b', marker='o',alpha=1.0)
-                    ax[0].scatter(190, 190, s=200, c='r', marker='*', alpha=1.0)
-                    ax[0].scatter(d['obs'][:,0], d['obs'][:,1], s=20, c='g', alpha=0.3, label='expert')
-                    ax[0].scatter(obs_[:,:,0], obs_[:,:,1], s=20, c='m', alpha=0.3, label='agent')
-                    ax[0].axis('equal')
-
-                    plt.tight_layout()
-                    f = plt.gca()
-                    
-                    ## calculate batch SW distance # asymmetric?
-                    dist = ot.sliced_wasserstein_distance(
-                        obs_.squeeze().detach().cpu().numpy(),d['obs'],n_projections=100, seed=args.seed)
-
-                    # turn off ticks for scatter plot
-                    ax[0].get_xaxis().set_ticks([])
-                    ax[0].get_yaxis().set_ticks([])
-                    ax[0].xaxis.set_ticklabels([])
-                    ax[0].yaxis.set_ticklabels([])
-
-                    sw_dists.append(dist)
-
-                    ax[1].plot(sw_dists)
-                    ax[1].axis('equal')
-                    ax[1].set_title('SW2 dist, 10 proj.')
-                    #plt.legend()
-                    plt.savefig(f"runs/{run_name}/gail_scatter_{global_step}.png")
-
-                update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
+                update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent, load_support=True)
 
                 loss_dict = disc.compute_loss(update_dict)
 
                 loss = loss_dict['d_loss'] + annealed_irm_coeff * \
-                    loss_dict['grad_penalty'] + \
-                    args.lip_coeff * loss_dict['lip_penalty']
+                    loss_dict['grad_penalty'] + args.safety_coeff * loss_dict['sd_loss']\
+                    + args.lip_coeff * loss_dict['lip_penalty']
+                    
                 #if args.irm_coeff > 1.0:
                 #    loss /= args.irm_coeff
 
                 disc.update(loss)
             
                 if global_step % args.logging_interval  == 0:
-                    writer.add_scalar('irl/gail_bce_loss', loss_dict['d_loss'], global_step)
+                    writer.add_scalar('irl/safil_bce_loss', loss_dict['d_loss'], global_step)
+                    writer.add_scalar('irl/safil_bce_loss_s', loss_dict['sd_loss'], global_step)                    
                     # track norms
-                    writer.add_scalar('irl/lip_grad_mix_norm', loss_dict['lip_grad_mix'], global_step)
-                    #writer.add_scalar('irl/lip_grad_e_norm', torch.norm(loss_dict['grad_e']), global_step)
-                    #writer.add_scalar('irl/lip_grad_p_norm', torch.norm(loss_dict['grad_p']), global_step)
-                    writer.add_scalar('irl/irm_grad_norm', torch.norm(loss_dict['irm_grad']), global_step)
+
                     if args.irm_coeff > 0:
-                        writer.add_scalar('irl/gail_irm_loss', loss_dict['grad_penalty'], global_step)
+                        writer.add_scalar('irl/safil_irm_loss', loss_dict['grad_penalty'], global_step)
 
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes

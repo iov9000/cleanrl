@@ -17,6 +17,12 @@ gym.envs.register(
      max_episode_steps=1000,
 )
 
+gym.envs.register(
+     id='LapLiver-v0',
+     entry_point='envs.env_lap_liver:LapLiver',
+     max_episode_steps=500,
+)
+
 import numpy as np
 #import pybullet_envs  # noqa
 import torch
@@ -590,7 +596,7 @@ if __name__ == "__main__":
                                 writer.add_scalar('irl/safil_bce_loss_s', loss_dict['sd_loss'], global_step)
 
                                 if args.irm_coeff > 0:
-                                    writer.add_scalar('irl/gail_irm_loss', loss_dict['grad_penalty'], global_step)
+                                    writer.add_scalar('irl/safil_irm_loss', loss_dict['grad_penalty'], global_step)
 
                 #  evaluate at regular intervals and save
                 if global_step % args.eval_interval == 0:
