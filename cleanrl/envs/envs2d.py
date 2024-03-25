@@ -794,13 +794,24 @@ class CMovePND(Env):
         curr_tgt = np.array(self.waypoints[self.curr_tgt])
         state = np.concatenate([self.agent, curr_tgt],0)
         
+        self.state = state
+
         self.needs_reset = False
         # return the observation
         return state, {}
-                            
+
+    def get_state(self):
+        return self.state, self.agent, self.curr_tgt
+
+    def set_state(self, agent, tgt):
+        self.agent = agent
+        self.curr_tgt = tgt
+        curr_tgt = np.array(self.waypoints[self.curr_tgt])
+        self.state = np.concatenate([self.agent, curr_tgt],0)
+
     def step(self, action):
         # Assert that it is a valid action 
-        assert self.action_space.contains(action), "Invalid Action"
+        #assert self.action_space.contains(action), "Invalid Action"
 
         # Decrease the time counter 
         self.time -= 1 
@@ -846,6 +857,8 @@ class CMovePND(Env):
             state = np.concatenate([self.agent, curr_tgt], -1)
         else:
             state = self.agent
+
+        self.state = state
 
         # If out of fuel, end the episode.
         if self.time == 0:

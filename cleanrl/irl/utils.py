@@ -16,7 +16,7 @@ from typing import Optional
 #from drqv2 import DrQV2Agent, Encoder
 
 
-def load_hf_demos(args, n_demos, perturb=0.0, bary_enhance=False):
+def load_hf_demos(args, n_demos, perturb=0.0, bary_enhance=False, load_support=False):
     folder = args.demo_dir
     env_name = args.env_id
     subsample = args.subsample
@@ -34,13 +34,24 @@ def load_hf_demos(args, n_demos, perturb=0.0, bary_enhance=False):
         expert_demos['all']['acs'] = expert_demos['all']['acs'][::subsample]
         expert_demos['all']['rew'] = expert_demos['all']['rew'][::subsample]
         expert_demos['all']['done'] = expert_demos['all']['done'][::subsample]
+        fn='all'
+        if load_support:
+            expert_demos[fn]['support_obs'] = expert_demos[fn]['support_obs'][::subsample]
+            expert_demos[fn]['support_acs'] = expert_demos[fn]['support_acs'][::subsample]
+            expert_demos[fn]['support_rew'] = expert_demos[fn]['support_rew'][::subsample]
+            expert_demos[fn]['support_done'] = expert_demos[fn]['support_done'][::subsample]
+        else:
+            expert_demos[fn]['support_obs'] = expert_demos[fn]['obs'][::subsample]
+            expert_demos[fn]['support_acs'] = expert_demos[fn]['acs'][::subsample]
+            expert_demos[fn]['support_rew'] = expert_demos[fn]['rew'][::subsample]
+            expert_demos[fn]['support_done'] = expert_demos[fn]['done'][::subsample]
     except:
         print("Generate demos from HuggingFace Hub first")
         assert False
 
     return expert_demos
 
-def load_hf_demos_name(args, fnames):
+def load_hf_demos_name(args, fnames, load_support=False):
     folder = args.demo_dir
     env_name = args.env_id
     subsample = args.subsample
@@ -56,6 +67,16 @@ def load_hf_demos_name(args, fnames):
             expert_demos[fn]['acs'] = expert_demos[fn]['acs'][::subsample]
             expert_demos[fn]['rew'] = expert_demos[fn]['rew'][::subsample]
             expert_demos[fn]['done'] = expert_demos[fn]['done'][::subsample]
+            if load_support:
+                expert_demos[fn]['support_obs'] = expert_demos[fn]['support_obs'][::subsample]
+                expert_demos[fn]['support_acs'] = expert_demos[fn]['support_acs'][::subsample]
+                expert_demos[fn]['support_rew'] = expert_demos[fn]['support_rew'][::subsample]
+                expert_demos[fn]['support_done'] = expert_demos[fn]['support_done'][::subsample]
+            else:
+                expert_demos[fn]['support_obs'] = expert_demos[fn]['obs'][::subsample]
+                expert_demos[fn]['support_acs'] = expert_demos[fn]['acs'][::subsample]
+                expert_demos[fn]['support_rew'] = expert_demos[fn]['rew'][::subsample]
+                expert_demos[fn]['support_done'] = expert_demos[fn]['done'][::subsample]
         except:
             print("Generate demos from HuggingFace Hub first")
             assert False
@@ -64,23 +85,36 @@ def load_hf_demos_name(args, fnames):
     acs_all = []
     rew_all = []
     done_all = []
+    support_obs_all = []
+    support_acs_all = []
+    support_rew_all = []
+    support_done_all = []
 
     for k, v in expert_demos.items():
         obs_all.append(v['obs'])
         acs_all.append(v['acs'])
         rew_all.append(v['rew'])
         done_all.append(v['done'])
+        support_obs_all.append(v['support_obs'])
+        support_acs_all.append(v['support_acs'])
+        support_rew_all.append(v['support_rew'])
+        support_done_all.append(v['support_done'])
+
 
     expert_demos['all'] = {}
     expert_demos['all']['obs'] = np.concatenate(obs_all, 0)
     expert_demos['all']['acs'] = np.concatenate(acs_all, 0)
     expert_demos['all']['rew'] = np.concatenate(rew_all, 0)
     expert_demos['all']['done'] = np.concatenate(done_all, 0)
+    expert_demos['all']['support_obs'] = np.concatenate(support_obs_all, 0)
+    expert_demos['all']['support_acs'] = np.concatenate(support_acs_all, 0)
+    expert_demos['all']['support_rew'] = np.concatenate(support_rew_all, 0)
+    expert_demos['all']['support_done'] = np.concatenate(support_done_all, 0)
 
     return expert_demos
 
 
-def load_fast_demos(args, filename, n_demos=1, bary_enhance=False, offset=100, obs_shape=3):
+def load_fast_demos(args, filename, n_demos=1, bary_enhance=False, offset=100, obs_shape=3, load_support=False):
     expert_demos = {}
     folder = args.demo_dir
     subsample = args.subsample
@@ -104,7 +138,8 @@ def load_fast_demos(args, filename, n_demos=1, bary_enhance=False, offset=100, o
     return {'all': expert_demos}
 
 
-def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, offset=500, obs_shape=3, filter_by_score=False, flip_z=False):
+def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, 
+        offset=500, obs_shape=3, filter_by_score=False, flip_z=False, load_support=False):
     expert_demos = {}
     obs = []
     obs_full = []
@@ -304,7 +339,11 @@ def demos_gen_dict(data, batch_size, shuffle=False):
         yield {'obs': data['obs'][mb_inds], 
                'acs': data['acs'][mb_inds],
                'rew': data['rew'][mb_inds],
-               'done': data['done'][mb_inds]}
+               'done': data['done'][mb_inds],
+               'support_obs': data['support_obs'][mb_inds], 
+               'support_acs': data['support_acs'][mb_inds],
+               'support_rew': data['support_rew'][mb_inds],
+               'support_done': data['support_done'][mb_inds]}
 
 def demos_sample_batch(data, batch_size, shuffle=False):
     """  Yields batch of specified size """
@@ -508,7 +547,7 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy, co
             support_done = expert_demos['support_done']
             support_obs_next = np.concatenate([support_obs[1:], np.expand_dims(support_obs[-1], 0)],
                                      axis=0)  # repeat last observation
-                                     
+
         support_obs_t = torch.from_numpy(support_obs).type(torch.get_default_dtype())
         support_acs_t = torch.from_numpy(support_acs).type(torch.get_default_dtype())   
         support_dones_t = torch.from_numpy(support_done).type(torch.get_default_dtype())   

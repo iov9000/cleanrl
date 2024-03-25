@@ -43,6 +43,12 @@ gym.envs.register(
      max_episode_steps=1000,
 )
 
+gym.envs.register(
+     id='CMovePND-v0',
+     entry_point='envs.envs2d:CMovePND',
+     max_episode_steps=1000,
+)
+
 from irl.gail import GailReward, GAILDiscriminator
 from irl.utils import load_hf_demos, load_hf_demos_name, load_lap_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
                    demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model, FrankaObsWrapper

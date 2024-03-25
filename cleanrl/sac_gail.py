@@ -23,6 +23,12 @@ gym.envs.register(
      max_episode_steps=1000,
 )
 
+gym.envs.register(
+     id='CMovePND-v0',
+     entry_point='envs.envs2d:CMovePND',
+     max_episode_steps=1000,
+)
+
 import numpy as np
 #import pybullet_envs  # noqa
 import torch

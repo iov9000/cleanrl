@@ -199,19 +199,19 @@ class Agent(nn.Module):
 
         self.discrete = discrete
         if self.discrete:
-            output_dim = int(envs.single_action_space.n)
+            output_dim = int(envs.action_space.n)
         else:
-            output_dim = np.prod(envs.single_action_space.shape)
+            output_dim = np.prod(envs.action_space.shape)
 
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size*4)),
+            layer_init(nn.Linear(np.array(envs.observation_space.shape).prod(), hidden_size*4)),
             nonlin,
             layer_init(nn.Linear(hidden_size*4, hidden_size*4)),
             nonlin,
             layer_init(nn.Linear(hidden_size*4, 1), std=1.0),
         )
         self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
+            layer_init(nn.Linear(np.array(envs.observation_space.shape).prod(), hidden_size)),
             nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nonlin,
@@ -318,7 +318,7 @@ if __name__ == "__main__":
         test_env = gym.wrappers.ClipAction(test_env)
 
     discrete = not isinstance(test_env.action_space, gym.spaces.Box)
-    agent = Agent(envs, discrete=discrete).to(device)
+    agent = Agent(test_env, discrete=discrete).to(device)
     if args.resume:
         agent.load_state_dict(torch.load(os.path.join(args.resume, "agent.pt") , map_location=device))
 

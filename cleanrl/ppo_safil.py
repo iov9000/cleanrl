@@ -144,7 +144,7 @@ def parse_args():
         action='store_true', help='use actions in discriminator')
 
     ## Safety specific arguments
-    parser.add_argument('--use_safe_disc_rewards', default=False, required=False, 
+    parser.add_argument('--use_safe_disc_reward', default=False, required=False, 
         action='store_true', help='use safety discriminator signal as reward')
     parser.add_argument('--safety_coeff', default=1.0, type=float, 
         required=False, help='use safety discriminator vs base measure')
@@ -385,7 +385,7 @@ if __name__ == "__main__":
     if args.diverse_demos is not None:
         demo_list = [f for f in os.listdir(args.demo_dir) if args.diverse_demos in f and args.env_id in f]
         print("-> Training on union of demos:", demo_list)
-        demos = load_hf_demos_name(args, demo_list)
+        demos = load_hf_demos_name(args, demo_list, load_support=True)
     else:
         if args.env_id == 'Lap-v0':
             demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
