@@ -34,6 +34,8 @@ def parse_args():
         help="logging interval")
     parser.add_argument("--eval_interval", type=int, default=10000,
         help="evaluation interval")
+    parser.add_argument("--video_interval", type=int, default=200,
+        help="evaluation interval")
     parser.add_argument('--save_eval', default=False, required=False, 
         action='store_true', help='verbose output')
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -116,15 +118,17 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, kwargs):
             env = gym.make(env_id, tasks_to_complete=['microwave'])
             env = FrankaObsWrapper(env)
         elif 'Safety' in env_id:
-            env = safety_gymnasium.make(env_id)
+            env = safety_gymnasium.make(env_id, render_mode='rgb_array')
             env = SafetyGymWrapper(env)
         else:
-            env = gym.make(env_id, **kwargs)
+            env = gym.make(env_id, render_mode='rgb_array', **kwargs)
 
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}",
+                    episode_trigger = lambda x: x % opt.video_interval == 1)
+
         #env.seed(seed)
 
         if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):

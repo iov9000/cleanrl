@@ -169,7 +169,7 @@ class SafILDiscriminator(nn.Module):
         elif self.opt.div == 'js':  # https://pytorch.org/docs/master/generated/torch.nn.Softplus.html
             d_out_ = F.softplus(d_out) # (N*T,) log (1 + p/q)
 
-        return d_out_, sd_out
+        return d_out_, F.softplus(sd_out)
 
     def get_reward(self, ob, ac, nob=None, d=None):
         base_out = self.base_fwd(self.base, ob, ac, nob, d)
@@ -310,7 +310,7 @@ class SafILDiscriminator(nn.Module):
 
         policy_out, policy_sout = self.forward(self.policy_obs, self.policy_acs, policy_obs_next, policy_dones)
         expert_out, _ = self.forward(exp_obs, exp_acs, exp_obs_next, exp_dones)
-        _, support_sout = self.forward(exp_obs, exp_acs, exp_obs_next, exp_dones)
+        _, support_sout = self.forward(supp_obs, supp_acs, supp_obs_next, supp_dones)
 
         d_out = torch.cat([expert_out, policy_out])
         sd_out = torch.cat([support_sout, policy_out])
@@ -363,7 +363,7 @@ class SafILDiscriminator(nn.Module):
             self.grad_penalty, grad_irm = self.irm_penalty(d_out, labels)
 
 
-        self.loss = self.bce_loss + self.irm_coeff * self.grad_penalty + self.lip_coeff * lip_penalty
+        #self.loss = self.bce_loss + self.irm_coeff * self.grad_penalty + self.lip_coeff * lip_penalty
 
         output_dict = {}
         output_dict['d_loss'] = self.bce_loss

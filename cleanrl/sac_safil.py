@@ -64,7 +64,7 @@ def parse_args():
         help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
-    parser.add_argument("--capture_video_interval", type=int, default=200,
+    parser.add_argument("--video_interval", type=int, default=200,
         help="capture video interval")
 
     # environment specific arguments
@@ -225,7 +225,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos, env_k
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % opt.capture_video_interval == 0)
+                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % opt.video_interval == 0)
         if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env)
         if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):

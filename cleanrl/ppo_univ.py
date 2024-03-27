@@ -153,6 +153,9 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, env_kwargs)
         if 'Franka' in env_id:
             env = gym.make(env_id, tasks_to_complete=['microwave'], **env_kwargs)
             env = FrankaObsWrapper(env)
+        elif 'Safety' in env_id:
+            env = safety_gymnasium.make(env_id, render_mode='rgb_array')
+            env = SafetyGymWrapper(env)
         else:
             env = gym.make(env_id, **env_kwargs)
 
@@ -259,6 +262,11 @@ if __name__ == "__main__":
     run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_{id_string}"
     if len(run_name) > 220:
         run_name = run_name[:220]
+
+    if 'Safety' in args.env_id:
+        import safety_gymnasium
+        from safety.utils import SafetyGymWrapper
+        
     if args.track:
         import wandb
 
