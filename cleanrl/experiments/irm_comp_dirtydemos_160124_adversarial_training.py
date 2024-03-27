@@ -16,7 +16,8 @@ if __name__ == '__main__':
     
     seeds = [515, 234, 894, 72, 322]
     algos = ['sac']
-    disc_types = ['airl','gail','meirl']
+    # disc_types = ['airl','gail','meirl']
+    disc_types = ['meirl']
     envs = ['Ant-v3', 'HalfCheetah-v3', 'Humanoid-v3', 'Hopper-v3', 'Walker2d-v3', 'BipedalWalker-v3', 'LunarLanderContinuous-v2']
     # lins = ['--use_spectral_norm', '--use_weight_norm']
     lins = ['']
@@ -41,13 +42,17 @@ if __name__ == '__main__':
                         for algo in algos:
                             for ua in usenobs:
                                 for env_name in envs:
+                                    if 'Humanoid' in env_name:
+                                        time = 72
+                                    else:
+                                        time = args.time
                                     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
                                     # ua_rbl = ua.replace(" ", "")
                                     # lin_rbl = lin.replace(" ", "")
                                     exp_id = (f"{ts}_{algo}_{disc}_{env_name}_seed_{seed}_{args.exp_id}_irm{irm_c}_lip{lip_c}")
                                     euler_slurm = (f"sbatch --mem-per-cpu={MEM_PER_CPU} {gpu_string} " 
                                                 f"-o {args.output_dir / exp_id} "
-                                                f"--time={args.time}:00:00 --wrap ")
+                                                f"--time={time}:00:00 --wrap ")
                                     euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
                                     # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
                                     exp_cmd = (f"python {algo}_{disc}.py --total-timesteps 1000000 "
