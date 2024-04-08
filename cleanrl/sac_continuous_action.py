@@ -120,6 +120,13 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, kwargs):
         elif 'Safety' in env_id:
             env = safety_gymnasium.make(env_id, render_mode='rgb_array')
             env = SafetyGymWrapper(env)
+        elif 'MetaWorld' in env_id:
+            env_name = env_id.replace('MetaWorld_','')
+            ml1 = metaworld.ML1(env_name)
+            env = ml1.train_classes[env_name]()
+            task = random.choice(ml1.train_tasks)
+            env.set_task(task)  # Set task
+            env.render_mode = 'rgb_array'
         else:
             env = gym.make(env_id, render_mode='rgb_array', **kwargs)
 
@@ -229,6 +236,10 @@ if __name__ == "__main__":
         import safety_gymnasium
         from safety.utils import SafetyGymWrapper
 
+    if 'MetaWorld' in args.env_id:
+        import metaworld
+        from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE
+
     if args.track:
         import wandb
 
@@ -278,6 +289,13 @@ if __name__ == "__main__":
     elif 'Safety' in args.env_id:
         test_env = safety_gymnasium.make(args.env_id)
         test_env = SafetyGymWrapper(test_env)
+    elif 'MetaWorld' in args.env_id:
+        env_name = args.env_id.replace('MetaWorld_','')
+        ml1 = metaworld.ML1(env_name)
+        test_env = ml1.train_classes[env_name]()
+        task = random.choice(ml1.train_tasks)
+        test_env.set_task(task)  # Set task
+        test_env.render_mode = 'rgb_array'
     else:
         test_env = gym.make(args.env_id, **env_kwargs) 
 
