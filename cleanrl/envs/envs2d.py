@@ -693,7 +693,7 @@ class CMovePND(Env):
 
     def __init__(self, waypoints=[(198,198)], D=2, size=200, 
             n_obstacles=1, random_obstacles=False, hard_obstacles=False, safety_reward_coeff = 0.0, 
-            random_init=False, goal_conditioning=True, render_mode="rgb_array"):
+            random_init=False, goal_conditioning=True, fail_on_collision=False, render_mode="rgb_array"):
         super(CMovePND, self).__init__()
         
 
@@ -726,6 +726,7 @@ class CMovePND(Env):
         self.safety_reward_coeff = safety_reward_coeff
         self.agent_render_q = deque(maxlen=100)
         self.hard_obstacles = bool(hard_obstacles)
+        self.fail_on_collision = bool(fail_on_collision)
 
         self.collision_flag = False
 
@@ -838,7 +839,11 @@ class CMovePND(Env):
         # l2 distance as reward
         if self.safety_reward_coeff > 0.0:
             reward = self.get_reward(self.agent, curr_tgt, 
-                                    safety_rew=self.safety_reward_coeff*safety_rew)
+                            safety_rew=self.safety_reward_coeff*safety_rew)
+            
+            if self.fail_on_collision and self.collision_flag:
+                self.term = True
+                reward -= self.safety_reward_coeff
         else:
             reward = self.get_reward(self.agent, curr_tgt)
 

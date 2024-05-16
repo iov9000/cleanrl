@@ -10,6 +10,7 @@ import pickle
 from datetime import datetime
 import matplotlib.pyplot as plt
 import pandas as pd
+from collections import deque
 
 from typing import Optional
 
@@ -1184,7 +1185,7 @@ class ResetToStateWrapper(gym.Wrapper):
         # self.reward_fn = make_network(**reward_fn_spec)
 
     def reset(self, seed=1, options=None, state=None):
-        obs, info = self.env.reset()
+        obs, info = self.env.reset(seed, options)
 
         print(obs)
 
@@ -1197,3 +1198,44 @@ class ResetToStateWrapper(gym.Wrapper):
 
 
         return o, info
+
+class FailureBufferWrapper(gym.Wrapper):
+    def __init__(self, env, maxlen=500, weight=0.1):
+        super().__init__(env=env)
+        self.buffer = deque(maxlen=maxlen)
+        self.weight = weight
+        # self.reward_fn = make_network(**reward_fn_spec)
+
+    def compute_distance(self, obs, tgt):
+        return np.sqrt(np.sum((obs-tgt)**2))
+
+    def reset(self, seed=1, options=None, state=None):
+        obs, info = self.env.reset()
+        self.obs = obs
+        self.episode_return = 0
+        #print("Length of failure buffer:", len(self.buffer))
+
+        return obs, info
+
+    def step(self, action):
+        next_obs, gt_reward, term, trunc, info = self.env.step(action)
+        done = term or trunc 
+
+        if term:
+            self.buffer.append(self.obs)
+
+        # reset the pwil because the atoms are exhausted
+        if len(self.buffer) > 0:
+            reward = self.compute_distance(next_obs, np.array(self.buffer))
+        else:
+            reward = 0
+        info['failstate_reward'] = reward
+
+        self.episode_return += reward
+        if done:
+            if 'episode' not in info.keys():
+                info['episode'] = {}
+            info['episode']["ep_rew_fail"] = self.episode_return
+            self.episode_return = 0
+            
+        return next_obs, gt_reward + self.weight*reward, term, trunc, info
