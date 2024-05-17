@@ -375,7 +375,7 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    if torch.cuda.is_available():
+    if torch.cuda.is_available() and args.cuda:
         torch.set_default_tensor_type(torch.cuda.FloatTensor)
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
@@ -403,7 +403,6 @@ if __name__ == "__main__":
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
-
 
     # Automatic entropy tuning
     if args.autotune:
@@ -477,7 +476,10 @@ if __name__ == "__main__":
                 data = rb.sample(args.batch_size)
                 expert_demos = demos_sample_batch(demos['all'], args.batch_size)
 
-                all_obs, all_obs_next, all_actions, all_rew, all_dones, is_expert = get_concat_samples(data, expert_demos)
+                (all_obs, all_obs_next, 
+                        all_actions, 
+                        all_rew, 
+                        all_dones, is_expert) = get_concat_samples(data, expert_demos, device)
                 batch = (all_obs, all_obs_next, all_actions, all_rew, all_dones, is_expert)
 
                 # update critic

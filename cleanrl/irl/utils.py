@@ -358,7 +358,7 @@ def demos_sample_batch(data, batch_size, shuffle=False):
             'rew': data['rew'][i:end],
             'done': data['done'][i:end]}
 
-def get_concat_samples(policy_batch, expert_batch):
+def get_concat_samples(policy_batch, expert_batch, device):
     policy_obs = policy_batch.observations
     policy_acs = policy_batch.actions
     policy_obs_next = policy_batch.next_observations
@@ -366,14 +366,14 @@ def get_concat_samples(policy_batch, expert_batch):
     policy_dones = torch.squeeze(policy_batch.dones)
 
     if isinstance(expert_batch, dict):
-        expert_rew = torch.from_numpy(expert_batch['rew']).type(torch.get_default_dtype())
-        expert_obs = torch.from_numpy(expert_batch['obs']).type(torch.get_default_dtype())
-        expert_acs = torch.from_numpy(expert_batch['acs']).type(torch.get_default_dtype())
-        expert_dones = torch.from_numpy(np.squeeze(expert_batch['done'])).type(torch.get_default_dtype())
+        expert_rew = torch.from_numpy(expert_batch['rew']).type(torch.get_default_dtype()).to(device)
+        expert_obs = torch.from_numpy(expert_batch['obs']).type(torch.get_default_dtype()).to(device)
+        expert_acs = torch.from_numpy(expert_batch['acs']).type(torch.get_default_dtype()).to(device)
+        expert_dones = torch.from_numpy(np.squeeze(expert_batch['done'])).type(torch.get_default_dtype()).to(device)
 
     expert_obs_next = np.concatenate([expert_batch['obs'][1:], np.expand_dims(expert_batch['obs'][-1], 0)],
                                      axis=0)  # repeat last observation
-    expert_obs_next = torch.from_numpy(expert_obs_next).type(torch.get_default_dtype())
+    expert_obs_next = torch.from_numpy(expert_obs_next).type(torch.get_default_dtype()).to(device)
 
     batch_state = torch.cat([policy_obs, expert_obs], dim=0)
     batch_next_state = torch.cat([policy_obs_next, expert_obs_next], dim=0)
