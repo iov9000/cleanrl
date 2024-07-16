@@ -40,7 +40,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 from irl.gail import GailReward, GAILDiscriminator
 from irl.utils import load_hf_demos, load_hf_demos_name, evaluate_model, prepare_batch_update_irl,\
-     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper, FrankaObsWrapper, MujocoTestWrapper
+     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper, FrankaObsWrapper, \
+        MujocoTestWrapper, Box2dTestWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -213,7 +214,11 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos, env_k
             env = gym.make(env_id, render_mode='rgb_array')        
         
         if opt.perturb_dynamics > 0.0:
-            env = MujocoTestWrapper(env, eps0=0.0, epsdyn=opt.perturb_dynamics, params=opt.perturb_parameters)
+            if 'box2d' in str(env.unwrapped.__class__):
+                env = Box2dTestWrapper(env, eps0=0.0, epsdyn=opt.perturb_dynamics, params=opt.perturb_parameters)
+            else:
+                env = MujocoTestWrapper(env, eps0=0.0, epsdyn=opt.perturb_dynamics, params=opt.perturb_parameters)
+
 
         if opt.use_absorb_wrapper: # DAC
             env = AbsorbAfterDoneWrapper(env)

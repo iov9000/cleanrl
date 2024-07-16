@@ -97,7 +97,7 @@ def save_expert_traj_dict(opt, env_name, env, model, nr_trajectories=10, min_tot
             num_steps += 1
 
         print("episode:", cnt, "reward:", total_reward)
-        if total_reward > min_total_rew:
+        if total_reward > min_total_rew and total_reward < args.max_rew:
             cnt += 1
             expert_obs.extend(episode_obs)
             expert_acs.extend(episode_acs)
@@ -122,6 +122,8 @@ if __name__ == '__main__':
     parser.add_argument("--nr_traj", default=0, type=int,
                         required=False, help="nr of trajectories to save")
     parser.add_argument("--min_rew", default=0, type=float,
+                        required=False, help="minimum cum. rew. to save traj.")
+    parser.add_argument("--max_rew", default=1000000, type=float,
                         required=False, help="minimum cum. rew. to save traj.")
     parser.add_argument("--eps0", default=0.0, type=float,
                         required=False, help="initial state perturbation")
@@ -160,9 +162,13 @@ if __name__ == '__main__':
     elif args.algo == 'tqc':
         model = TQC.load(checkpoint, custom_objects=custom_objects)
 
-    env = gym.make(args.env_name)
+    env = gym.make(args.env_name, render_mode='rgb_array')
     if args.normalize_obs:
         env = gym.wrappers.NormalizeObservation(env)
+    if args.record_video:
+        env = gym.wrappers.RecordVideo(env, 
+            f"demo_vids/test_video_{args.env_name}_{args.algo}_initnoise_{args.eps0}__{args.perturb_parameter}_{args.epsdyn}_action_noise{args.action_noise}_{args.min_rew}_{args.max_rew}",
+            episode_trigger = lambda x: x % 1 == 0)
     save_expert_traj_dict(args, args.env_name, env, model, args.nr_traj, args.min_rew, args.extraflag)
 
 

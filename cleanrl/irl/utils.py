@@ -806,41 +806,29 @@ class Box2dTestWrapper(gym.Wrapper):
         for p in params:
             self.default_params[p] = np.array(getattr(self.env.model, p))
 
-
         #print(dir(self.env.model))
-        self.perturb_init(eps0)
+        #self.perturb_init(eps0)
         for p in params:
             self.perturb_parameter(p)
 
         super().__init__(env=self.env)
 
-    def perturb_init(self, eps):
-        #  perturb initial position and velocity
-        self.init_qpos = np.array(self.init_qpos)
-        self.init_qvel = np.array(self.init_qvel)
-        self.init_qpos = self.init_qpos * eps * \
-            np.random.randn(*self.init_qpos.shape)
-        # self.init_qvel = self.init_qvel * eps * \
-        #    np.random.randn(*self.init_qvel.shape)
-        self.init_qpos = tuple(self.init_qpos)
-        self.init_qvel = tuple(self.init_qvel)
-
     def perturb_parameter(self, parameter='body_mass'):
-        param = np.array(getattr(self.env.model, parameter))
+        param = np.array(getattr(self.env.unwrapped, parameter))
         param_mod = param + np.random.randn(*param.shape)*self.epsdyn
 
         #print(
         #    f">> Perturbed parameter {parameter}, default: {self.default_params[parameter]}, changed: {param_mod}")
         # assign new value
-        getattr(self.env.model, parameter)[:] = param_mod
+        setattr(self.env.unwrapped, parameter, param_mod)
 
     def reset(self, seed=1, options=None):
         o = self.env.reset(seed, options)[0]
         # reset mass to default value otherwise accum.
         for k, v in self.default_params.items():
-            getattr(self.env.model, k)[:] = v
+            getattr(self.env.unwrapped, k)[:] = v
 
-        self.perturb_init(self.eps0)
+        #self.perturb_init(self.eps0)
         for k, v in self.default_params.items():
             self.perturb_parameter(k)
 
@@ -1239,3 +1227,50 @@ class FailureBufferWrapper(gym.Wrapper):
             self.episode_return = 0
             
         return next_obs, gt_reward + self.weight*reward, term, trunc, info
+
+
+def make_dcm(cfg):
+    import dmc2gym
+    """Helper function to create dm_control environment"""
+    if cfg.env.name == 'dmc_ball_in_cup_catch':
+        domain_name = 'ball_in_cup'
+        task_name = 'catch'
+    elif cfg.env.name == 'dmc_point_mass_easy':
+        domain_name = 'point_mass'
+        task_name = 'easy'
+    else:
+        domain_name = cfg.env.name.split('_')[1]
+        task_name = '_'.join(cfg.env.name.split('_')[2:])
+    
+    if cfg.env.from_pixels:
+        # Set env variables for Mujoco rendering
+        os.environ["MUJOCO_GL"] = "egl"
+        os.environ["EGL_DEVICE_ID"] = os.environ["CUDA_VISIBLE_DEVICES"]
+
+        # per dreamer: https://github.com/danijar/dreamer/blob/02f0210f5991c7710826ca7881f19c64a012290c/wrappers.py#L26
+        camera_id = 2 if domain_name == 'quadruped' else 0
+
+        env = dmc2gym.make(domain_name=domain_name,
+                        task_name=task_name,
+                        seed=cfg.seed,
+                        visualize_reward=False,
+                        from_pixels=True,
+                        height=cfg.env.image_size,
+                        width=cfg.env.image_size,
+                        frame_skip=cfg.env.action_repeat,
+                        camera_id=camera_id)
+
+        print(env.observation_space.dtype)
+        # env = FrameStack(env, k=cfg.env.frame_stack)
+        env = FrameStackEager(env, k=cfg.env.frame_stack)
+        
+    else:
+        env = dmc2gym.make(domain_name=domain_name,
+                        task_name=task_name,
+                        seed=cfg.seed,
+                        visualize_reward=True)
+    env.seed(cfg.seed)
+    assert env.action_space.low.min() >= -1
+    assert env.action_space.high.max() <= 1
+
+    return env

@@ -182,7 +182,10 @@ def parse_args():
     parser.add_argument("--scheduler_gamma", type=float, default=1.0,
         help="exponential decay rate of the learning rate scheduler")
     parser.add_argument("--swil_vb", type=int, default=0,
-        help="variational bottleneck dimension")
+        help="variational bottleneck dimension")    
+    
+    parser.add_argument('--add_proj_noise', default=False, required=False, 
+        action='store_true', help='add projection noise')
     parser.add_argument('--use_cnn_base', default=False, required=False, 
         action='store_true', help='use cnn base for discriminator (only for visual obs)')
     parser.add_argument('--use_disc_bias', default=True, required=False, 
@@ -209,6 +212,8 @@ def parse_args():
         action='store_true', help='verbose output')
     parser.add_argument('--drop_batch', default=False, required=False, 
         action='store_true', help='drop batch in irl epochs')   
+    parser.add_argument('--eval', default=False, required=False, 
+        action='store_true', help='evaluate model')
 
     args = parser.parse_args()
     # fmt: on
@@ -222,6 +227,13 @@ def parse_args():
     cli = cli.replace(" ","_").replace(",","").replace(".py","").replace('[','').replace(']','')
 
     return args, non_default, cli
+
+def multiple_episodes_trigger(opt, x, n_episodes):
+    bool_list = []
+    for i in range(n_episodes):
+        bool_list.append(x % opt.capture_video_interval == i)
+
+    return np.any(bool_list)
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos, env_kwargs):
     def thunk():
@@ -239,7 +251,9 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos, env_k
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % opt.capture_video_interval == 0)
+                #env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % opt.capture_video_interval == 0)
+                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: multiple_episodes_trigger(opt, x, 10))
+
         if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env)
         if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
@@ -421,13 +435,18 @@ if __name__ == "__main__":
     # get env specs
     if 'Adroit' in args.env_id:
         #test_env = AdroitResetWrapper(gym.make(args.env_id, max_episode_steps=500), demos)
-        test_env = gym.make(args.env_id, max_episode_steps=500)
+        test_env = gym.make(args.env_id, max_episode_steps=500, render_mode='rgb_array')
         #test_env.set_env_state(demos['all']['init_state_dict'][0])
     elif 'Franka' in args.env_id:
-        test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+        test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'], render_mode='rgb_array')
         test_env = FrankaObsWrapper(test_env)
     else:
-        test_env = gym.make(args.env_id)     
+        test_env = gym.make(args.env_id, render_mode='rgb_array')    
+
+    if args.capture_video:
+        #env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % opt.capture_video_interval == 0)
+        test_env = gym.wrappers.RecordVideo(test_env, f"videos/{run_name}", episode_trigger = lambda x: multiple_episodes_trigger(args, x, 10)) 
+
     disc = SWILDiscriminator(test_env, args)
 
     # env setup
@@ -478,269 +497,290 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     init = True # flag for IRL discriminator pretraining
 
+    if not args.eval:
     
-    ######## gather a batch to define a SWIL distance so we don't lose initial samples
-    obs = envs.reset(seed=args.seed)[0]
-    b_obs, b_acs, b_dones = [], [], [] 
-    traj = {'obs': [], 'acs': [], 'done': []} # traj_only IRL
+        ######## gather a batch to define a SWIL distance so we don't lose initial samples
+        obs = envs.reset(seed=args.seed)[0]
+        b_obs, b_acs, b_dones = [], [], [] 
+        traj = {'obs': [], 'acs': [], 'done': []} # traj_only IRL
 
-    #b_obs.append(torch.from_numpy(obs).type(torch.get_default_dtype()))
-    for i in range(args.batch_size):
-        actions = np.array([envs.single_action_space.sample()
-                            for _ in range(envs.num_envs)])
-        next_obs, rewards, term, trunc, infos = envs.step(actions)
-        dones = term or trunc
-        b_obs.append(torch.from_numpy(next_obs).type(torch.get_default_dtype()))
-        b_acs.append(torch.from_numpy(actions).type(torch.get_default_dtype()))
-        b_dones.append(torch.from_numpy(dones).type(torch.get_default_dtype()))
-
-    b_obs = torch.stack(b_obs)
-    b_acs = torch.stack(b_acs)
-    b_dones = torch.stack(b_dones)
-
-    gen_demos = demos_gen_dict(demos['all'], args.batch_size)
-
-    for d in gen_demos:
-        if len(d['obs']) < args.batch_size:
-            obs_ = b_obs[:len(d['obs'])]
-            actions_ = b_acs[:len(d['obs'])]
-            dones_ = b_dones[:len(d['obs'])]
-        else:
-            obs_ = b_obs
-            actions_ = b_acs
-            dones_ = b_dones
-        # GAIL Discriminator Update
-        update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, actor)
-        loss_dict = disc.compute_loss(update_dict)
-
-        loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + disc.beta * loss_dict['ib_loss'] 
-        if args.irm_coeff > 1.0:
-            loss /= args.irm_coeff
-
-        if args.n_proj == 1:
-            disc.update(loss)
-
-    #####
-    obs = envs.reset(seed=args.seed)[0]
-
-    for global_step in range(args.total_timesteps):
-        irl_trigger = False
-        try:
-            # ALGO LOGIC: put action logic here
-            if global_step < args.learning_starts:
-                actions = np.array([envs.single_action_space.sample()
+        #b_obs.append(torch.from_numpy(obs).type(torch.get_default_dtype()))
+        for i in range(args.batch_size):
+            actions = np.array([envs.single_action_space.sample()
                                 for _ in range(envs.num_envs)])
-            else:
-                actions, _, _ = actor.get_action(torch.Tensor(obs).to(device))
-                actions = actions.detach().cpu().numpy()
-
-            # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, rewards, term, trunc, infos = envs.step(actions)
             dones = term or trunc
+            b_obs.append(torch.from_numpy(next_obs).type(torch.get_default_dtype()))
+            b_acs.append(torch.from_numpy(actions).type(torch.get_default_dtype()))
+            b_dones.append(torch.from_numpy(dones).type(torch.get_default_dtype()))
 
-            # traj_only IRL
-            traj['obs'].append(obs)
-            traj['acs'].append(actions)
-            traj['done'].append(dones)
-            
-            # TRY NOT TO MODIFY: record rewards for plotting purposes
-            if not isinstance(infos, list):
-                infos = [infos]
+        b_obs = torch.stack(b_obs)
+        b_acs = torch.stack(b_acs)
+        b_dones = torch.stack(b_dones)
 
-            for item in infos:
-                # TODO: fix this for new Gymnasium
-                if "final_info" in item.keys():
-                    irl_trigger = True
-                    if args.verbose:
-                        print(
-                            f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
-                    if global_step % 1 == 0:
-                        writer.add_scalar(
-                            "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
-                        writer.add_scalar(
-                            "charts/episodic_return_irl", item["final_info"][0]['episode']["ep_rew_irl"], global_step)
-                        writer.add_scalar(
-                            "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
-                    break
+        gen_demos = demos_gen_dict(demos['all'], args.batch_size)
 
-            # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
-            real_next_obs = next_obs.copy()
-            for idx, d in enumerate(dones):
-                if d:
-                    real_next_obs[idx] = infos[idx]["final_observation"][0]
-                    # TODO: check if 0 index is always correct
-            rb.add(obs, real_next_obs, actions, rewards, dones, infos)
+        for d in gen_demos:
+            if len(d['obs']) < args.batch_size:
+                obs_ = b_obs[:len(d['obs'])]
+                actions_ = b_acs[:len(d['obs'])]
+                dones_ = b_dones[:len(d['obs'])]
+            else:
+                obs_ = b_obs
+                actions_ = b_acs
+                dones_ = b_dones
+            # GAIL Discriminator Update
+            update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, actor)
+            loss_dict = disc.compute_loss(update_dict)
 
-            # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
-            obs = next_obs
+            loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + disc.beta * loss_dict['ib_loss'] 
+            if args.irm_coeff > 1.0:
+                loss /= args.irm_coeff
 
-            # ALGO LOGIC: training.
-            if global_step > args.learning_starts:
-                ts0 = time.time()
-                data = rb.sample(args.batch_size)
-                with torch.no_grad():
-                    next_state_actions, next_state_log_pi, _ = actor.get_action(data.next_observations)
-                    qf1_next_target = qf1_target(data.next_observations, next_state_actions)
-                    qf2_next_target = qf2_target(data.next_observations, next_state_actions)
-                    min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - alpha * next_state_log_pi
-                    next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * (min_qf_next_target).view(-1)
+            if args.n_proj == 1:
+                disc.update(loss)
 
-                qf1_a_values = qf1(data.observations, data.actions).view(-1)
-                qf2_a_values = qf2(data.observations, data.actions).view(-1)
-                qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
-                qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
-                qf_loss = qf1_loss + qf2_loss
+        #####
+        obs = envs.reset(seed=args.seed)[0]
 
-                q_optimizer.zero_grad()
-                qf_loss.backward()
-                q_optimizer.step()
 
-                if global_step % args.policy_frequency == 0:  # TD 3 Delayed update support
-                    for _ in range(
-                        args.policy_frequency
-                    ):  # compensate for the delay by doing 'actor_update_interval' instead of 1
-                        pi, log_pi, _ = actor.get_action(data.observations)
-                        qf1_pi = qf1(data.observations, pi)
-                        qf2_pi = qf2(data.observations, pi)
-                        min_qf_pi = torch.min(qf1_pi, qf2_pi).view(-1)
-                        actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
 
-                        actor_optimizer.zero_grad()
-                        actor_loss.backward()
-                        actor_optimizer.step()
-
-                        if args.autotune:
-                            with torch.no_grad():
-                                _, log_pi, _ = actor.get_action(data.observations)
-                            alpha_loss = (-log_alpha * (log_pi + target_entropy)).mean()
-
-                            a_optimizer.zero_grad()
-                            alpha_loss.backward()
-                            a_optimizer.step()
-                            alpha = log_alpha.exp().item()
-
-                # update the target networks
-                if global_step % args.target_network_frequency == 0:
-                    for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
-                        target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-                    for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
-                        target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-
-                if global_step % args.logging_interval == 0:
-                    writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), global_step)
-                    writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), global_step)
-                    writer.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)
-                    writer.add_scalar("losses/qf2_loss", qf2_loss.item(), global_step)
-                    writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, global_step)
-                    writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
-                    writer.add_scalar("losses/alpha", alpha, global_step)
-                    print("SPS:", int(global_step / (time.time() - start_time)))
-                    writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
-                    if args.autotune:
-                        writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
-                
-                # Optimize the discriminator
-                if init:
-                    n_irl_epochs = args.irl_init_epochs
+        for global_step in range(args.total_timesteps):
+            irl_trigger = False
+            try:
+                # ALGO LOGIC: put action logic here
+                if global_step < args.learning_starts:
+                    actions = np.array([envs.single_action_space.sample()
+                                    for _ in range(envs.num_envs)])
                 else:
-                    n_irl_epochs = args.irl_epochs
-                init = False
+                    actions, _, _ = actor.get_action(torch.Tensor(obs).to(device))
+                    actions = actions.detach().cpu().numpy()
 
-                irl_condition = global_step % args.swil_period == 0
-                if args.swil_period == -1:
-                    irl_condition = irl_trigger
-            
-                use_curr_traj_only = args.use_curr_traj_only
-                if irl_condition and global_step < args.max_swil_step:
-                    for epoch in range(n_irl_epochs):            
-                        # SWIL Discriminator Update 
-                        gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=args.shuffle_irl_batches)
-                        for d in gen_demos:
-                            if len(d['obs']) < args.batch_size:
-                                #print(d['obs'].shape, args.batch_size)
-                                if args.drop_batch:
-                                    break
-                                else:
-                                    # TODO: choose random indices?
-                                    obs_ = data.observations[:len(d['obs'])]
-                                    actions_ = data.actions[:len(d['obs'])]
-                                    dones_ = data.dones[:len(d['obs'])]
-                            else:
-                                obs_ = data.observations
-                                actions_ = data.actions
-                                dones_ = data.dones
+                # TRY NOT TO MODIFY: execute the game and log data.
+                next_obs, rewards, term, trunc, infos = envs.step(actions)
+                dones = term or trunc
 
-                            if use_curr_traj_only:
-                                obs_ = np.concatenate(traj['obs'])[i*args.batch_size:(i+1)*args.batch_size]
-                                actions_ = np.concatenate(traj['acs'])[i*args.batch_size:(i+1)*args.batch_size]
-                                dones_ = np.concatenate(traj['acs'])[i*args.batch_size:(i+1)*args.batch_size]
-                                if len(d['obs']) > len(obs_):
-                                    break
+                # traj_only IRL
+                traj['obs'].append(obs)
+                traj['acs'].append(actions)
+                traj['done'].append(dones)
+                
+                # TRY NOT TO MODIFY: record rewards for plotting purposes
+                if not isinstance(infos, list):
+                    infos = [infos]
+
+                for item in infos:
+                    # TODO: fix this for new Gymnasium
+                    if "final_info" in item.keys():
+                        irl_trigger = True
+                        if args.verbose:
+                            print(
+                                f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
+                        if global_step % 1 == 0:
+                            writer.add_scalar(
+                                "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                            writer.add_scalar(
+                                "charts/episodic_return_irl", item["final_info"][0]['episode']["ep_rew_irl"], global_step)
+                            writer.add_scalar(
+                                "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
+                        break
+
+                # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
+                real_next_obs = next_obs.copy()
+                for idx, d in enumerate(dones):
+                    if d:
+                        real_next_obs[idx] = infos[idx]["final_observation"][0]
+                        # TODO: check if 0 index is always correct
+                rb.add(obs, real_next_obs, actions, rewards, dones, infos)
+
+                # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
+                obs = next_obs
+
+                # ALGO LOGIC: training.
+                if global_step > args.learning_starts:
+                    ts0 = time.time()
+                    data = rb.sample(args.batch_size)
+                    with torch.no_grad():
+                        next_state_actions, next_state_log_pi, _ = actor.get_action(data.next_observations)
+                        qf1_next_target = qf1_target(data.next_observations, next_state_actions)
+                        qf2_next_target = qf2_target(data.next_observations, next_state_actions)
+                        min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - alpha * next_state_log_pi
+                        next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * (min_qf_next_target).view(-1)
+
+                    qf1_a_values = qf1(data.observations, data.actions).view(-1)
+                    qf2_a_values = qf2(data.observations, data.actions).view(-1)
+                    qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
+                    qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
+                    qf_loss = qf1_loss + qf2_loss
+
+                    q_optimizer.zero_grad()
+                    qf_loss.backward()
+                    q_optimizer.step()
+
+                    if global_step % args.policy_frequency == 0:  # TD 3 Delayed update support
+                        for _ in range(
+                            args.policy_frequency
+                        ):  # compensate for the delay by doing 'actor_update_interval' instead of 1
+                            pi, log_pi, _ = actor.get_action(data.observations)
+                            qf1_pi = qf1(data.observations, pi)
+                            qf2_pi = qf2(data.observations, pi)
+                            min_qf_pi = torch.min(qf1_pi, qf2_pi).view(-1)
+                            actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
+
+                            actor_optimizer.zero_grad()
+                            actor_loss.backward()
+                            actor_optimizer.step()
+
+                            if args.autotune:
+                                with torch.no_grad():
+                                    _, log_pi, _ = actor.get_action(data.observations)
+                                alpha_loss = (-log_alpha * (log_pi + target_entropy)).mean()
+
+                                a_optimizer.zero_grad()
+                                alpha_loss.backward()
+                                a_optimizer.step()
+                                alpha = log_alpha.exp().item()
+
+                    # update the target networks
+                    if global_step % args.target_network_frequency == 0:
+                        for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
+                            target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
+                        for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
+                            target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
+
+                    if global_step % args.logging_interval == 0:
+                        writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), global_step)
+                        writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), global_step)
+                        writer.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)
+                        writer.add_scalar("losses/qf2_loss", qf2_loss.item(), global_step)
+                        writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, global_step)
+                        writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
+                        writer.add_scalar("losses/alpha", alpha, global_step)
+                        print("SPS:", int(global_step / (time.time() - start_time)))
+                        writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+                        if args.autotune:
+                            writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
+                    
+                    # Optimize the discriminator
+                    if init:
+                        n_irl_epochs = args.irl_init_epochs
+                    else:
+                        n_irl_epochs = args.irl_epochs
+                    init = False
+
+                    irl_condition = global_step % args.swil_period == 0
+                    if args.swil_period == -1:
+                        irl_condition = irl_trigger
+                
+                    use_curr_traj_only = args.use_curr_traj_only
+                    if irl_condition and global_step < args.max_swil_step:
+                        for epoch in range(n_irl_epochs):            
+                            # SWIL Discriminator Update 
+                            gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=args.shuffle_irl_batches)
+                            for d in gen_demos:
                                 if len(d['obs']) < args.batch_size:
+                                    #print(d['obs'].shape, args.batch_size)
                                     if args.drop_batch:
                                         break
                                     else:
-                                        obs_ = obs_[:len(d['obs'])]
-                                        actions_ = actions_[:len(d['obs'])]
-                                        dones_ = dones_[:len(d['obs'])]
+                                        # TODO: choose random indices?
+                                        obs_ = data.observations[:len(d['obs'])]
+                                        actions_ = data.actions[:len(d['obs'])]
+                                        dones_ = data.dones[:len(d['obs'])]
+                                else:
+                                    obs_ = data.observations
+                                    actions_ = data.actions
+                                    dones_ = data.dones
 
-                            # GAIL Discriminator Update
-                            update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, actor)
-                            loss_dict = disc.compute_loss(update_dict)
+                                if use_curr_traj_only:
+                                    obs_ = np.concatenate(traj['obs'])[i*args.batch_size:(i+1)*args.batch_size]
+                                    actions_ = np.concatenate(traj['acs'])[i*args.batch_size:(i+1)*args.batch_size]
+                                    dones_ = np.concatenate(traj['acs'])[i*args.batch_size:(i+1)*args.batch_size]
+                                    if len(d['obs']) > len(obs_):
+                                        break
+                                    if len(d['obs']) < args.batch_size:
+                                        if args.drop_batch:
+                                            break
+                                        else:
+                                            obs_ = obs_[:len(d['obs'])]
+                                            actions_ = actions_[:len(d['obs'])]
+                                            dones_ = dones_[:len(d['obs'])]
 
-                            loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + disc.beta * loss_dict['ib_loss'] 
-                            if args.irm_coeff > 1.0:
-                                loss /= args.irm_coeff
+                                # GAIL Discriminator Update
+                                update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, actor)
+                                loss_dict = disc.compute_loss(update_dict)
 
-                            if args.n_proj == 1:
-                                disc.update(loss)
-                    
-                            if global_step % args.logging_interval == 0:
-                                writer.add_scalar('irl/swil_gsw_dist', loss_dict['d_loss'], global_step)
+                                loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + disc.beta * loss_dict['ib_loss'] 
+                                if args.irm_coeff > 1.0:
+                                    loss /= args.irm_coeff
 
-                                if args.irm_coeff > 0:
-                                    writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
-                                if args.swil_vb > 0:
-                                    writer.add_scalar('irl/swil_vib_loss', loss_dict['ib_loss'], global_step)
+                                if args.n_proj == 1:
+                                    disc.update(loss)
                         
-                    traj = {'obs': [], 'acs': [], 'done': []}
+                                if global_step % args.logging_interval == 0:
+                                    writer.add_scalar('irl/swil_gsw_dist', loss_dict['d_loss'], global_step)
 
-                # evaluate at regular intervals and save 
-                if global_step % args.eval_interval == 0:
-                    mu, std, d = evaluate_model(args, actor, device, test_env, wrap_mujoco=args.eval_test_eps>0)
-                    print(f"Evaluation at {global_step}: {mu}, {std}")
-                    writer.add_scalar('eval/mu', mu, global_step)
-                    writer.add_scalar('eval/std', std, global_step)
-                    ref_dist = ot.sliced_wasserstein_distance(
-                        d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
-                    writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
+                                    if args.irm_coeff > 0:
+                                        writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
+                                    if args.swil_vb > 0:
+                                        writer.add_scalar('irl/swil_vib_loss', loss_dict['ib_loss'], global_step)
+                            
+                        traj = {'obs': [], 'acs': [], 'done': []}
 
-                    results_dict['eval_mu'].append(mu)
-                    results_dict['eval_std'].append(std)
+                    # evaluate at regular intervals and save 
+                    if global_step % args.eval_interval == 0:
+                        mu, std, d = evaluate_model(args, actor, device, test_env, wrap_mujoco=args.eval_test_eps>0)
+                        print(f"Evaluation at {global_step}: {mu}, {std}")
+                        writer.add_scalar('eval/mu', mu, global_step)
+                        writer.add_scalar('eval/std', std, global_step)
+                        ref_dist = ot.sliced_wasserstein_distance(
+                            d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
+                        writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
 
-        except KeyboardInterrupt:
-            break
+                        results_dict['eval_mu'].append(mu)
+                        results_dict['eval_std'].append(std)
 
-    envs.close()
+            except KeyboardInterrupt:
+                break
 
-    # final eval
-    torch.save(actor.state_dict(), f"runs/{run_name}/actor.pt")
-    torch.save(qf1.state_dict(), f"runs/{run_name}/qf1.pt")
-    torch.save(qf2.state_dict(), f"runs/{run_name}/qf2.pt")
-    torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
+        envs.close()
 
-    ## test model and save trajectories
-    #test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
+        # final eval
+        torch.save(actor.state_dict(), f"runs/{run_name}/actor.pt")
+        torch.save(qf1.state_dict(), f"runs/{run_name}/qf1.pt")
+        torch.save(qf2.state_dict(), f"runs/{run_name}/qf2.pt")
+        torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
 
-    #  XXX f"runs/{args.exp_id}_dict.pkl" append to results dict
-    mu, std, d = evaluate_model(args, actor, device, test_env)
-    results_dict['final_mu'] = mu
-    results_dict['final_std'] = std
-    writer.add_scalar('eval/mu', mu, args.total_timesteps)
-    writer.add_scalar('eval/std', std, args.total_timesteps)
+        ## test model and save trajectories
+        #test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
 
-    writer.close()
+        #  XXX f"runs/{args.exp_id}_dict.pkl" append to results dict
+        mu, std, d = evaluate_model(args, actor, device, test_env)
+        results_dict['final_mu'] = mu
+        results_dict['final_std'] = std
+        writer.add_scalar('eval/mu', mu, args.total_timesteps)
+        writer.add_scalar('eval/std', std, args.total_timesteps)
 
+        writer.close()
+    
+    else:
+
+        torch.save(actor.state_dict(), f"runs/{run_name}/actor.pt")
+        torch.save(qf1.state_dict(), f"runs/{run_name}/qf1.pt")
+        torch.save(qf2.state_dict(), f"runs/{run_name}/qf2.pt")
+        torch.save(disc.state_dict(), f"runs/{run_name}/disc.pt")
+
+        ## test model and save trajectories
+        #test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
+
+        #  XXX f"runs/{args.exp_id}_dict.pkl" append to results dict
+        mu, std, d = evaluate_model(args, actor, device, test_env)
+        results_dict['final_mu'] = mu
+        results_dict['final_std'] = std
+        writer.add_scalar('eval/mu', mu, args.total_timesteps)
+        writer.add_scalar('eval/std', std, args.total_timesteps)
+
+        writer.close()
     # save df for easier parsing
     # ea = read_tb_file(f"runs/{run_name}")
     # df = create_df_from_ea(ea, "charts/episodic_return")
