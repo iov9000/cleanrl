@@ -48,7 +48,7 @@ if __name__ == '__main__':
     # use_acs = ['--use_actions', '']
     n_demos = [1,4,10]
     # n_demos = [1]
-    qlens = [1,5,10]
+    qlens = [1,10,20]
     #qlens = [1]
     subsamplings = [1,20,100]
     periods = [100]

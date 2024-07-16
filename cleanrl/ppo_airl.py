@@ -53,7 +53,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
-    parser.add_argument("--exp_id", type=str, default='',
+    parser.add_argument("--exp-id", type=str, default='',
         help="the id of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
@@ -165,6 +165,7 @@ def parse_args():
         action='store_false', help='use bias in disc arch')
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--load_disc", type=str, default=None, help="resume training from checkpoint")
+    parser.add_argument("--load_disc_timestep", type=int, default=None, help="(optional) load specific timestep")
     
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
     parser.add_argument('--use_weight_norm', default=False, required=False, 
@@ -302,12 +303,15 @@ class Agent(nn.Module):
 
 
 if __name__ == "__main__":
-    args, non_default = parse_args()
+    args, non_default, cli = parse_args()
     ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     ua = 'ua' if args.use_actions else ''
     # create output folder with non default arguments in the name
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
-    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    # run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    run_name = f"{ts}_{cli}".replace("/","_")
+    if len(run_name) > 220:
+        run_name = run_name[:220]
     if args.track:
         import wandb
 
@@ -375,7 +379,10 @@ if __name__ == "__main__":
     disc = AIRLDiscriminator(test_env, args)
     discrete = not isinstance(test_env.action_space, gym.spaces.Box)
     if args.load_disc:
-        disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
+        if args.load_disc_timestep is not None:
+            disc.load_state_dict(torch.load(os.path.join(args.load_disc, f"disc_{args.load_disc_timestep}.pt") , map_location=device))
+        else:
+            disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
 
     agent = Agent(test_env, args.agent_size, discrete=discrete).to(device)
     if args.resume:

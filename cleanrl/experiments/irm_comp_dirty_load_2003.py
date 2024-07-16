@@ -8,7 +8,10 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser()
     p.add_argument('--output_dir', type=Path, default=Path('/cluster/project/jbuhmann/oivan/cleanrl/cleanrl/slurm_out'), required=False, help='output dir path')
     p.add_argument('--time', default=24, required=False, help='which algorithms to use')
-    p.add_argument('--exp_id', default='', required=False, help='which algorithms to use')
+    p.add_argument('--exp_id', default='', required=False, help='additional flag')
+    p.add_argument('--algo', default='sac', required=False, help='which agent to use')
+    p.add_argument('--disc_type', default='airl', required=False, help='which discriminator type')
+    p.add_argument('--dynamics_noise', default=0.1, type=float, required=False, help='perturbation noise amplitude')
     p.add_argument('--run_folder', default='', required=False, help='which algorithms to use')
     p.add_argument('--load_timestep', default=200000, type=int, required=False, help='which algorithms to use')
     p.add_argument('--gpu', default=False, required=False, action='store_true', help='use subproc for parallel envs')
@@ -18,13 +21,18 @@ if __name__ == '__main__':
     args = p.parse_args()
 
     seeds = [515, 234, 894, 72, 322]
-    algos = ['sac']
-    disc_types = ['gail']
-    envs = ['Ant-v3', 'HalfCheetah-v3', 'Humanoid-v3', 'Hopper-v3', 'Walker2d-v3']
+    algos = [args.algo]
+    disc_types = [args.disc_type]
+    # envs = ['Ant-v3', 'HalfCheetah-v3', 'Humanoid-v3', 'Hopper-v3', 'Walker2d-v3']
+    envs = ['Ant-v3', 'Humanoid-v3'] 
     # lins = ['--use_spectral_norm', '--use_weight_norm']
-    lins = ['--perturb_dynamics=0.1']
+    lins = [f"--perturb_dynamics={args.dynamics_noise}"]
     # pps = ['body_mass', 'jnt_range', 'actuator_ctrlrange', '']
-    pps = ['body_mass', 'jnt_range', 'actuator_ctrlrange', 'geom_friction']
+    if args.dynamics_noise > 0.0:
+        pps = ['body_mass', 'jnt_range', 'actuator_ctrlrange', 'geom_friction']
+    else:
+        pps = ['body_mass']
+
     # lins = ['--use_weight_norm --linear_proj']
     # usenobs = ['--use_next_obs', '', '--use_next_obs --use_dones']
     # usenobs = ['--use_next_obs', '', '--use_next_obs --use_dones']
@@ -42,6 +50,8 @@ if __name__ == '__main__':
     
     runs = [f for f in os.listdir(f"{args.run_folder}")] 
 
+    print(args.run_folder, args.disc_type)
+
     for seed in seeds:
         for lin in lins:
             for disc in disc_types:
@@ -55,13 +65,19 @@ if __name__ == '__main__':
                                             time = 72
                                         else:
                                             time = args.time
-                                        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                                        ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
 
                                         disc_folders = []
-                                        for run_name in runs:
-                                            if env_name in run_name and f"irm_coeff_{irm_c}" in run_name and f"lip_coeff_{lip_c}" in run_name and str(seed) in run_name:
-                                                disc_folders.append(run_name)
 
+                                        for run_name in runs:
+                                            if 'meirl' in args.disc_type:
+                                                filter_phrase = env_name in run_name and f"irm{irm_c}" in run_name and f"lip{lip_c}" in run_name and str(seed) in run_name
+                                            else:
+                                                filter_phrase = env_name in run_name and f"irm_coeff_{irm_c}" in run_name and f"lip_coeff_{lip_c}" in run_name and str(seed) in run_name
+
+                                            if filter_phrase:
+                                                disc_folders.append(run_name)
+                                        
                                         disc_folder = disc_folders[-1]
                                         print(os.listdir(f"{args.run_folder}/{disc_folder}"))
                                         disc_ckpt_name = f"disc_{load_timestep}.pt"
@@ -70,11 +86,16 @@ if __name__ == '__main__':
                                             # ua_rbl = ua.replace(" ", "")
                                             # lin_rbl = lin.replace(" ", "")
                                             exp_id = (f"{ts}_{algo}_{disc}_{env_name}_seed_{seed}_{args.exp_id}_irm{irm_c}_lip{lip_c}")
+                                            # euler_slurm = (f"sbatch {gpu_string} " 
                                             euler_slurm = (f"sbatch --mem-per-cpu={MEM_PER_CPU} {gpu_string} " 
                                                         f"-o {args.output_dir / exp_id} "
                                                         f"--time={time}:00:00 --wrap ")
                                             euler_lsf = 'bsub -W 24:00 -R "rusage[scratch=5000,mem=8000,ngpus_excl_p=1]" -R "select[gpu_model0==NVIDIAGeForceGTX1080Ti]" '
                                             # exp_cmd = (f"python {algo}_{disc_type}.py  --seed={seed} --irm_coeff={irm_coeff} --env_id {env_name}")
+                                            # if 'continuous' in disc:
+                                                # exp_cmd = (f"python {algo}_{disc}.py {lin} --verbose --seed={seed} "
+                                                    # f"--exp-id {args.run_folder[-5:]} --env-id {env_name} --perturb_parameters {pp} "
+                                            # else:
                                             exp_cmd = (f"python {algo}_{disc}.py "
                                                 f"{lin} --verbose --seed={seed} --exp-id {args.run_folder[-5:]}  --env-id {env_name} {ua} --diverse_demos dirty "
                                                         f"--irm_coeff {irm_c} --lip_coeff {lip_c} --perturb_parameters {pp} "

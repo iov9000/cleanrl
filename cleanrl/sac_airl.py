@@ -296,7 +296,8 @@ if __name__ == "__main__":
     # create output folder with non default arguments in the name
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
     #run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
-    run_name = f"{ts}_{cli}"
+    # run_name = f"{ts}_{cli}"
+    run_name = f"{ts}_{cli}".replace("/","_")
     if len(run_name) > 220:
         run_name = run_name[:220]
     results_dict = {'eval_mu': [], 'eval_std': []}
@@ -381,9 +382,10 @@ if __name__ == "__main__":
         disc.load_state_dict(torch.load(os.path.join(args.resume, "disc.pt") , map_location=device))
 
     if args.load_disc:
-        disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
-    if args.load_disc_timestep is not None:
-        disc.load_state_dict(torch.load(os.path.join(args.load_disc, f"disc_{args.load_disc_timestep}.pt") , map_location=device))
+        if args.load_disc_timestep is not None:
+            disc.load_state_dict(torch.load(os.path.join(args.load_disc, f"disc_{args.load_disc_timestep}.pt") , map_location=device))
+        else:
+            disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
 
 
     qf1_target = SoftQNetwork(envs).to(device)

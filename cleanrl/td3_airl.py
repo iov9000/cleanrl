@@ -1,6 +1,7 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/td3/#td3_continuous_actionpy
 import argparse
 import os
+import sys
 import random
 import time
 from datetime import datetime
@@ -163,6 +164,7 @@ def parse_args():
 
     parser.add_argument("--resume", type=str, default=None, help="resume training from checkpoint")
     parser.add_argument("--load_disc", type=str, default=None, help="load discriminator from checkpoint")
+    parser.add_argument("--load_disc_timestep", type=int, default=None, help="(optional) load specific timestep")
 
     parser.add_argument('--drop_batch', default=False, required=False, 
         action='store_true', help='drop batch in irl epochs')   
@@ -170,6 +172,8 @@ def parse_args():
         action='store_true', help='use bias in disc arch')
     parser.add_argument('--verbose', default=False, required=False, 
         action='store_true', help='verbose output')        
+    parser.add_argument('--eval_on_different_seed', default=False, required=False, 
+        action='store_true', help='evaluate on random seed')
     parser.add_argument("--test_eps", type=float, default=0.0, help="test perturbation eps")
     parser.add_argument("--perturbation_parameters", type=str, nargs='+', default='', help="which env parameter to perturb")
 
@@ -180,8 +184,10 @@ def parse_args():
         for opt in parser._option_string_actions.values()
         if hasattr(args, opt.dest) and opt.default != getattr(args, opt.dest)
     }
-
-    return args, non_default
+    cli = str(sys.argv).replace('--','').replace('verbose','').replace("'","")
+    cli = cli.replace(" ","_").replace(",","").replace(".py","").replace('[','').replace(']','')
+    
+    return args, non_default, cli
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, agent, disc, demos, env_kwargs):
     def thunk():
@@ -287,12 +293,13 @@ class Actor(nn.Module):
 
 
 if __name__ == "__main__":
-    args, non_default = parse_args()
+    args, non_default, cli = parse_args()
     ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     ua = 'ua' if args.use_actions else ''
     # create output folder with non default arguments in the name
     id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
-    run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    # run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    run_name = f"{ts}_{cli}".replace("/","_")
     if len(run_name) > 220:
         run_name = run_name[:220]
     results_dict = {'eval_mu': [], 'eval_std': []}
@@ -371,7 +378,10 @@ if __name__ == "__main__":
         disc.load_state_dict(torch.load(os.path.join(args.resume, "disc.pt") , map_location=device))
 
     if args.load_disc:
-        disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
+        if args.load_disc_timestep is not None:
+            disc.load_state_dict(torch.load(os.path.join(args.load_disc, f"disc_{args.load_disc_timestep}.pt") , map_location=device))
+        else:
+            disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
 
     qf1_target = QNetwork(envs).to(device)
     qf2_target = QNetwork(envs).to(device)
