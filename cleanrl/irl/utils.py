@@ -817,6 +817,9 @@ class Box2dTestWrapper(gym.Wrapper):
         param = np.array(getattr(self.env.unwrapped, parameter))
         param_mod = param + np.random.randn(*param.shape)*self.epsdyn
 
+        if 'wind' in parameter or 'turbulence' in parameter:
+            self.env.unwrapped.enable_wind = True
+
         #print(
         #    f">> Perturbed parameter {parameter}, default: {self.default_params[parameter]}, changed: {param_mod}")
         # assign new value
@@ -831,6 +834,10 @@ class Box2dTestWrapper(gym.Wrapper):
         #self.perturb_init(self.eps0)
         for k, v in self.default_params.items():
             self.perturb_parameter(k)
+
+        #print((f"Lunar Lander Dynamics: gravity: {self.env.unwrapped.gravity}, "
+        #       f"wind_power: {self.env.unwrapped.wind_power}," 
+        #       f"turbulence_power: {self.env.unwrapped.turbulence_power},"))
 
         return o, {}
 
