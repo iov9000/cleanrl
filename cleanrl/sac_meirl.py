@@ -34,7 +34,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 from irl.meirl import MeirlReward, MEIRLDiscriminator
 from irl.utils import load_hf_demos, load_hf_demos_name, evaluate_model, prepare_batch_update_irl,\
-     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper, FrankaObsWrapper, MujocoTestWrapper
+     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper, FrankaObsWrapper,\
+        MujocoTestWrapper, Box2dTestWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -194,9 +195,20 @@ def parse_args():
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, disc):
     def thunk():
-        env = gym.make(env_id)
+        if 'Adroit' in env_id:
+            env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
+            #env.set_env_state(demos['all']['init_state_dict'][0])
+        elif 'Franka' in env_id:
+            env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'], render_mode='rgb_array')
+            env = FrankaObsWrapper(env)
+        else:
+            env = gym.make(env_id, render_mode='rgb_array')              
+        
         if opt.perturb_dynamics > 0.0:
-            env = MujocoTestWrapper(env, eps0=0.0, epsdyn=opt.perturb_dynamics, params=opt.perturb_parameters)
+            if 'box2d' in str(env.unwrapped.__class__):
+                env = Box2dTestWrapper(env, eps0=0.0, epsdyn=opt.perturb_dynamics, params=opt.perturb_parameters)
+            else:
+                env = MujocoTestWrapper(env, eps0=0.0, epsdyn=opt.perturb_dynamics, params=opt.perturb_parameters)
 
         if opt.use_absorb_wrapper: # DAC
             env = AbsorbAfterDoneWrapper(env)
@@ -341,7 +353,11 @@ if __name__ == "__main__":
     # get env specs
     test_env = gym.make(args.env_id)
     if args.perturb_dynamics > 0.0:
-        test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
+        if 'box2d' in str(test_env.unwrapped.__class__):
+            test_env = Box2dTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
+        else:
+            test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
+            
     disc = MEIRLDiscriminator(test_env, args)
 
     # env setup

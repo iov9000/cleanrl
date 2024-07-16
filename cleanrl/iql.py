@@ -79,7 +79,7 @@ def parse_args():
     parser.add_argument("--tau", type=float, default=0.005,
         help="target smoothing coefficient (default: 0.005)")
     parser.add_argument("--batch-size", type=int, default=256,
-        help="the batch size of sample from the reply memory")
+        help="the batch size of sample from the replay memory")
     parser.add_argument("--exploration-noise", type=float, default=0.1,
         help="the scale of exploration noise")
     parser.add_argument("--learning-starts", type=int, default=0,
@@ -94,7 +94,7 @@ def parse_args():
         help="the frequency of updates for the target nerworks")
     parser.add_argument("--noise-clip", type=float, default=0.5,
         help="noise clip parameter of the Target Policy Smoothing Regularization")
-    parser.add_argument("--alpha", type=float, default=0.5,
+    parser.add_argument("--alpha", type=float, default=0.001,
           help="Entropy regularization coefficient.")
     parser.add_argument('--autotune', default=True, required=False, 
         action='store_false', help='autotune entropy')
@@ -147,9 +147,10 @@ def parse_args():
     parser.add_argument('--inf_bootstrap', default=True, required=False, 
         action='store_false', help='infinite bootstrap (only use true terminations as done, ignore truncations)')
 
-
     parser.add_argument("--use_sb_ppo", default=False, required=False, action='store_true', help="use autoencoder")
     parser.add_argument("--iql_div", type=str, default="chi2", help="divergence type")
+    parser.add_argument("--doubleQ", default=False, required=False, action='store_true', 
+                        help="use doubleQ or singleQ for IQLearn procedure")
 
     parser.add_argument('--drop_batch', default=False, required=False, 
         action='store_true', help='drop batch in irl epochs')   
@@ -160,7 +161,8 @@ def parse_args():
     parser.add_argument('--eval_on_different_seed', default=True, required=False, 
         action='store_false', help='verbose output')
     parser.add_argument("--test_eps", type=float, default=0.0, help="test perturbation eps")
-    parser.add_argument("--perturbation_parameters", type=str, nargs='+', default='', help="which env parameter to perturb")
+    parser.add_argument("--perturbation_parameters", type=str, nargs='+', default='', 
+                        help="which env parameter to perturb")
 
     args = parser.parse_args()
     # fmt: on
@@ -226,9 +228,10 @@ class SoftQNetwork(nn.Module):
 LOG_STD_MAX = 2
 LOG_STD_MIN = -5
 
-# helper fct.
+# helper fct. to compute value function based on Q and policy
 def getV(actor, critic, alpha, obs):
     action, log_prob, _ = actor.get_action(obs)
+    # if doubleQ
     if isinstance(critic, tuple):
         q1 = critic[0](obs, action)
         q2 = critic[1](obs, action)
@@ -375,7 +378,7 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    if torch.cuda.is_available():
+    if torch.cuda.is_available() and args.cuda:
         torch.set_default_tensor_type(torch.cuda.FloatTensor)
     else:
         torch.set_default_tensor_type(torch.FloatTensor)
@@ -404,10 +407,9 @@ if __name__ == "__main__":
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
 
-
     # Automatic entropy tuning
     if args.autotune:
-        target_entropy = -torch.prod(torch.Tensor(envs.single_action_space.shape).to(device)).item()
+        target_entropy = -4*torch.prod(torch.Tensor(envs.single_action_space.shape).to(device)).item()
         log_alpha = torch.zeros(1, requires_grad=True, device=device)
         alpha = log_alpha.exp().item()
         a_optimizer = optim.Adam([log_alpha], lr=args.q_lr)
@@ -446,6 +448,10 @@ if __name__ == "__main__":
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             if not isinstance(infos, list):
                 infos = [infos]
+            done_no_lim = dones
+
+            #if str(envs.envs.__class__.__name__).find('TimeLimit') >= 0 and global_step%10000 + 1 == envs._max_episode_steps:
+            #    done_no_lim = 0
 
             for item in infos:
                 # TODO: fix this for new Gymnasium
@@ -467,7 +473,7 @@ if __name__ == "__main__":
                 if d:
                     real_next_obs[idx] = infos[idx]["final_observation"][0]
                     # TODO: check if 0 index is always correct
-            rb.add(obs, real_next_obs, actions, rewards, dones, infos)
+            rb.add(obs, real_next_obs, actions, rewards, done_no_lim, infos)
 
             # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
             obs = next_obs
@@ -477,25 +483,67 @@ if __name__ == "__main__":
                 data = rb.sample(args.batch_size)
                 expert_demos = demos_sample_batch(demos['all'], args.batch_size)
 
-                all_obs, all_obs_next, all_actions, all_rew, all_dones, is_expert = get_concat_samples(data, expert_demos)
+                (all_obs, all_obs_next, 
+                        all_actions, 
+                        all_rew, 
+                        all_dones, is_expert) = get_concat_samples(data, expert_demos, device)
                 batch = (all_obs, all_obs_next, all_actions, all_rew, all_dones, is_expert)
+                
+                if args.doubleQ:
+                    current_V = getV(actor, (qf1, qf2), alpha, all_obs)
+                    if args.use_target:
+                        with torch.no_grad():
+                            next_V = getV(actor, (qf1_target, qf2_target), alpha, all_obs_next)
+                    else:
+                        next_V = getV(actor, (qf1, qf2), alpha, all_obs_next)
 
-                # update critic
-                current_V = getV(actor, (qf1, qf2), alpha, all_obs)
-                if args.use_target:
-                    with torch.no_grad():
-                        next_V = getV(actor, (qf1_target, qf2_target), alpha, all_obs_next)
+                    current_Q1 = qf1(all_obs, all_actions)
+                    current_Q2 = qf2(all_obs, all_actions)
+                    q1_loss, loss_dict1 = iq_loss(actor, qf1, alpha, args.gamma, current_Q1, current_V, next_V, batch)
+                    q2_loss, loss_dict2 = iq_loss(actor, qf2, alpha, args.gamma, current_Q2, current_V, next_V, batch)
+                    iql_loss = 1/2 * (q1_loss + q2_loss)
                 else:
-                    next_V = getV(actor, qf1, alpha, all_obs_next)
-                current_Q1 = qf1(all_obs, all_actions)
-                current_Q2 = qf2(all_obs, all_actions)
-                q1_loss, loss_dict1 = iq_loss(actor, qf1, alpha, args.gamma, current_Q1, current_V, next_V, batch)
-                q2_loss, loss_dict2 = iq_loss(actor, qf2, alpha, args.gamma, current_Q2, current_V, next_V, batch)
-                iql_loss = 1/2 * (q1_loss + q2_loss)
+                    current_V = getV(actor, qf1, alpha, all_obs)
+                    if args.use_target:
+                        with torch.no_grad():
+                            next_V = getV(actor, qf1_target, alpha, all_obs_next)
+                    else:
+                        next_V = getV(actor, qf1, alpha, all_obs_next)
+
+                    current_Q1 = qf1(all_obs, all_actions)
+                    current_Q2 = current_Q1
+                    iql_loss, loss_dict1 = iq_loss(actor, qf1, alpha, args.gamma, current_Q1, current_V, next_V, batch)
 
                 q_optimizer.zero_grad()
                 iql_loss.backward()
                 q_optimizer.step()
+
+                ######
+                # IQ-Learn minimal implementation with X^2 divergence (~15 lines)
+                # Calculate 1st term of loss: -E_(ρ_expert)[Q(s, a) - γV(s')]
+                # current_Q1 = qf1(all_obs, all_actions)
+                # current_Q2 = current_Q1
+                # y = (1 - all_dones) * args.gamma * getV(actor, qf1, alpha, all_obs)
+                # if args.use_target:
+                #     with torch.no_grad():
+                #         y = (1 - all_dones) * args.gamma * getV(actor, qf1_target, alpha, all_obs_next)
+
+                # reward = (current_Q1 - y)[is_expert]
+                # iql_loss = -(reward).mean()
+
+                # # 2nd term for our loss (use expert and policy states): E_(ρ)[Q(s,a) - γV(s')]
+                # value_loss = (getV(actor, qf1, alpha, all_obs) - y).mean()
+                # iql_loss += value_loss
+
+                # # Use χ2 divergence (adds a extra term to the loss)
+                # chi2_loss = 1/(4 * alpha) * (reward**2).mean()
+                # iql_loss += chi2_loss
+
+                # q_optimizer.zero_grad()
+                # iql_loss.backward()
+                # q_optimizer.step()
+                ######
+
 
                 # update actor
                 if global_step % args.policy_frequency == 0:  # TD 3 Delayed update support

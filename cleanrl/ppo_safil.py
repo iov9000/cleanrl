@@ -39,7 +39,7 @@ gym.envs.register(
 
 from irl.safil import SafilReward, SafILDiscriminator
 from irl.utils import load_hf_demos, load_hf_demos_name, load_lap_demos, prepare_batch_update_irl, enhance_demos_with_barycenters,\
-                   demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model, FrankaObsWrapper
+                   demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model, FrankaObsWrapper, FailureBufferWrapper
 
 import ot
 
@@ -135,7 +135,6 @@ def parse_args():
     parser.add_argument("--diverse_demos", type=str, default=None,
         help="diverse demos for generalization experiments")
 
-
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--use_dones', default=False, required=False, 
@@ -144,10 +143,12 @@ def parse_args():
         action='store_true', help='use actions in discriminator')
 
     ## Safety specific arguments
-    parser.add_argument('--use_safe_disc_rewards', default=False, required=False, 
+    parser.add_argument('--use_safe_disc_reward', default=False, required=False, 
         action='store_true', help='use safety discriminator signal as reward')
     parser.add_argument('--safety_coeff', default=1.0, type=float, 
         required=False, help='use safety discriminator vs base measure')
+    parser.add_argument('--use_failure_buffer', default=False, required=False, 
+        action='store_true', help='use failure buffer')
     ## / Safety specific arguments
 
     parser.add_argument('--d_layer_dims', default=[128, 128], nargs='+', required=False,
@@ -211,7 +212,7 @@ def parse_args():
     return args, non_default, cli
 
 
-def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
+def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc, kwargs):
     def thunk():
         if 'Adroit' in env_id:
             env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
@@ -223,7 +224,7 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
             env = safety_gymnasium.make(env_id)
             env = SafetyGymWrapper(env)
         else:
-            env = gym.make(env_id, render_mode='rgb_array')        
+            env = gym.make(env_id, **kwargs, render_mode='rgb_array')        
         
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if opt.time_aware:
@@ -237,6 +238,8 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc):
             env = gym.wrappers.NormalizeObservation(env)
             env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
         env = SafilReward(env, opt, disc)
+        if opt.use_failure_buffer:
+            env = FailureBufferWrapper(env, weight=opt.safety_coeff)
         if opt.normalize_irl_rewards and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeReward(env, gamma=gamma)
             env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
@@ -385,7 +388,7 @@ if __name__ == "__main__":
     if args.diverse_demos is not None:
         demo_list = [f for f in os.listdir(args.demo_dir) if args.diverse_demos in f and args.env_id in f]
         print("-> Training on union of demos:", demo_list)
-        demos = load_hf_demos_name(args, demo_list)
+        demos = load_hf_demos_name(args, demo_list, load_support=True)
     else:
         if args.env_id == 'Lap-v0':
             demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
@@ -419,7 +422,7 @@ if __name__ == "__main__":
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args, args.env_id, args.seed + i, i, args.capture_video, run_name, args.gamma, disc) for i in range(args.num_envs)]
+        [make_env(args, args.env_id, args.seed + i, i, args.capture_video, run_name, args.gamma, disc, env_kwargs) for i in range(args.num_envs)]
     )
     #assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
@@ -561,7 +564,6 @@ if __name__ == "__main__":
 
                 entropy_loss = entropy.mean()
                 loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
-
                 optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
@@ -615,8 +617,10 @@ if __name__ == "__main__":
                 loss_dict = disc.compute_loss(update_dict)
 
                 loss = loss_dict['d_loss'] + annealed_irm_coeff * \
-                    loss_dict['grad_penalty'] + args.safety_coeff * loss_dict['sd_loss']\
+                    loss_dict['grad_penalty'] + 0.0 * loss_dict['sd_loss']\
                     + args.lip_coeff * loss_dict['lip_penalty']
+                    #loss_dict['grad_penalty'] + args.safety_coeff * loss_dict['sd_loss']\
+
                     
                 #if args.irm_coeff > 1.0:
                 #    loss /= args.irm_coeff

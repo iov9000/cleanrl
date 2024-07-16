@@ -23,6 +23,12 @@ gym.envs.register(
      max_episode_steps=1000,
 )
 
+gym.envs.register(
+     id='CMovePND-v0',
+     entry_point='envs.envs2d:CMovePND',
+     max_episode_steps=1000,
+)
+
 import numpy as np
 #import pybullet_envs  # noqa
 import torch
@@ -34,7 +40,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 from irl.gail import GailReward, GAILDiscriminator
 from irl.utils import load_hf_demos, load_hf_demos_name, evaluate_model, prepare_batch_update_irl,\
-     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper, FrankaObsWrapper, MujocoTestWrapper
+     enhance_demos_with_barycenters, demos_gen_dict, save_traj_dict, AbsorbAfterDoneWrapper, FrankaObsWrapper, \
+        MujocoTestWrapper, Box2dTestWrapper
 
 from parse_tb import read_tb_file, create_df_from_ea
 
@@ -64,7 +71,7 @@ def parse_args():
         help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
-    parser.add_argument("--capture_video_interval", type=int, default=200,
+    parser.add_argument("--video_interval", type=int, default=200,
         help="capture video interval")
 
     # environment specific arguments
@@ -207,14 +214,18 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos, env_k
             env = gym.make(env_id, render_mode='rgb_array')        
         
         if opt.perturb_dynamics > 0.0:
-            env = MujocoTestWrapper(env, eps0=0.0, epsdyn=opt.perturb_dynamics, params=opt.perturb_parameters)
+            if 'box2d' in str(env.unwrapped.__class__):
+                env = Box2dTestWrapper(env, eps0=0.0, epsdyn=opt.perturb_dynamics, params=opt.perturb_parameters)
+            else:
+                env = MujocoTestWrapper(env, eps0=0.0, epsdyn=opt.perturb_dynamics, params=opt.perturb_parameters)
+
 
         if opt.use_absorb_wrapper: # DAC
             env = AbsorbAfterDoneWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % opt.capture_video_interval == 0)
+                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % opt.video_interval == 0)
         if opt.clip_action and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env)
         if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
@@ -371,8 +382,13 @@ if __name__ == "__main__":
         test_env = FrankaObsWrapper(test_env)
     else:
         test_env = gym.make(args.env_id, **env_kwargs) 
+        
     if args.perturb_dynamics > 0.0:
-        test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
+        if 'box2d' in str(test_env.unwrapped.__class__):
+            test_env = Box2dTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
+        else:
+            test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
+
     disc = GAILDiscriminator(test_env, args)
 
     # env setup

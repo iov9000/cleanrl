@@ -3,6 +3,11 @@ import os
 import gymnasium as gym
 # import pybullet
 #import gym
+
+module_path = os.path.abspath(os.path.join('..'))
+if module_path not in sys.path:
+    sys.path.append(module_path)
+
 import numpy as np
 from huggingface_sb3 import load_from_hub
 from stable_baselines3 import PPO, SAC, TD3, DQN
@@ -12,8 +17,14 @@ from itertools import count
 import torch
 
 import argparse
+#import safety_gymnasium
 
 import pickle
+
+gym.envs.register(
+     id='CMovePND-v0',
+     entry_point='envs.envs2d:CMovePND',
+     max_episode_steps=1000)
 
 def save_expert_traj_dict(opt, env, model):
     num_steps = 0
@@ -57,37 +68,52 @@ def save_expert_traj_dict(opt, env, model):
             noise = 0.0
 
         while not done:
-            ac, _states = model.predict(ob)
+            if args.custom_model is None:
+                ac, _states = model.predict(ob)
+            else:
+                ob_ = torch.FloatTensor(ob).unsqueeze(0)
+                if args.algo == 'ppo':
+                    ac, _, _, _ = model.get_action_and_value(ob_)
+                else: # SAC
+                    ac, _, _ = model.get_action(ob_)
+
             ac = ac + np.random.randn(*ac.shape)*noise
+
             # save "backup" state
             if hasattr(env, 'model'):
                 Qpos = env.sim.get_state().qpos
                 Qvel = env.sim.get_state().qvel
             else:
-                saved_state = env.state
+                saved_state, agent, tgt = env.get_state()
 
             for i in range(opt.n_eps_walk):
                 # reset to saved state on beginning of random walk
                 if hasattr(env, 'model'):
                     env.set_state(Qpos, Qvel)
                 else:
-                    env.state = saved_state
+                    env.set_state(agent, tgt)
 
                 for j in range(opt.len_eps_walk):
+
                     random_ac = env.action_space.sample()
                     next_ob_s, reward_s, term_s, trunc_s, _ = env.step(random_ac)
                     # TODO: figure out what to do with terminations..
                     done_s = term_s or trunc_s
-                    support_obs.append(ob)
-                    support_acs.append(ac)
-                    support_rew.append(reward)
-                    support_done.append(done)
+                    support_obs.append(next_ob_s)
+                    support_acs.append(random_ac)
+                    support_rew.append(reward_s)
+                    support_done.append(done_s)
 
-            # carry on with previous
-            env.set_state(Qpos, Qvel)
+            # carry on with previously saved state
+            if hasattr(env, 'model'):
+                env.set_state(Qpos, Qvel)
+            else:
+                env.set_state(agent, tgt)
+
+            ac = ac.squeeze().detach().numpy()
             next_ob, reward, term, trunc, _ = env.step(ac)
             done = term or trunc
-            
+
             ob = next_ob
             total_reward += reward
             episode_obs.append(ob)
@@ -123,6 +149,7 @@ def save_expert_traj_dict(opt, env, model):
     d = {'obs': expert_obs, 'acs': expert_acs, 'rew': expert_rew, 'done': expert_done,
          'support_obs': exp_support_obs, 'support_acs': exp_support_acs, 
          'support_rew': exp_support_rew, 'support_done': exp_support_done}
+
     pickle.dump(d, open(filename, 'wb'))
 
 if __name__ == '__main__':
@@ -146,7 +173,7 @@ if __name__ == '__main__':
                         required=False, help="action perturbation")
     parser.add_argument("--n_eps_walk", default=5, type=int,
                         required=False, help="random walk number")
-    parser.add_argument("--len_eps_walk", default=5, type=int,
+    parser.add_argument("--len_eps_walk", default=3, type=int,
                         required=False, help="random walk length")
     parser.add_argument("--perturb_parameter", default='body_mass', type=str, nargs='+',
                         required=False, help="specify which sim parameter to perturb")
@@ -213,10 +240,12 @@ if __name__ == '__main__':
     if args.normalize_obs:
         env = gym.wrappers.NormalizeObservation(env)
 
+    print(hparams)
+
     if hparams is not None:
-        if hparams.clip_action and isinstance(env.action_space, gym.spaces.Box):
+        if hparams['clip_action'] and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.ClipAction(env) 
-        if hparams.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
+        if hparams['normalize_obs'] and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeObservation(env)
             env = gym.wrappers.TransformObservation(
                 env, lambda obs: np.clip(obs, -10, 10))

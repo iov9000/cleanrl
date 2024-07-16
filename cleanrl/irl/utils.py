@@ -10,13 +10,14 @@ import pickle
 from datetime import datetime
 import matplotlib.pyplot as plt
 import pandas as pd
+from collections import deque
 
 from typing import Optional
 
 #from drqv2 import DrQV2Agent, Encoder
 
 
-def load_hf_demos(args, n_demos, perturb=0.0, bary_enhance=False):
+def load_hf_demos(args, n_demos, perturb=0.0, bary_enhance=False, load_support=False):
     folder = args.demo_dir
     env_name = args.env_id
     subsample = args.subsample
@@ -34,13 +35,24 @@ def load_hf_demos(args, n_demos, perturb=0.0, bary_enhance=False):
         expert_demos['all']['acs'] = expert_demos['all']['acs'][::subsample]
         expert_demos['all']['rew'] = expert_demos['all']['rew'][::subsample]
         expert_demos['all']['done'] = expert_demos['all']['done'][::subsample]
+        fn='all'
+        if load_support:
+            expert_demos[fn]['support_obs'] = expert_demos[fn]['support_obs'][::subsample]
+            expert_demos[fn]['support_acs'] = expert_demos[fn]['support_acs'][::subsample]
+            expert_demos[fn]['support_rew'] = expert_demos[fn]['support_rew'][::subsample]
+            expert_demos[fn]['support_done'] = expert_demos[fn]['support_done'][::subsample]
+        else:
+            expert_demos[fn]['support_obs'] = expert_demos[fn]['obs'][::subsample]
+            expert_demos[fn]['support_acs'] = expert_demos[fn]['acs'][::subsample]
+            expert_demos[fn]['support_rew'] = expert_demos[fn]['rew'][::subsample]
+            expert_demos[fn]['support_done'] = expert_demos[fn]['done'][::subsample]
     except:
         print("Generate demos from HuggingFace Hub first")
         assert False
 
     return expert_demos
 
-def load_hf_demos_name(args, fnames):
+def load_hf_demos_name(args, fnames, load_support=False):
     folder = args.demo_dir
     env_name = args.env_id
     subsample = args.subsample
@@ -56,6 +68,16 @@ def load_hf_demos_name(args, fnames):
             expert_demos[fn]['acs'] = expert_demos[fn]['acs'][::subsample]
             expert_demos[fn]['rew'] = expert_demos[fn]['rew'][::subsample]
             expert_demos[fn]['done'] = expert_demos[fn]['done'][::subsample]
+            if load_support:
+                expert_demos[fn]['support_obs'] = expert_demos[fn]['support_obs'][::subsample]
+                expert_demos[fn]['support_acs'] = expert_demos[fn]['support_acs'][::subsample]
+                expert_demos[fn]['support_rew'] = expert_demos[fn]['support_rew'][::subsample]
+                expert_demos[fn]['support_done'] = expert_demos[fn]['support_done'][::subsample]
+            else:
+                expert_demos[fn]['support_obs'] = expert_demos[fn]['obs'][::subsample]
+                expert_demos[fn]['support_acs'] = expert_demos[fn]['acs'][::subsample]
+                expert_demos[fn]['support_rew'] = expert_demos[fn]['rew'][::subsample]
+                expert_demos[fn]['support_done'] = expert_demos[fn]['done'][::subsample]
         except:
             print("Generate demos from HuggingFace Hub first")
             assert False
@@ -64,23 +86,36 @@ def load_hf_demos_name(args, fnames):
     acs_all = []
     rew_all = []
     done_all = []
+    support_obs_all = []
+    support_acs_all = []
+    support_rew_all = []
+    support_done_all = []
 
     for k, v in expert_demos.items():
         obs_all.append(v['obs'])
         acs_all.append(v['acs'])
         rew_all.append(v['rew'])
         done_all.append(v['done'])
+        support_obs_all.append(v['support_obs'])
+        support_acs_all.append(v['support_acs'])
+        support_rew_all.append(v['support_rew'])
+        support_done_all.append(v['support_done'])
+
 
     expert_demos['all'] = {}
     expert_demos['all']['obs'] = np.concatenate(obs_all, 0)
     expert_demos['all']['acs'] = np.concatenate(acs_all, 0)
     expert_demos['all']['rew'] = np.concatenate(rew_all, 0)
     expert_demos['all']['done'] = np.concatenate(done_all, 0)
+    expert_demos['all']['support_obs'] = np.concatenate(support_obs_all, 0)
+    expert_demos['all']['support_acs'] = np.concatenate(support_acs_all, 0)
+    expert_demos['all']['support_rew'] = np.concatenate(support_rew_all, 0)
+    expert_demos['all']['support_done'] = np.concatenate(support_done_all, 0)
 
     return expert_demos
 
 
-def load_fast_demos(args, filename, n_demos=1, bary_enhance=False, offset=100, obs_shape=3):
+def load_fast_demos(args, filename, n_demos=1, bary_enhance=False, offset=100, obs_shape=3, load_support=False):
     expert_demos = {}
     folder = args.demo_dir
     subsample = args.subsample
@@ -104,7 +139,8 @@ def load_fast_demos(args, filename, n_demos=1, bary_enhance=False, offset=100, o
     return {'all': expert_demos}
 
 
-def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, offset=500, obs_shape=3, filter_by_score=False, flip_z=False):
+def load_lap_demos(folder='demos/davos_data', n_demos=1, bary_enhance=False, 
+        offset=500, obs_shape=3, filter_by_score=False, flip_z=False, load_support=False):
     expert_demos = {}
     obs = []
     obs_full = []
@@ -304,7 +340,11 @@ def demos_gen_dict(data, batch_size, shuffle=False):
         yield {'obs': data['obs'][mb_inds], 
                'acs': data['acs'][mb_inds],
                'rew': data['rew'][mb_inds],
-               'done': data['done'][mb_inds]}
+               'done': data['done'][mb_inds],
+               'support_obs': data['support_obs'][mb_inds], 
+               'support_acs': data['support_acs'][mb_inds],
+               'support_rew': data['support_rew'][mb_inds],
+               'support_done': data['support_done'][mb_inds]}
 
 def demos_sample_batch(data, batch_size, shuffle=False):
     """  Yields batch of specified size """
@@ -318,7 +358,7 @@ def demos_sample_batch(data, batch_size, shuffle=False):
             'rew': data['rew'][i:end],
             'done': data['done'][i:end]}
 
-def get_concat_samples(policy_batch, expert_batch):
+def get_concat_samples(policy_batch, expert_batch, device):
     policy_obs = policy_batch.observations
     policy_acs = policy_batch.actions
     policy_obs_next = policy_batch.next_observations
@@ -326,14 +366,14 @@ def get_concat_samples(policy_batch, expert_batch):
     policy_dones = torch.squeeze(policy_batch.dones)
 
     if isinstance(expert_batch, dict):
-        expert_rew = torch.from_numpy(expert_batch['rew']).type(torch.get_default_dtype())
-        expert_obs = torch.from_numpy(expert_batch['obs']).type(torch.get_default_dtype())
-        expert_acs = torch.from_numpy(expert_batch['acs']).type(torch.get_default_dtype())
-        expert_dones = torch.from_numpy(np.squeeze(expert_batch['done'])).type(torch.get_default_dtype())
+        expert_rew = torch.from_numpy(expert_batch['rew']).type(torch.get_default_dtype()).to(device)
+        expert_obs = torch.from_numpy(expert_batch['obs']).type(torch.get_default_dtype()).to(device)
+        expert_acs = torch.from_numpy(expert_batch['acs']).type(torch.get_default_dtype()).to(device)
+        expert_dones = torch.from_numpy(np.squeeze(expert_batch['done'])).type(torch.get_default_dtype()).to(device)
 
     expert_obs_next = np.concatenate([expert_batch['obs'][1:], np.expand_dims(expert_batch['obs'][-1], 0)],
                                      axis=0)  # repeat last observation
-    expert_obs_next = torch.from_numpy(expert_obs_next).type(torch.get_default_dtype())
+    expert_obs_next = torch.from_numpy(expert_obs_next).type(torch.get_default_dtype()).to(device)
 
     batch_state = torch.cat([policy_obs, expert_obs], dim=0)
     batch_next_state = torch.cat([policy_obs_next, expert_obs_next], dim=0)
@@ -508,7 +548,7 @@ def prepare_batch_update_irl(env, opt, expert_demos, obs, acs, dones, policy, co
             support_done = expert_demos['support_done']
             support_obs_next = np.concatenate([support_obs[1:], np.expand_dims(support_obs[-1], 0)],
                                      axis=0)  # repeat last observation
-                                     
+
         support_obs_t = torch.from_numpy(support_obs).type(torch.get_default_dtype())
         support_acs_t = torch.from_numpy(support_acs).type(torch.get_default_dtype())   
         support_dones_t = torch.from_numpy(support_done).type(torch.get_default_dtype())   
@@ -764,43 +804,31 @@ class Box2dTestWrapper(gym.Wrapper):
         # save default simulation parameters
         #print(dir(self.env.model))
         for p in params:
-            self.default_params[p] = np.array(getattr(self.env.model, p))
-
+            self.default_params[p] = np.array(getattr(self.env.unwrapped, p))
 
         #print(dir(self.env.model))
-        self.perturb_init(eps0)
+        #self.perturb_init(eps0)
         for p in params:
             self.perturb_parameter(p)
 
         super().__init__(env=self.env)
 
-    def perturb_init(self, eps):
-        #  perturb initial position and velocity
-        self.init_qpos = np.array(self.init_qpos)
-        self.init_qvel = np.array(self.init_qvel)
-        self.init_qpos = self.init_qpos * eps * \
-            np.random.randn(*self.init_qpos.shape)
-        # self.init_qvel = self.init_qvel * eps * \
-        #    np.random.randn(*self.init_qvel.shape)
-        self.init_qpos = tuple(self.init_qpos)
-        self.init_qvel = tuple(self.init_qvel)
-
     def perturb_parameter(self, parameter='body_mass'):
-        param = np.array(getattr(self.env.model, parameter))
+        param = np.array(getattr(self.env.unwrapped, parameter))
         param_mod = param + np.random.randn(*param.shape)*self.epsdyn
 
         #print(
         #    f">> Perturbed parameter {parameter}, default: {self.default_params[parameter]}, changed: {param_mod}")
         # assign new value
-        getattr(self.env.model, parameter)[:] = param_mod
+        setattr(self.env.unwrapped, parameter, param_mod)
 
     def reset(self, seed=1, options=None):
-        o = self.env.reset(seed, options)[0]
+        o = self.env.reset(seed=seed, options=options)[0]
         # reset mass to default value otherwise accum.
         for k, v in self.default_params.items():
-            getattr(self.env.model, k)[:] = v
+            setattr(self.env.unwrapped, k, v)
 
-        self.perturb_init(self.eps0)
+        #self.perturb_init(self.eps0)
         for k, v in self.default_params.items():
             self.perturb_parameter(k)
 
@@ -1145,7 +1173,7 @@ class ResetToStateWrapper(gym.Wrapper):
         # self.reward_fn = make_network(**reward_fn_spec)
 
     def reset(self, seed=1, options=None, state=None):
-        obs, info = self.env.reset()
+        obs, info = self.env.reset(seed, options)
 
         print(obs)
 
@@ -1158,3 +1186,91 @@ class ResetToStateWrapper(gym.Wrapper):
 
 
         return o, info
+
+class FailureBufferWrapper(gym.Wrapper):
+    def __init__(self, env, maxlen=500, weight=0.1):
+        super().__init__(env=env)
+        self.buffer = deque(maxlen=maxlen)
+        self.weight = weight
+        # self.reward_fn = make_network(**reward_fn_spec)
+
+    def compute_distance(self, obs, tgt):
+        return np.sqrt(np.sum((obs-tgt)**2))
+
+    def reset(self, seed=1, options=None, state=None):
+        obs, info = self.env.reset()
+        self.obs = obs
+        self.episode_return = 0
+        #print("Length of failure buffer:", len(self.buffer))
+
+        return obs, info
+
+    def step(self, action):
+        next_obs, gt_reward, term, trunc, info = self.env.step(action)
+        done = term or trunc 
+
+        if term:
+            self.buffer.append(self.obs)
+
+        # reset the pwil because the atoms are exhausted
+        if len(self.buffer) > 0:
+            reward = self.compute_distance(next_obs, np.array(self.buffer))
+        else:
+            reward = 0
+        info['failstate_reward'] = reward
+
+        self.episode_return += reward
+        if done:
+            if 'episode' not in info.keys():
+                info['episode'] = {}
+            info['episode']["ep_rew_fail"] = self.episode_return
+            self.episode_return = 0
+            
+        return next_obs, gt_reward + self.weight*reward, term, trunc, info
+
+
+def make_dcm(cfg):
+    import dmc2gym
+    """Helper function to create dm_control environment"""
+    if cfg.env.name == 'dmc_ball_in_cup_catch':
+        domain_name = 'ball_in_cup'
+        task_name = 'catch'
+    elif cfg.env.name == 'dmc_point_mass_easy':
+        domain_name = 'point_mass'
+        task_name = 'easy'
+    else:
+        domain_name = cfg.env.name.split('_')[1]
+        task_name = '_'.join(cfg.env.name.split('_')[2:])
+    
+    if cfg.env.from_pixels:
+        # Set env variables for Mujoco rendering
+        os.environ["MUJOCO_GL"] = "egl"
+        os.environ["EGL_DEVICE_ID"] = os.environ["CUDA_VISIBLE_DEVICES"]
+
+        # per dreamer: https://github.com/danijar/dreamer/blob/02f0210f5991c7710826ca7881f19c64a012290c/wrappers.py#L26
+        camera_id = 2 if domain_name == 'quadruped' else 0
+
+        env = dmc2gym.make(domain_name=domain_name,
+                        task_name=task_name,
+                        seed=cfg.seed,
+                        visualize_reward=False,
+                        from_pixels=True,
+                        height=cfg.env.image_size,
+                        width=cfg.env.image_size,
+                        frame_skip=cfg.env.action_repeat,
+                        camera_id=camera_id)
+
+        print(env.observation_space.dtype)
+        # env = FrameStack(env, k=cfg.env.frame_stack)
+        env = FrameStackEager(env, k=cfg.env.frame_stack)
+        
+    else:
+        env = dmc2gym.make(domain_name=domain_name,
+                        task_name=task_name,
+                        seed=cfg.seed,
+                        visualize_reward=True)
+    env.seed(cfg.seed)
+    assert env.action_space.low.min() >= -1
+    assert env.action_space.high.max() <= 1
+
+    return env

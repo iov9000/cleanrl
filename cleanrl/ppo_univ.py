@@ -153,6 +153,9 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, env_kwargs)
         if 'Franka' in env_id:
             env = gym.make(env_id, tasks_to_complete=['microwave'], **env_kwargs)
             env = FrankaObsWrapper(env)
+        elif 'Safety' in env_id:
+            env = safety_gymnasium.make(env_id, render_mode='rgb_array')
+            env = SafetyGymWrapper(env)
         else:
             env = gym.make(env_id, **env_kwargs)
 
@@ -199,19 +202,19 @@ class Agent(nn.Module):
 
         self.discrete = discrete
         if self.discrete:
-            output_dim = int(envs.single_action_space.n)
+            output_dim = int(envs.action_space.n)
         else:
-            output_dim = np.prod(envs.single_action_space.shape)
+            output_dim = np.prod(envs.action_space.shape)
 
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size*4)),
+            layer_init(nn.Linear(np.array(envs.observation_space.shape).prod(), hidden_size*4)),
             nonlin,
             layer_init(nn.Linear(hidden_size*4, hidden_size*4)),
             nonlin,
             layer_init(nn.Linear(hidden_size*4, 1), std=1.0),
         )
         self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hidden_size)),
+            layer_init(nn.Linear(np.array(envs.observation_space.shape).prod(), hidden_size)),
             nonlin,
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nonlin,
@@ -259,6 +262,11 @@ if __name__ == "__main__":
     run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_{id_string}"
     if len(run_name) > 220:
         run_name = run_name[:220]
+
+    if 'Safety' in args.env_id:
+        import safety_gymnasium
+        from safety.utils import SafetyGymWrapper
+        
     if args.track:
         import wandb
 
@@ -318,7 +326,7 @@ if __name__ == "__main__":
         test_env = gym.wrappers.ClipAction(test_env)
 
     discrete = not isinstance(test_env.action_space, gym.spaces.Box)
-    agent = Agent(envs, discrete=discrete).to(device)
+    agent = Agent(test_env, discrete=discrete).to(device)
     if args.resume:
         agent.load_state_dict(torch.load(os.path.join(args.resume, "agent.pt") , map_location=device))
 

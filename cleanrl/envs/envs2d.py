@@ -693,7 +693,7 @@ class CMovePND(Env):
 
     def __init__(self, waypoints=[(198,198)], D=2, size=200, 
             n_obstacles=1, random_obstacles=False, hard_obstacles=False, safety_reward_coeff = 0.0, 
-            random_init=False, goal_conditioning=True, render_mode="rgb_array"):
+            random_init=False, goal_conditioning=True, fail_on_collision=False, render_mode="rgb_array"):
         super(CMovePND, self).__init__()
         
 
@@ -726,6 +726,7 @@ class CMovePND(Env):
         self.safety_reward_coeff = safety_reward_coeff
         self.agent_render_q = deque(maxlen=100)
         self.hard_obstacles = bool(hard_obstacles)
+        self.fail_on_collision = bool(fail_on_collision)
 
         self.collision_flag = False
 
@@ -794,13 +795,24 @@ class CMovePND(Env):
         curr_tgt = np.array(self.waypoints[self.curr_tgt])
         state = np.concatenate([self.agent, curr_tgt],0)
         
+        self.state = state
+
         self.needs_reset = False
         # return the observation
         return state, {}
-                            
+
+    def get_state(self):
+        return self.state, self.agent, self.curr_tgt
+
+    def set_state(self, agent, tgt):
+        self.agent = agent
+        self.curr_tgt = tgt
+        curr_tgt = np.array(self.waypoints[self.curr_tgt])
+        self.state = np.concatenate([self.agent, curr_tgt],0)
+
     def step(self, action):
         # Assert that it is a valid action 
-        assert self.action_space.contains(action), "Invalid Action"
+        #assert self.action_space.contains(action), "Invalid Action"
 
         # Decrease the time counter 
         self.time -= 1 
@@ -827,7 +839,11 @@ class CMovePND(Env):
         # l2 distance as reward
         if self.safety_reward_coeff > 0.0:
             reward = self.get_reward(self.agent, curr_tgt, 
-                                    safety_rew=self.safety_reward_coeff*safety_rew)
+                            safety_rew=self.safety_reward_coeff*safety_rew)
+            
+            if self.fail_on_collision and self.collision_flag:
+                self.term = True
+                reward -= self.safety_reward_coeff
         else:
             reward = self.get_reward(self.agent, curr_tgt)
 
@@ -846,6 +862,8 @@ class CMovePND(Env):
             state = np.concatenate([self.agent, curr_tgt], -1)
         else:
             state = self.agent
+
+        self.state = state
 
         # If out of fuel, end the episode.
         if self.time == 0:
