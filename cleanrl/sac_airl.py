@@ -375,7 +375,11 @@ if __name__ == "__main__":
         test_env = gym.make(args.env_id, render_mode='rgb_array', **env_kwargs)      
 
     if args.perturb_dynamics > 0.0:
-        test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
+        if 'box2d' in str(test_env.unwrapped.__class__):
+            test_env = Box2dTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
+        else:
+            test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
+            
     actor = Actor(test_env).to(device)
     if args.capture_video:
         #env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger = lambda x: x % opt.capture_video_interval == 0)

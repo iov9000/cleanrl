@@ -804,7 +804,7 @@ class Box2dTestWrapper(gym.Wrapper):
         # save default simulation parameters
         #print(dir(self.env.model))
         for p in params:
-            self.default_params[p] = np.array(getattr(self.env.model, p))
+            self.default_params[p] = np.array(getattr(self.env.unwrapped, p))
 
         #print(dir(self.env.model))
         #self.perturb_init(eps0)
@@ -823,10 +823,10 @@ class Box2dTestWrapper(gym.Wrapper):
         setattr(self.env.unwrapped, parameter, param_mod)
 
     def reset(self, seed=1, options=None):
-        o = self.env.reset(seed, options)[0]
+        o = self.env.reset(seed=seed, options=options)[0]
         # reset mass to default value otherwise accum.
         for k, v in self.default_params.items():
-            getattr(self.env.unwrapped, k)[:] = v
+            setattr(self.env.unwrapped, k, v)
 
         #self.perturb_init(self.eps0)
         for k, v in self.default_params.items():

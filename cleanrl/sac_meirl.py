@@ -348,7 +348,11 @@ if __name__ == "__main__":
     # get env specs
     test_env = gym.make(args.env_id)
     if args.perturb_dynamics > 0.0:
-        test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
+        if 'box2d' in str(test_env.unwrapped.__class__):
+            test_env = Box2dTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
+        else:
+            test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
+            
     disc = MEIRLDiscriminator(test_env, args)
 
     # env setup

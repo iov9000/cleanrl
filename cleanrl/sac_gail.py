@@ -382,8 +382,13 @@ if __name__ == "__main__":
         test_env = FrankaObsWrapper(test_env)
     else:
         test_env = gym.make(args.env_id, **env_kwargs) 
+        
     if args.perturb_dynamics > 0.0:
-        test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
+        if 'box2d' in str(test_env.unwrapped.__class__):
+            test_env = Box2dTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
+        else:
+            test_env = MujocoTestWrapper(test_env, eps0=0.0, epsdyn=args.perturb_dynamics, params=args.perturb_parameters)
+
     disc = GAILDiscriminator(test_env, args)
 
     # env setup
