@@ -31,10 +31,7 @@ def load_hf_demos(args, n_demos, perturb=0.0, bary_enhance=False, load_support=F
     try:
         #expert_demos['all'] = np.load(os.path.join(folder, f"demo_hf_{env_name}_{n_demos}.npy"))
         expert_demos['all'] = pickle.load(open(os.path.join(folder, fname), 'rb'))
-        expert_demos['all']['obs'] = expert_demos['all']['obs'][::subsample]
-        expert_demos['all']['acs'] = expert_demos['all']['acs'][::subsample]
-        expert_demos['all']['rew'] = expert_demos['all']['rew'][::subsample]
-        expert_demos['all']['done'] = expert_demos['all']['done'][::subsample]
+
         fn='all'
         if load_support:
             expert_demos[fn]['support_obs'] = expert_demos[fn]['support_obs'][::subsample]
@@ -46,6 +43,13 @@ def load_hf_demos(args, n_demos, perturb=0.0, bary_enhance=False, load_support=F
             expert_demos[fn]['support_acs'] = expert_demos[fn]['acs'][::subsample]
             expert_demos[fn]['support_rew'] = expert_demos[fn]['rew'][::subsample]
             expert_demos[fn]['support_done'] = expert_demos[fn]['done'][::subsample]
+
+        # overwrite with subsampled after assigning to support items
+        expert_demos['all']['obs'] = expert_demos['all']['obs'][::subsample]
+        expert_demos['all']['acs'] = expert_demos['all']['acs'][::subsample]
+        expert_demos['all']['rew'] = expert_demos['all']['rew'][::subsample]
+        expert_demos['all']['done'] = expert_demos['all']['done'][::subsample]
+
     except:
         print("Generate demos from HuggingFace Hub first")
         assert False
