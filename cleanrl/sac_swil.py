@@ -136,6 +136,8 @@ def parse_args():
     parser.add_argument("--max_swil_step", type=int, default=100000000, help="only update projections until some timestep")
     parser.add_argument("--replace_atoms", default=False, required=False, action='store_true', help="actually replace atoms with policy samples")
     parser.add_argument("--replace_atoms_ouo", default=False, required=False, action='store_true', help="remove replaced atoms (only use once)")
+    parser.add_argument("--shuffle_atom_batches", default=False, required=False, action='store_true', help="shuffle atom batches for computing reward")
+
 
     parser.add_argument('--use_curr_traj_only', default=False, required=False, 
         action='store_true', help='only used last sampled trajectory to do matching')
@@ -529,7 +531,7 @@ if __name__ == "__main__":
                 obs_ = b_obs
                 actions_ = b_acs
                 dones_ = b_dones
-            # GAIL Discriminator Update
+            # SWIL Discriminator Update
             update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, actor)
             loss_dict = disc.compute_loss(update_dict)
 
@@ -600,6 +602,9 @@ if __name__ == "__main__":
                 if global_step > args.learning_starts:
                     ts0 = time.time()
                     data = rb.sample(args.batch_size)
+                    if args.swil_rew == 'replacement_nn':
+                        data_2 = rb.sample(args.batch_size)
+
                     with torch.no_grad():
                         next_state_actions, next_state_log_pi, _ = actor.get_action(data.next_observations)
                         qf1_next_target = qf1_target(data.next_observations, next_state_actions)
@@ -683,14 +688,23 @@ if __name__ == "__main__":
                                     if args.drop_batch:
                                         break
                                     else:
-                                        # TODO: choose random indices?
                                         obs_ = data.observations[:len(d['obs'])]
                                         actions_ = data.actions[:len(d['obs'])]
                                         dones_ = data.dones[:len(d['obs'])]
+
+                                        if args.swil_rew == 'replacement_nn':
+                                            obs2_ = data_2.observations[:len(d['obs'])]
+                                            actions2_ = data_2.actions[:len(d['obs'])]
+                                            dones2_ = data_2.dones[:len(d['obs'])]
                                 else:
                                     obs_ = data.observations
                                     actions_ = data.actions
                                     dones_ = data.dones
+
+                                    if args.swil_rew == 'replacement_nn':
+                                        obs2_ = data_2.observations
+                                        actions2_ = data_2.actions
+                                        dones2_ = data_2.dones
 
                                 if use_curr_traj_only:
                                     obs_ = np.concatenate(traj['obs'])[i*args.batch_size:(i+1)*args.batch_size]
@@ -706,9 +720,14 @@ if __name__ == "__main__":
                                             actions_ = actions_[:len(d['obs'])]
                                             dones_ = dones_[:len(d['obs'])]
 
-                                # GAIL Discriminator Update
+                                # SWIL Discriminator Update
                                 update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, actor)
+
                                 loss_dict = disc.compute_loss(update_dict)
+                                
+                                if args.swil_rew == 'replacement_nn':
+                                    update_dict_2 = prepare_batch_update_irl(envs, args, d, obs2_, actions2_, dones2_, actor)
+                                    sw2_diff_loss = disc.compute_replacement_reward_loss(update_dict, update_dict_2)
 
                                 loss = loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty'] + disc.beta * loss_dict['ib_loss'] 
                                 if args.irm_coeff > 1.0:
@@ -716,6 +735,8 @@ if __name__ == "__main__":
 
                                 if args.n_proj == 1:
                                     disc.update(loss)
+                                    if args.swil_rew == 'replacement_nn':
+                                        disc.update_rew(sw2_diff_loss)
                         
                                 if global_step % args.logging_interval == 0:
                                     writer.add_scalar('irl/swil_gsw_dist', loss_dict['d_loss'], global_step)

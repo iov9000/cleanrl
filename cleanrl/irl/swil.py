@@ -11,6 +11,7 @@ import time
 import copy
 
 from collections import deque
+from sklearn.utils import shuffle
 
 from torch.nn.utils import spectral_norm, weight_norm
 from irl.utils import ResNetAIRLDisc, MiniGridCNN, AtariCNNBase, gaussian_kld
@@ -238,6 +239,10 @@ class SWILDiscriminator(nn.Module):
                 self.proj_layer = nn.Sequential(
                     linlayer(self.n_proj, 1, bias, opt.use_weight_norm, opt.use_spectral_norm), torch.nn.Tanh())
 
+            if self.opt.swil_rew == 'replacement_nn':
+                self.base_rew_replnn = copy.deepcopy(self.base)
+                self.rew_replnn = copy.deepcopy(self.reward)
+
             if self.opt.swil_ae:
                 self.ae_layers = []
                 for i in reversed(range(2, len(self.layer_dims))):
@@ -304,7 +309,7 @@ class SWILDiscriminator(nn.Module):
                 self.base.apply(layer_init)
                 self.reward.apply(layer_init)
 
-        base_out = self.base_fwd(ob, ac, nob, d)
+        base_out = self.base_fwd(self.base, ob, ac, nob, d)
 
         if self.swil_vb > 0:
             vb_out, z, mu, std = self.vb(base_out, noise=noise)
@@ -327,7 +332,7 @@ class SWILDiscriminator(nn.Module):
             #out = rew/rew.norm(-1)
             return rew, z, mu, std  # + torch.randn_like(self.reward(base_out))
 
-    def base_fwd(self, ob, ac, nob=None, d=None):
+    def base_fwd(self, base_fn, ob, ac, nob=None, d=None):
         #  match tensor sizes
         if len(ob.shape) != len(ac.shape):
             ac = torch.unsqueeze(ac, -1)
@@ -344,10 +349,10 @@ class SWILDiscriminator(nn.Module):
             input_.append(d)
 
         if (self.use_cnn_base or self.is_atari):
-            base_out = self.base(*input_)
+            base_out = base_fn(*input_)
 
         else:
-            base_out = self.base(torch.cat(input_, axis=-1))
+            base_out = base_fn(torch.cat(input_, axis=-1))
 
         return base_out
 
@@ -392,7 +397,7 @@ class SWILDiscriminator(nn.Module):
     def compute_replacement_reward(self, ob, ac, nob=None,d=None, step=None):
         with torch.no_grad(): 
             # project next state and rank it as part of previous evaluation
-            base_out = self.base_fwd(ob,ac,nob,d)
+            base_out = self.base_fwd(self.base, ob,ac,nob,d)
             if self.swil_vb > 0:
                 vb_out, z, mu, std = self.vb(base_out, noise=False)
             else:
@@ -401,7 +406,7 @@ class SWILDiscriminator(nn.Module):
             obs_t_slice = self.reward(vb_out).unsqueeze(0)
             
             rew = torch.zeros(1)
-
+            
             for p, (sorted_proj, sorted_proj_tgt) in enumerate(zip(self.pi_atoms_sorted, self.exp_atoms_sorted)):
                 #sorted_proj = self.pi_atoms_sorted
                 #sorted_proj_tgt = self.exp_atoms_sorted
@@ -562,7 +567,7 @@ class SWILDiscriminator(nn.Module):
     def swil_reward(self, ob, ac, nob=None,d=None):
         ## TODO: replacement loss here..
         if self.opt.gsw_df == 'nn':
-            base_out = self.base_fwd(ob,ac,nob,d)
+            base_out = self.base_fwd(self.base,ob,ac,nob,d)
             if self.reward_type == 'linear':
                 if self.opt.proj_layer:
                     return self.proj_layer(self.reward(base_out))
@@ -595,8 +600,50 @@ class SWILDiscriminator(nn.Module):
     def get_reward(self, ob, ac, nob=None,d=None, step=None):
         if self.opt.swil_rew == 'old_swil':
             return self.swil_reward(ob,ac,nob,d)
+        elif self.opt.swil_rew == 'replacement_nn':
+            return self.rew_replnn(self.base_fwd(self.base_rew_replnn,ob,ac,nob))
         else:
-            return self.compute_replacement_reward(ob,ac,nob,d, step)
+            return self.compute_replacement_reward(ob, ac, nob, d, step)
+
+
+    def compute_replacement_reward_loss(self, update_dict, update_dict_2):
+        obs_pi = update_dict['policy_obs']
+        acs_pi = update_dict['policy_acs']
+        nobs_pi = update_dict['policy_obs_next']
+        d_pi = update_dict['policy_dones']
+        exp_obs = update_dict['expert_obs']
+        exp_acs = update_dict['expert_acs']
+        exp_obs_next = update_dict['expert_obs_next']
+        exp_dones = update_dict['expert_dones']
+
+        obs_pi_2 = update_dict_2['policy_obs']
+        acs_pi_2 = update_dict_2['policy_acs']
+        nobs_pi_2 = update_dict_2['policy_obs_next']
+        d_pi_2 = update_dict_2['policy_dones']
+
+        # project atoms 
+        pi_slices, _, _, _ = self.proj(obs_pi, acs_pi, nobs_pi, d_pi)
+        pi_slices_2, _, _, _ = self.proj(obs_pi_2, acs_pi_2, nobs_pi_2, d_pi_2)
+
+        pred_diffs = self.get_reward(obs_pi_2, acs_pi_2, nobs_pi_2, d_pi_2)
+
+        exp_slices, _, _, _ = self.proj(obs_exp, acs_exp, nobs_exp, d_exp)
+
+        # sort slices
+        pi_slices_sorted, pi_slices_sorted_idx = torch.sort(pi_slices, dim=0, stable=True)
+        exp_slices_sorted, exp_slices_sorted_idx = torch.sort(exp_slices, dim=0, stable=True)
+
+        # sort and insert using torch.searchsorted
+        idx = torch.searchsorted(pi_slices_sorted, pi_slices_2)
+
+        # compute distances for all indices 
+        diffs = pi_slices_sorted[idx] - pi_slices_2
+        
+        # sum up loss and return it
+        l2_pred_diff_loss = torch.sum(torch.nn.functional.mse_loss(pred_diffs, diffs))
+
+        return l2_pred_diff_loss
+
 
     def get_slice(self, ob, ac, theta):
         ''' Slices samples from distribution X~P_X
@@ -665,11 +712,30 @@ class SWILDiscriminator(nn.Module):
         # sort slices
         pi_slices_sorted, pi_slices_sorted_idx = torch.sort(pi_slices, dim=0, stable=True)
         exp_slices_sorted, exp_slices_sorted_idx = torch.sort(exp_slices, dim=0, stable=True)
-        
-        self.pi_atoms_sorted.append(pi_slices_sorted)
-        self.exp_atoms_sorted.append(exp_slices_sorted)
-        self.pi_atoms_sorted_idx.append(pi_slices_sorted_idx)
-        self.exp_atoms_sorted_idx.append(exp_slices_sorted_idx)
+
+        if self.opt.shuffle_atom_batches:
+
+            if len(self.pi_atoms_sorted) == 0:
+                self.pi_atoms_sorted.append(pi_slices_sorted)
+                self.exp_atoms_sorted.append(exp_slices_sorted)
+                self.pi_atoms_sorted_idx.append(pi_slices_sorted_idx)
+                self.exp_atoms_sorted_idx.append(exp_slices_sorted_idx)
+            elif np.random.rand() > 0.5:
+                self.pi_atoms_sorted.append(pi_slices_sorted)
+                self.exp_atoms_sorted.append(exp_slices_sorted)
+                self.pi_atoms_sorted_idx.append(pi_slices_sorted_idx)
+                self.exp_atoms_sorted_idx.append(exp_slices_sorted_idx) 
+        else:
+            self.pi_atoms_sorted.append(pi_slices_sorted)
+            self.exp_atoms_sorted.append(exp_slices_sorted)
+            self.pi_atoms_sorted_idx.append(pi_slices_sorted_idx)
+            self.exp_atoms_sorted_idx.append(exp_slices_sorted_idx)            
+
+        # shuffle atom batches
+        if self.opt.shuffle_atom_batches:
+            self.pi_atoms_sorted, self.pi_atoms_sorted_idx = shuffle(self.pi_atoms_sorted, self.pi_atoms_sorted_idx, random_state = 0)
+            self.exp_atoms_sorted, self.exp_atoms_sorted_idx = shuffle(self.exp_atoms_sorted, self.exp_atoms_sorted_idx, random_state = 0)
+
 
         return torch.sqrt(torch.sum((pi_slices_sorted-exp_slices_sorted)**2))
 
@@ -831,7 +897,7 @@ class SWILDiscriminator(nn.Module):
             self.pi_atoms_sorted_idx.append(pi_slices_sorted_idx)
             self.exp_atoms_sorted_idx.append(exp_slices_sorted_idx)
             self.pi_atoms_sorted_bkp = copy.deepcopy(self.pi_atoms_sorted)
-            self.exp_atoms_sorted_bkp = copy.deepcopy(self.pi_atoms_sorted)
+            self.exp_atoms_sorted_bkp = copy.deepcopy(self.exp_atoms_sorted)
 
             #self.pi_atoms_sorted_ = copy.deepcopy(self.pi_atoms_sorted)
 
@@ -867,7 +933,7 @@ class SWILDiscriminator(nn.Module):
         output_dict = {}
         if self.opt.swil_ae:
             # meaningful reconstruction: action prediction?
-            base_out = self.base_fwd(exp_obs,exp_acs)
+            base_out = self.base_fwd(self.base, exp_obs,exp_acs)
             recon = self.recon_net(self.reward(base_out))
             if self.use_actions:
                 if len(exp_acs.shape) == 1:
@@ -913,6 +979,12 @@ class SWILDiscriminator(nn.Module):
             loss.backward()
         self.d_optimizer.step()
         self.d_scheduler.step()
+
+    def update_rew(self, loss):
+        self.r_optimizer.zero_grad()
+        loss.backward()
+        self.r_optimizer.step()
+        self.r_scheduler.step()
 
 
 class FlowModel(nn.Module):
@@ -1010,21 +1082,21 @@ class FlowModel(nn.Module):
 
     def forward(self, ob, ac=None, nob=None, d=None, lprobs=None):
         # forward the nn models
-        base_out = self.base_fwd(ob, ac, nob, d)
+        base_out = self.base_fwd(self.base, ob, ac, nob, d)
         grads = self.model(base_out)
 
         # get random projections based on reward
         return grads
 
-    def base_fwd(self, ob, ac=None, nob=None, d=None):
+    def base_fwd(self, base_fn, ob, ac=None, nob=None, d=None):
         if self.use_actions and (self.use_cnn_base or self.is_atari):
-            base_out = self.base(ob, ac)
+            base_out = base_fn(ob, ac)
         elif self.use_actions and not (self.use_cnn_base or self.is_atari):
             if len(ob.shape) != len(ac.shape):
                 ac = torch.unsqueeze(ac, -1)
-            base_out = self.base(torch.cat([ob, ac], axis=-1))
+            base_out = base_fn(torch.cat([ob, ac], axis=-1))
         else:
-            base_out = self.base(ob)
+            base_out = base_fn(ob)
 
         return base_out
 
@@ -1034,7 +1106,7 @@ class FlowModel(nn.Module):
             self.reward.reset_parameters()
 
     def get_reward(self, ob, ac, nob=None, d=None):
-        base_out = self.base_fwd(ob, ac, nob, d)
+        base_out = self.base_fwd(self.base, ob, ac, nob, d)
         grads = self.model(base_out)
 
         d_ob = nob-ob
