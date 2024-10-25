@@ -324,6 +324,46 @@ def get_index(pos_seq_dict, index):
 
     return d
 
+def _get_obs(model, data, 
+            include_cinert=False, 
+            include_cvel=False, 
+            include_qfrc_actuator=False,
+            include_cfrc_ext=False):
+    position = data.qpos.flatten()
+    velocity = data.qvel.flatten()
+
+    if include_cinert:
+        com_inertia = data.cinert[1:].flatten()
+    else:
+        com_inertia = np.array([])
+    if include_cvel:
+        com_velocity = data.cvel[1:].flatten()
+    else:
+        com_velocity = np.array([])
+
+    if include_qfrc_actuator:
+        actuator_forces = data.qfrc_actuator[6:].flatten()
+    else:
+        actuator_forces = np.array([])
+    if include_cfrc_ext:
+        external_contact_forces = data.cfrc_ext[1:].flatten()
+    else:
+        external_contact_forces = np.array([])
+
+    #if self._exclude_current_positions_from_observation:
+    #    position = position[2:]
+
+    return np.concatenate(
+        (
+            position,
+            velocity,
+            com_inertia,
+            com_velocity,
+            actuator_forces,
+            external_contact_forces,
+        )
+    )
+
 
 def parse_args():
     # fmt: off
@@ -370,6 +410,7 @@ if __name__ == "__main__":
 
     # TODO: loop over position_seq
     frames = []
+    obs = []
     for i in tqdm(range(len(poses))):
     #for i in tqdm(range(100)):
 
@@ -388,11 +429,15 @@ if __name__ == "__main__":
         viewer.cam.elevation=-10
         viewer.cam.lookat =np.array([ 0.0 , 0.0 , 1.5 ])
         #viewer.render()
+        ob = _get_obs(model, data)
         img = viewer.read_pixels(camid=-1)
         #frames.append(np.transpose(img, (0,2,1)))
         frames.append(img)
+        obs.append(ob)
         viewer.close()
     
+    np.save('obs', np.stack(obs))
+
     import cv2
     out = cv2.VideoWriter("output.mp4", cv2.VideoWriter_fourcc(*'mp4v'), 30, (1200, 800))
     for frame in frames:
@@ -400,6 +445,9 @@ if __name__ == "__main__":
             frame = (frame * 255).astype(np.uint8)
         out.write(frame) # frame is a numpy.ndarray with shape (1280, 720, 3)
     out.release()
+
+
+
     #matplotlib.image.imsave('test_.png', img)
 
     # # create openGL context
