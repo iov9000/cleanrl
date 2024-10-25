@@ -140,15 +140,11 @@ class SWILDiscriminator(nn.Module):
         self.use_actions = opt.use_actions
         self.use_dones = opt.use_dones
         self.use_next_obs = opt.use_next_obs
-        self.irm_coeff = opt.irm_coeff
-        self.l2_coeff = opt.l2_coeff
-        self.lip_coeff = opt.lip_coeff
         self.use_cnn_base = opt.use_cnn_base
         use_cnn_base = self.use_cnn_base
         self.bias = opt.use_disc_bias
         bias = self.bias
         self.n_proj = opt.n_proj
-        self.l2_coeff = opt.l2_coeff
         self.reward_type = opt.swil_reward_type
         self.is_atari = 'atari' in self.opt.exp_name
         self.swil_vb = opt.swil_vb
@@ -201,7 +197,7 @@ class SWILDiscriminator(nn.Module):
             elif self.is_atari:
                 self.base = AtariCNNBase(opt, env, self.use_actions)
             elif opt.linear_proj:
-                self.base = linlayer(self.layer_dims[0], self.n_proj, bias, opt.use_weight_norm, opt.use_spectral_norm)
+                self.base = linlayer(self.layer_dims[0], self.opt.n_proj, bias, opt.use_weight_norm, opt.use_spectral_norm)
             else:
                 #self.base = nn.Sequential(torch.nn.Linear(self.layer_dims[0],
                 #                                          self.layer_dims[1], bias), nonlin)
@@ -209,7 +205,7 @@ class SWILDiscriminator(nn.Module):
                     self.layer_dims[0], self.layer_dims[1], bias, opt.use_weight_norm, opt.use_spectral_norm), nonlin)
 
             if self.is_atari:
-                self.reward = nn.Linear(512,self.n_proj)
+                self.reward = nn.Linear(512,self.opt.n_proj)
             elif opt.linear_proj:
                 self.reward = nn.Identity()
             else:
@@ -226,7 +222,7 @@ class SWILDiscriminator(nn.Module):
                     #                                     out_features=self.n_proj,
                     #                                     bias=bias)]
                     self.reward_layers += [
-                        linlayer(self.layer_dims[-1], self.n_proj, bias, opt.use_ll_weight_norm, opt.use_spectral_norm)]
+                        linlayer(self.layer_dims[-1], self.opt.n_proj, bias, opt.use_ll_weight_norm, opt.use_spectral_norm)]
                         #linlayer(self.layer_dims[-1], self.n_proj, bias, opt.use_ll_weight_norm, opt.use_spectral_norm), nn.Sigmoid()]
                     self.reward = nn.Sequential(*self.reward_layers)
                 else:
@@ -237,7 +233,7 @@ class SWILDiscriminator(nn.Module):
                 #                                         out_features=1,
                 #                                         bias=bias), torch.nn.Tanh())
                 self.proj_layer = nn.Sequential(
-                    linlayer(self.n_proj, 1, bias, opt.use_weight_norm, opt.use_spectral_norm), torch.nn.Tanh())
+                    linlayer(self.opt.n_proj, 1, bias, opt.use_weight_norm, opt.use_spectral_norm), torch.nn.Tanh())
 
             if self.opt.swil_rew == 'replacement_nn':
                 self.base_rew_replnn = copy.deepcopy(self.base)
@@ -246,7 +242,7 @@ class SWILDiscriminator(nn.Module):
             if self.opt.swil_ae:
                 self.ae_layers = []
                 for i in reversed(range(2, len(self.layer_dims))):
-                    self.ae_layers += [torch.nn.Linear(in_features=self.n_proj,
+                    self.ae_layers += [torch.nn.Linear(in_features=self.opt.n_proj,
                                                             out_features=self.layer_dims[i],
                                                             bias=bias), nonlin]
                 self.ae_layers += [torch.nn.Linear(in_features=self.layer_dims[-1],
@@ -260,7 +256,7 @@ class SWILDiscriminator(nn.Module):
                 if self.opt.proj_layer:
                     self.proj_layer.cuda()
             
-            self.d_optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.l2_coeff)#, eps=1e-5)
+            self.d_optimizer = Adam(self.parameters(), lr=self.lr, weight_decay=self.opt.l2_coeff)#, eps=1e-5)
             self.d_scheduler = ExponentialLR(self.d_optimizer, gamma=opt.scheduler_gamma)
         else:
             self.gsw_module = GSW('poly', nofprojections=opt.n_proj, degree=opt.poly_degree)
@@ -999,15 +995,10 @@ class FlowModel(nn.Module):
         self.use_actions = opt.use_actions
         self.use_dones = opt.use_dones
         self.use_next_obs = opt.use_next_obs
-        self.irm_coeff = opt.irm_coeff
-        self.l2_coeff = opt.l2_coeff
-        self.lip_coeff = opt.lip_coeff
         self.use_cnn_base = opt.use_cnn_base
         use_cnn_base = self.use_cnn_base
         self.bias = opt.use_disc_bias
         bias = self.bias
-        self.n_proj = opt.n_proj
-        self.l2_coeff = opt.l2_coeff
         self.model_type = opt.swil_reward_type
         self.is_atari = 'atari' in self.opt.exp_name
 
@@ -1075,7 +1066,7 @@ class FlowModel(nn.Module):
                 self.proj_layer.cuda()
 
         self.d_optimizer = Adam(
-            self.parameters(), lr=self.lr, weight_decay=self.l2_coeff)  # , eps=1e-5)
+            self.parameters(), lr=self.lr, weight_decay=self.opt.l2_coeff)  # , eps=1e-5)
         self.d_scheduler = ExponentialLR(
             self.d_optimizer, gamma=opt.scheduler_gamma)
 
@@ -1195,7 +1186,6 @@ class SwilFlowReward(gym.Wrapper):
         self.use_actions = opt.use_actions
         self.gradient_model = FlowModel(env, opt)
         self.obs = None
-        self.n_proj = opt.n_proj
         self.sw_poly_deg = opt.sw_poly_deg
         self.radon_df_type = opt.radon_df_type
         # calculate reward at the end of trajecotiry
@@ -1205,7 +1195,7 @@ class SwilFlowReward(gym.Wrapper):
         #loss = ot.sliced_wasserstein_distance(x1_torch, x2_torch, n_projections=100, seed=gen)
         policy_atoms.requires_grad_(True)
         sw_dist, _ , Xsorted , Ysorted = gsw(policy_atoms, expert_atoms, ftype=self.radon_df_type,
-                   n_proj=self.n_proj, degree=self.sw_poly_deg)
+                   n_proj=self.opt.n_proj, degree=self.sw_poly_deg)
         sw_dist.backward()
 
         return sw_dist, policy_atoms.grad, Xsorted, Ysorted
@@ -1255,7 +1245,6 @@ class SwilIRDiffReward(gym.Wrapper):
         self.use_actions = opt.use_actions
         self.obs = None
         self.opt = opt
-        self.n_proj = opt.n_proj
         self.sw_poly_deg = opt.sw_poly_deg
         self.radon_df_type = opt.radon_df_type
         # TODO: makes GSW module shared across vec envs?
@@ -1265,7 +1254,7 @@ class SwilIRDiffReward(gym.Wrapper):
 
     def compute_gsw(self, policy_atoms, expert_atoms):
         dist, theta, sorted_proj_pi, sorted_proj_exp = self.gsw.gsw(policy_atoms, expert_atoms, ftype=self.radon_df_type,
-                                          n_proj=self.n_proj, degree=self.sw_poly_deg)
+                                          n_proj=self.opt.n_proj, degree=self.sw_poly_deg)
         self.sorted_proj_pi = sorted_proj_pi
         self.sorted_proj_exp = sorted_proj_exp
         self.theta = theta
