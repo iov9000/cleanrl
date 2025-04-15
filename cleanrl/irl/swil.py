@@ -268,7 +268,8 @@ class SWILDiscriminator(nn.Module):
                             bias,
                             opt.use_ll_weight_norm,
                             opt.use_spectral_norm,
-                        )
+                        ),
+                        nonlin,
                     ]
                     # linlayer(self.layer_dims[-1], self.n_proj, bias, opt.use_ll_weight_norm, opt.use_spectral_norm), nn.Sigmoid()]
                     self.reward = nn.Sequential(*self.reward_layers)

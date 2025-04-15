@@ -274,6 +274,39 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, disc, demos, env_k
     return thunk
 
 
+class RecordEpisodeStatistics(gym.Wrapper):
+    def __init__(self, env, deque_size=100):
+        super().__init__(env)
+        self.num_envs = getattr(env, "num_envs", 1)
+        self.episode_returns = None
+        self.episode_lengths = None
+
+    def reset(self, **kwargs):
+        observations = super().reset(**kwargs)
+        self.episode_returns = np.zeros(self.num_envs, dtype=np.float32)
+        self.episode_lengths = np.zeros(self.num_envs, dtype=np.int32)
+        self.lives = np.zeros(self.num_envs, dtype=np.int32)
+        self.returned_episode_returns = np.zeros(self.num_envs, dtype=np.float32)
+        self.returned_episode_lengths = np.zeros(self.num_envs, dtype=np.int32)
+        return observations
+
+    def step(self, action):
+        observations, rewards, dones, infos = super().step(action)
+        self.episode_returns += infos["reward"]
+        self.episode_lengths += 1
+        self.returned_episode_returns[:] = self.episode_returns
+        self.returned_episode_lengths[:] = self.episode_lengths
+        self.episode_returns *= 1 - infos["terminated"]
+        self.episode_lengths *= 1 - infos["terminated"]
+        infos["r"] = self.returned_episode_returns
+        infos["l"] = self.returned_episode_lengths
+        return (
+            observations,
+            rewards,
+            dones,
+            infos,
+        )
+
 class GumbelSoftmax(torch.distributions.RelaxedOneHotCategorical):
     '''
     A differentiable Categorical distribution using reparametrization trick with Gumbel-Softmax
@@ -455,6 +488,34 @@ if __name__ == "__main__":
     envs = gym.vector.SyncVectorEnv([make_env(args, args.env_id, args.seed, 0, args.capture_video, run_name, disc, demos, env_kwargs)])
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
+    # use envpool for vectorized envs
+    # import envpool
+    # envs = envpool.make(
+    #     args.env_id,
+    #     env_type="gym",
+    #     num_envs=args.num_envs,
+    #     episodic_life=True,
+    #     reward_clip=True,
+    #     seed=args.seed,
+    # )
+    # envs.num_envs = args.num_envs
+    # envs.single_action_space = envs.action_space
+    # envs.single_observation_space = envs.observation_space
+    # env = RecordEpisodeStatistics(envs)
+    # if args.clip_action and isinstance(env.action_space, gym.spaces.Box):
+    #     env = gym.wrappers.ClipAction(env)
+    # if args.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
+    #     env = gym.wrappers.NormalizeObservation(env)
+    #     env = gym.wrappers.TransformObservation(
+    #         env, lambda obs: np.clip(obs, -10, 10))
+    # env = SwilReward(env, args, disc)    
+    # if args.normalize_irl_rewards and isinstance(env.action_space, gym.spaces.Box):
+    #     env = gym.wrappers.NormalizeReward(env, gamma=args.gamma)
+    #     env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))    
+    # #env.seed(seed)
+    # env.action_space.seed(args.seed)
+    # env.observation_space.seed(args.seed)
+    
     max_action = float(envs.single_action_space.high[0])
 
     actor = Actor(envs).to(device)
