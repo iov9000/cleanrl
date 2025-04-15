@@ -11,7 +11,8 @@ from tqdm import tqdm
 import gymnasium as gym
 
 import numpy as np
-#import pybullet_envs  # noqa
+
+# import pybullet_envs  # noqa
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -23,14 +24,24 @@ from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
 from irl.swil import SwilReward, SWILDiscriminator
-from irl.utils import load_hf_demos, load_hf_demos_name, prepare_batch_update_irl, enhance_demos_with_barycenters,\
-                    demos_gen_dict, MujocoTestWrapper, save_traj_dict, evaluate_model, FrankaObsWrapper
+from irl.utils import (
+    load_hf_demos,
+    load_hf_demos_name,
+    prepare_batch_update_irl,
+    enhance_demos_with_barycenters,
+    demos_gen_dict,
+    MujocoTestWrapper,
+    save_traj_dict,
+    evaluate_model,
+    FrankaObsWrapper,
+)
 
 gym.envs.register(
-     id='CMovePND-v0',
-     entry_point='envs.envs2d:CMovePND',
-     max_episode_steps=1000,
+    id="CMovePND-v0",
+    entry_point="envs.envs2d:CMovePND",
+    max_episode_steps=1000,
 )
+
 
 def parse_args():
     # fmt: off
@@ -162,7 +173,7 @@ def parse_args():
         action='store_true', help='enhance demos using W2 barycenters')
     parser.add_argument("--diverse_demos", type=str, default=None,
         help="diverse demos for generalization experiments")
-    
+
     parser.add_argument('--use_actions', default=True, required=False, 
         action='store_false', help='use actions in discriminator')
     parser.add_argument('--use_dones', default=False, required=False, 
@@ -230,15 +241,17 @@ def parse_args():
 
 def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc, env_kwargs):
     def thunk():
-        if 'Adroit' in env_id:
-            env = gym.make(env_id, max_episode_steps=500, render_mode='rgb_array')
-            env.set_env_state(demos['all']['init_state_dict'][0])
-        elif 'Franka' in env_id:
-            env = gym.make(env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+        if "Adroit" in env_id:
+            env = gym.make(env_id, max_episode_steps=500, render_mode="rgb_array")
+            env.set_env_state(demos["all"]["init_state_dict"][0])
+        elif "Franka" in env_id:
+            env = gym.make(
+                env_id, tasks_to_complete=["microwave", "kettle", "light switch"]
+            )
             env = FrankaObsWrapper(env)
         else:
-            env = gym.make(env_id, render_mode='rgb_array', **env_kwargs)
-        
+            env = gym.make(env_id, render_mode="rgb_array", **env_kwargs)
+
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if opt.time_aware:
             env = gym.wrappers.TimeAwareObservation(env)
@@ -249,12 +262,16 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc, env_k
             env = gym.wrappers.ClipAction(env)
         if opt.normalize_obs and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeObservation(env)
-            env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+            env = gym.wrappers.TransformObservation(
+                env, lambda obs: np.clip(obs, -10, 10)
+            )
         env = SwilReward(env, opt, disc)
         if opt.normalize_irl_rewards and isinstance(env.action_space, gym.spaces.Box):
             env = gym.wrappers.NormalizeReward(env, gamma=gamma)
-            env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-        #env.seed(seed)
+            env = gym.wrappers.TransformReward(
+                env, lambda reward: np.clip(reward, -10, 10)
+            )
+        # env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -263,27 +280,29 @@ def make_env(opt, env_id, seed, idx, capture_video, run_name, gamma, disc, env_k
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-#def layer_init(layer, std=0.1, bias_const=0.0):
+    # def layer_init(layer, std=0.1, bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
+
 LOG_STD_MAX = 2
 LOG_STD_MIN = -5
 
+
 class Agent(nn.Module):
-    def __init__(self, envs, hidden_size=64, nonlin='tanh', discrete=False):        
+    def __init__(self, envs, hidden_size=64, nonlin="tanh", discrete=False):
         super().__init__()
 
-        if nonlin == 'relu':
+        if nonlin == "relu":
             nonlin = nn.ReLU()
-        elif nonlin == 'prelu':
+        elif nonlin == "prelu":
             nonlin = nn.PReLU()
         else:
             nonlin = nn.Tanh()
 
         if isinstance(envs.observation_space, gym.spaces.Dict):
-            ob_shape = envs.observation_space['observation'].shape
+            ob_shape = envs.observation_space["observation"].shape
         else:
             ob_shape = envs.single_observation_space.shape
 
@@ -308,7 +327,7 @@ class Agent(nn.Module):
             layer_init(nn.Linear(hidden_size, output_dim), std=0.01),
         )
         if not self.discrete:
-            self.actor_logstd = nn.Parameter(torch.zeros(1,output_dim))
+            self.actor_logstd = nn.Parameter(torch.zeros(1, output_dim))
 
     def get_value(self, x):
         return self.critic(x)
@@ -323,9 +342,19 @@ class Agent(nn.Module):
             action = probs.sample()
 
         if eval:
-            return action_mean, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+            return (
+                action_mean,
+                probs.log_prob(action).sum(1),
+                probs.entropy().sum(1),
+                self.critic(x),
+            )
         else:
-            return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+            return (
+                action,
+                probs.log_prob(action).sum(1),
+                probs.entropy().sum(1),
+                self.critic(x),
+            )
 
     def get_action_and_value_d(self, x, action=None, eval=False):
         logits = self.actor_mean(x)
@@ -341,19 +370,29 @@ class Agent(nn.Module):
         else:
             return self.get_action_and_value_c(x, action, eval)
 
+
 if __name__ == "__main__":
     args, non_default, cli = parse_args()
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-    ua = 'ua' if args.use_actions else ''
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    ua = "ua" if args.use_actions else ""
     # create output folder with non default arguments in the name
-    id_string = str(non_default).replace(' ','').replace(':','').replace('Namespace','').replace('{','').replace('}','').replace("'","_").replace(",","_")
-    #run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
+    id_string = (
+        str(non_default)
+        .replace(" ", "")
+        .replace(":", "")
+        .replace("Namespace", "")
+        .replace("{", "")
+        .replace("}", "")
+        .replace("'", "_")
+        .replace(",", "_")
+    )
+    # run_name = f"{ts}_{args.env_id}__{args.exp_name}_seed_{args.seed}_irm{args.irm_coeff}_lip{args.lip_coeff}_{ua}_{id_string}"
     run_name = f"{ts}_{cli}"
-    run_name = f"{ts}_{cli}".replace('/','_')
+    run_name = f"{ts}_{cli}".replace("/", "_")
 
     if len(run_name) > 220:
         run_name = run_name[:220]
-        
+
     if args.track:
         import wandb
 
@@ -370,10 +409,12 @@ if __name__ == "__main__":
     writer = SummaryWriter(f"runs/{run_name}")
     writer.add_text(
         "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+        "|param|value|\n|-|-|\n%s"
+        % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
-    import pickle 
-    pickle.dump(vars(args),open(f"runs/{run_name}/hparams.pkl",'wb'))
+    import pickle
+
+    pickle.dump(vars(args), open(f"runs/{run_name}/hparams.pkl", "wb"))
 
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
@@ -393,12 +434,16 @@ if __name__ == "__main__":
         env_kwargs[comp] = args.env_kwargs_values[i]
 
     if args.diverse_demos is not None:
-        demo_list = [f for f in os.listdir(args.demo_dir) if args.diverse_demos in f and args.env_id in f]
+        demo_list = [
+            f
+            for f in os.listdir(args.demo_dir)
+            if args.diverse_demos in f and args.env_id in f
+        ]
         print("-> Training on union of demos:", demo_list)
         demos = load_hf_demos_name(args, demo_list)
     else:
-        if args.env_id == 'Lap-v0':
-            demos = load_lap_demos('demos/davos_data', args.n_demos, obs_shape=3)
+        if args.env_id == "Lap-v0":
+            demos = load_lap_demos("demos/davos_data", args.n_demos, obs_shape=3)
         else:
             demos = load_hf_demos(args, args.n_demos)
 
@@ -406,19 +451,23 @@ if __name__ == "__main__":
         print("Enhancing demos by computing Wasserstein barycenters")
         demos = enhance_demos_with_barycenters(demos)
 
-    # get env specs
-    if 'Adroit' in args.env_id:
+    # get env specs
+    if "Adroit" in args.env_id:
         test_env = gym.make(args.env_id, max_episode_steps=500)
-        test_env.set_env_state(demos['all']['init_state_dict'][0])
-    elif 'Franka' in args.env_id:
-        test_env = gym.make(args.env_id, tasks_to_complete=['microwave', 'kettle', 'light switch'])
+        test_env.set_env_state(demos["all"]["init_state_dict"][0])
+    elif "Franka" in args.env_id:
+        test_env = gym.make(
+            args.env_id, tasks_to_complete=["microwave", "kettle", "light switch"]
+        )
         test_env = FrankaObsWrapper(test_env)
     else:
-        test_env = gym.make(args.env_id, **env_kwargs)        
+        test_env = gym.make(args.env_id, **env_kwargs)
 
     if args.normalize_obs and isinstance(test_env.action_space, gym.spaces.Box):
         test_env = gym.wrappers.NormalizeObservation(test_env)
-        test_env = gym.wrappers.TransformObservation(test_env, lambda obs: np.clip(obs, -10, 10))
+        test_env = gym.wrappers.TransformObservation(
+            test_env, lambda obs: np.clip(obs, -10, 10)
+        )
     if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
         test_env = gym.wrappers.ClipAction(test_env)
 
@@ -429,23 +478,44 @@ if __name__ == "__main__":
     print(">>>>>> Discriminator structure: ", disc.base, disc.reward)
 
     if args.load_disc:
-        disc.load_state_dict(torch.load(os.path.join(args.load_disc, "disc.pt") , map_location=device))
+        disc.load_state_dict(
+            torch.load(os.path.join(args.load_disc, "disc.pt"), map_location=device)
+        )
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args, args.env_id, args.seed + i, i, args.capture_video, run_name, args.gamma, disc, env_kwargs) for i in range(args.num_envs)]
+        [
+            make_env(
+                args,
+                args.env_id,
+                args.seed + i,
+                i,
+                args.capture_video,
+                run_name,
+                args.gamma,
+                disc,
+                env_kwargs,
+            )
+            for i in range(args.num_envs)
+        ]
     )
-    #assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
+    # assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     agent = Agent(envs, args.agent_size, args.agent_nonlin, discrete).to(device)
     if args.resume:
-        agent.load_state_dict(torch.load(os.path.join(args.resume, "agent.pt") , map_location=device))
+        agent.load_state_dict(
+            torch.load(os.path.join(args.resume, "agent.pt"), map_location=device)
+        )
 
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
-    obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
-    actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
+    obs = torch.zeros(
+        (args.num_steps, args.num_envs) + envs.single_observation_space.shape
+    ).to(device)
+    actions = torch.zeros(
+        (args.num_steps, args.num_envs) + envs.single_action_space.shape
+    ).to(device)
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
@@ -458,7 +528,7 @@ if __name__ == "__main__":
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
 
-    init = True # flag for IRL discriminator pretraining
+    init = True  # flag for IRL discriminator pretraining
     cnt_on_policy_updates = 0
     total_swil_updates = 0
     sw_dists = []
@@ -484,25 +554,38 @@ if __name__ == "__main__":
 
                 # TRY NOT TO MODIFY: execute the game and log data.
                 next_obs, reward, term, trunc, info = envs.step(action.cpu().numpy())
-                done = np.logical_or(term, trunc) # don't make the distinction here
+                done = np.logical_or(term, trunc)  # don't make the distinction here
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
-                next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
+                next_obs, next_done = (
+                    torch.Tensor(next_obs).to(device),
+                    torch.Tensor(done).to(device),
+                )
 
-                if not isinstance(info,list):
+                if not isinstance(info, list):
                     info = [info]
 
                 for item in info:
-
                     if "final_info" in item.keys():
                         if args.verbose:
-                            print(f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}")
+                            print(
+                                f"global_step={global_step}, episodic_return={item['final_info'][0]['episode']['r']}"
+                            )
                         if global_step % 1 == 0:
                             writer.add_scalar(
-                                "charts/episodic_return", item["final_info"][0]['episode']["r"], global_step)
+                                "charts/episodic_return",
+                                item["final_info"][0]["episode"]["r"],
+                                global_step,
+                            )
                             writer.add_scalar(
-                                "charts/episodic_return_irl", item["final_info"][0]['episode']["ep_rew_irl"], global_step)
+                                "charts/episodic_return_irl",
+                                item["final_info"][0]["episode"]["ep_rew_irl"],
+                                global_step,
+                            )
                             writer.add_scalar(
-                                "charts/episodic_length", item["final_info"][0]['episode']["l"], global_step)
+                                "charts/episodic_length",
+                                item["final_info"][0]["episode"]["l"],
+                                global_step,
+                            )
                         break
 
             # bootstrap value if not done
@@ -517,8 +600,15 @@ if __name__ == "__main__":
                     else:
                         nextnonterminal = 1.0 - dones[t + 1]
                         nextvalues = values[t + 1]
-                    delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
-                    advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
+                    delta = (
+                        rewards[t]
+                        + args.gamma * nextvalues * nextnonterminal
+                        - values[t]
+                    )
+                    advantages[t] = lastgaelam = (
+                        delta
+                        + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
+                    )
                 returns = advantages + values
 
             # flatten the batch
@@ -538,7 +628,9 @@ if __name__ == "__main__":
                     end = start + args.minibatch_size
                     mb_inds = b_inds[start:end]
 
-                    _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
+                    _, newlogprob, entropy, newvalue = agent.get_action_and_value(
+                        b_obs[mb_inds], b_actions[mb_inds]
+                    )
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()
 
@@ -546,15 +638,21 @@ if __name__ == "__main__":
                         # calculate approx_kl http://joschu.net/blog/kl-approx.html
                         old_approx_kl = (-logratio).mean()
                         approx_kl = ((ratio - 1) - logratio).mean()
-                        clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
+                        clipfracs += [
+                            ((ratio - 1.0).abs() > args.clip_coef).float().mean().item()
+                        ]
 
                     mb_advantages = b_advantages[mb_inds]
                     if args.norm_adv:
-                        mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+                        mb_advantages = (mb_advantages - mb_advantages.mean()) / (
+                            mb_advantages.std() + 1e-8
+                        )
 
                     # Policy loss
                     pg_loss1 = -mb_advantages * ratio
-                    pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
+                    pg_loss2 = -mb_advantages * torch.clamp(
+                        ratio, 1 - args.clip_coef, 1 + args.clip_coef
+                    )
                     pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
                     # Value loss
@@ -573,7 +671,9 @@ if __name__ == "__main__":
                         v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
                     entropy_loss = entropy.mean()
-                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                    loss = (
+                        pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                    )
 
                     optimizer.zero_grad()
                     loss.backward()
@@ -586,7 +686,9 @@ if __name__ == "__main__":
 
             y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
             var_y = np.var(y_true)
-            explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
+            explained_var = (
+                np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
+            )
 
             # Optimize the discriminator
             if init:
@@ -595,75 +697,98 @@ if __name__ == "__main__":
                 n_irl_epochs = args.irl_epochs
             init = False
 
-            # SWIL updates
-            #print(cnt_on_policy_updates, args.swil_period)
-            #print(">>>>>>>> MOD ", cnt_on_policy_updates%args.swil_period)
+            # SWIL updates
+            # print(cnt_on_policy_updates, args.swil_period)
+            # print(">>>>>>>> MOD ", cnt_on_policy_updates%args.swil_period)
             if cnt_on_policy_updates % args.swil_period == 0:
-                #print(update % int(np.ceil(1/(n_irl_epochs+1))))
-                if update % int(np.ceil(1/(n_irl_epochs+1))) == 0:
-                    k = int(n_irl_epochs) if n_irl_epochs >=0 else 1
-                    total_swil_updates+=1
-                    #print(">>>>>>>> SWIL update")
-                    #print(len(demos['all']['obs']), obs.shape)
+                # print(update % int(np.ceil(1/(n_irl_epochs+1))))
+                if update % int(np.ceil(1 / (n_irl_epochs + 1))) == 0:
+                    k = int(n_irl_epochs) if n_irl_epochs >= 0 else 1
+                    total_swil_updates += 1
+                    # print(">>>>>>>> SWIL update")
+                    # print(len(demos['all']['obs']), obs.shape)
 
-                    #np.save("515_init_rho.npy", obs)
+                    # np.save("515_init_rho.npy", obs)
                     if args.load_init_rho:
                         obs = torch.tensor(np.load("515_init_rho.npy"))
 
-                    for epoch in range(k):            
-                        # GAIL Discriminator Update 
-                        gen_demos = demos_gen_dict(demos['all'], args.batch_size, shuffle=args.shuffle_irl_batches)
+                    for epoch in range(k):
+                        # GAIL Discriminator Update
+                        gen_demos = demos_gen_dict(
+                            demos["all"],
+                            args.batch_size,
+                            shuffle=args.shuffle_irl_batches,
+                        )
                         for d in gen_demos:
-                            #print(len(d['obs']), obs.shape, args.batch_size)
-                            if len(d['obs']) < args.batch_size:
-                                obs_ = obs[:len(d['obs'])]
-                                actions_ = actions[:len(d['obs'])]
-                                dones_ = dones[:len(d['obs'])]
+                            # print(len(d['obs']), obs.shape, args.batch_size)
+                            if len(d["obs"]) < args.batch_size:
+                                obs_ = obs[: len(d["obs"])]
+                                actions_ = actions[: len(d["obs"])]
+                                dones_ = dones[: len(d["obs"])]
                             else:
                                 obs_ = obs
                                 actions_ = actions
                                 dones_ = dones
 
                             if args.single_state_pi0:
-                                obs_ref = torch.tile(obs_[0], (d['obs'].shape[0],1))
+                                obs_ref = torch.tile(obs_[0], (d["obs"].shape[0], 1))
                             else:
                                 obs_ref = obs_
 
-                            update_dict = prepare_batch_update_irl(envs, args, d, obs_, actions_, dones_, agent)
+                            update_dict = prepare_batch_update_irl(
+                                envs, args, d, obs_, actions_, dones_, agent
+                            )
 
                             loss_dict = disc.compute_loss(update_dict)
 
-                            loss = args.gsw_coeff*loss_dict['d_loss'] + args.irm_coeff * loss_dict['grad_penalty']\
-                                + args.lip_coeff * loss_dict['lip_penalty'] + args.recon_coeff*loss_dict['recon_loss']
+                            loss = (
+                                args.gsw_coeff * loss_dict["d_loss"]
+                                + args.irm_coeff * loss_dict["grad_penalty"]
+                                + args.lip_coeff * loss_dict["lip_penalty"]
+                                + args.recon_coeff * loss_dict["recon_loss"]
+                            )
                             if args.irm_coeff > 1.0:
                                 loss /= args.irm_coeff
-                            
+
                             if args.irl_epochs > 0:
                                 disc.update(loss)
-                        
+
                             if global_step % args.logging_interval == 0:
-                                writer.add_scalar('irl/swil_d_loss', loss_dict['d_loss'], global_step)
-                                writer.add_scalar('irl/swil_ae_loss', loss_dict['recon_loss'], global_step)
+                                writer.add_scalar(
+                                    "irl/swil_d_loss", loss_dict["d_loss"], global_step
+                                )
+                                writer.add_scalar(
+                                    "irl/swil_ae_loss",
+                                    loss_dict["recon_loss"],
+                                    global_step,
+                                )
 
-                                #trajectory_weights = 1./len(update_dict['policy_obs']) * np.ones(len(update_dict['policy_obs']))
-                                #expert_weights = 1./len(update_dict['expert_obs']) * np.ones(len(update_dict['expert_obs']))
+                                # trajectory_weights = 1./len(update_dict['policy_obs']) * np.ones(len(update_dict['policy_obs']))
+                                # expert_weights = 1./len(update_dict['expert_obs']) * np.ones(len(update_dict['expert_obs']))
 
-                                #cost_matrix = ot.dist(
+                                # cost_matrix = ot.dist(
                                 #    update_dict['policy_obs'], update_dict['expert_obs'], metric='euclidean')
 
-                                #w2_dist = ot.emd2(
+                                # w2_dist = ot.emd2(
                                 #    trajectory_weights, expert_weights, cost_matrix.numpy())
-                                #writer.add_scalar('irl/ref_w_dist', w2_dist, global_step)
+                                # writer.add_scalar('irl/ref_w_dist', w2_dist, global_step)
 
-                                #pyfor i,p in enumerate(disc.parameters()):
+                                # pyfor i,p in enumerate(disc.parameters()):
                                 #    writer.add_scalar(f"irl/{i}_norm", torch.norm(p.data), global_step)
                                 #    writer.add_scalar(f"irl/{i}_gradnorm", torch.norm(p.grad), global_step)
 
                                 if args.irm_coeff > 0:
-                                    writer.add_scalar('irl/swil_irm_loss', loss_dict['grad_penalty'], global_step)
+                                    writer.add_scalar(
+                                        "irl/swil_irm_loss",
+                                        loss_dict["grad_penalty"],
+                                        global_step,
+                                    )
                                 if args.swil_vb > 0:
                                     writer.add_scalar(
-                                        'irl/swil_vib_loss', loss_dict['ib_loss'], global_step)
+                                        "irl/swil_vib_loss",
+                                        loss_dict["ib_loss"],
+                                        global_step,
+                                    )
 
             cnt_on_policy_updates += 1
 
@@ -674,83 +799,132 @@ if __name__ == "__main__":
                 else:
                     det = False
                 mu, std, d = evaluate_model(args, agent, device, test_env)
-                #mu, std, d = evaluate_model(args, agent, device, test_env, deterministic = det)
+                # mu, std, d = evaluate_model(args, agent, device, test_env, deterministic = det)
 
                 print(f"Evaluation at {global_step}: {mu}, {std}")
-                writer.add_scalar('eval/mu', mu, global_step)
-                writer.add_scalar('eval/std', std, global_step)
-                # calculate reference distance using OT package
+                writer.add_scalar("eval/mu", mu, global_step)
+                writer.add_scalar("eval/std", std, global_step)
+                # calculate reference distance using OT package
                 ref_dist = ot.sliced_wasserstein_distance(
-                    d['obs'], demos['all']['obs'][:len(d['obs'])], n_projections=100, seed=args.seed)
-                writer.add_scalar('irl/ref_sw_dist', ref_dist, global_step)
+                    d["obs"],
+                    demos["all"]["obs"][: len(d["obs"])],
+                    n_projections=100,
+                    seed=args.seed,
+                )
+                writer.add_scalar("irl/ref_sw_dist", ref_dist, global_step)
 
-                # plot rollouts
+                # plot rollouts
                 if "MoveP-v0" in args.env_id:
-                    demos_obs = demos['all']['obs']
-                    agent_obs = d['obs']
+                    demos_obs = demos["all"]["obs"]
+                    agent_obs = d["obs"]
 
                     rho0 = disc.policy_obs.detach().numpy()
-                    #fig, ax = plt.subplots(1,3,figsize=(15,5))
-                    fig, ax = plt.subplot_mosaic([['left', 'upper mid', 'right'],
-                               ['left', 'lower mid', 'right']],
-                              figsize=(12, 4), layout="constrained")
+                    # fig, ax = plt.subplots(1,3,figsize=(15,5))
+                    fig, ax = plt.subplot_mosaic(
+                        [
+                            ["left", "upper mid", "right"],
+                            ["left", "lower mid", "right"],
+                        ],
+                        figsize=(12, 4),
+                        layout="constrained",
+                    )
 
-                    ax['left'].scatter(test_env.init_pos[0], test_env.init_pos[1], s=200, c='b', marker='o',alpha=1.0)
-                    ax['left'].scatter(test_env.waypoints[-1][0], test_env.waypoints[-1][1], s=200, c='r', marker='*', alpha=1.0)
-                    ax['left'].scatter(demos_obs[:,0], demos_obs[:,1], s=20, c='g', alpha=0.2, label='expert')
-                    ax['left'].scatter(agent_obs[:,0], agent_obs[:,1], s=20, c='m', alpha=0.2, label='agent')
-                    ax['left'].scatter(rho0[:,0], rho0[:,1], s=20, c='y', alpha=0.2, label='rho0')
-                    ax['left'].axis('equal')
+                    ax["left"].scatter(
+                        test_env.init_pos[0],
+                        test_env.init_pos[1],
+                        s=200,
+                        c="b",
+                        marker="o",
+                        alpha=1.0,
+                    )
+                    ax["left"].scatter(
+                        test_env.waypoints[-1][0],
+                        test_env.waypoints[-1][1],
+                        s=200,
+                        c="r",
+                        marker="*",
+                        alpha=1.0,
+                    )
+                    ax["left"].scatter(
+                        demos_obs[:, 0],
+                        demos_obs[:, 1],
+                        s=20,
+                        c="g",
+                        alpha=0.2,
+                        label="expert",
+                    )
+                    ax["left"].scatter(
+                        agent_obs[:, 0],
+                        agent_obs[:, 1],
+                        s=20,
+                        c="m",
+                        alpha=0.2,
+                        label="agent",
+                    )
+                    ax["left"].scatter(
+                        rho0[:, 0], rho0[:, 1], s=20, c="y", alpha=0.2, label="rho0"
+                    )
+                    ax["left"].axis("equal")
                     plt.tight_layout()
                     f = plt.gca()
 
                     # calculate batch SW distance # asymmetric?
                     dist = ot.sliced_wasserstein_distance(
-                        demos_obs, agent_obs, n_projections=100, seed=args.seed)
+                        demos_obs, agent_obs, n_projections=100, seed=args.seed
+                    )
 
                     # turn off ticks for scatter plot
-                    ax['left'].get_xaxis().set_ticks([])
-                    ax['left'].get_yaxis().set_ticks([])
-                    ax['left'].xaxis.set_ticklabels([])
-                    ax['left'].yaxis.set_ticklabels([])
+                    ax["left"].get_xaxis().set_ticks([])
+                    ax["left"].get_yaxis().set_ticks([])
+                    ax["left"].xaxis.set_ticklabels([])
+                    ax["left"].yaxis.set_ticklabels([])
 
                     val_grid = test_env.get_reward_grid()[-1]
-                    val_grid_t = torch.from_numpy(val_grid).type(torch.get_default_dtype())
-                    #val = disc.get_reward(val_grid_t).detach().numpy()
+                    val_grid_t = torch.from_numpy(val_grid).type(
+                        torch.get_default_dtype()
+                    )
+                    # val = disc.get_reward(val_grid_t).detach().numpy()
                     val = agent.get_value(val_grid_t).detach().numpy()
                     val = val.reshape(test_env.shape)
-                    x_ = np.arange(0,test_env.shape[0])
-                    y_ = np.arange(0,test_env.shape[1])
-                    ax['upper mid'].pcolormesh(x_,y_,val.T)
-                    ax['lower mid'].pcolormesh(x_,y_,val.T)
+                    x_ = np.arange(0, test_env.shape[0])
+                    y_ = np.arange(0, test_env.shape[1])
+                    ax["upper mid"].pcolormesh(x_, y_, val.T)
+                    ax["lower mid"].pcolormesh(x_, y_, val.T)
 
-                    #plt.colorbar()
-                    #plt.savefig(f"runs/{run_name}/reward_{global_step}.png")
+                    # plt.colorbar()
+                    # plt.savefig(f"runs/{run_name}/reward_{global_step}.png")
 
                     sw_dists.append(dist)
 
-                    ax['right'].plot(sw_dists)
-                    ax['right'].axis('equal')
-                    ax['right'].set_title('SW2 dist, 10 proj.')
+                    ax["right"].plot(sw_dists)
+                    ax["right"].axis("equal")
+                    ax["right"].set_title("SW2 dist, 10 proj.")
                     # plt.legend()
-                    plt.savefig(
-                        f"runs/{run_name}/swil_scatter_{global_step}.png")
-
-
+                    plt.savefig(f"runs/{run_name}/swil_scatter_{global_step}.png")
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             if global_step % args.logging_interval == 0:
-                writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step) 
+                writer.add_scalar(
+                    "charts/learning_rate", optimizer.param_groups[0]["lr"], global_step
+                )
                 writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
                 writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
                 writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-                writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
+                writer.add_scalar(
+                    "losses/old_approx_kl", old_approx_kl.item(), global_step
+                )
                 writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
                 writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
-                writer.add_scalar("losses/explained_variance", explained_var, global_step)
+                writer.add_scalar(
+                    "losses/explained_variance", explained_var, global_step
+                )
                 if args.verbose:
                     print("SPS:", int(global_step / (time.time() - start_time)))
-                writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+                writer.add_scalar(
+                    "charts/SPS",
+                    int(global_step / (time.time() - start_time)),
+                    global_step,
+                )
         except KeyboardInterrupt:
             break
 
@@ -764,16 +938,15 @@ if __name__ == "__main__":
         det = True
     else:
         det = False
-    #mu, std, d = evaluate_model(args, agent, device, test_env, deterministic = det)   
-    mu, std, d = evaluate_model(args, agent, device, test_env)   
+    # mu, std, d = evaluate_model(args, agent, device, test_env, deterministic = det)
+    mu, std, d = evaluate_model(args, agent, device, test_env)
 
     print("Total SWIL updates: ", total_swil_updates)
 
-    writer.add_scalar('eval/mu', mu, args.total_timesteps)
-    writer.add_scalar('eval/std', std, args.total_timesteps)
+    writer.add_scalar("eval/mu", mu, args.total_timesteps)
+    writer.add_scalar("eval/std", std, args.total_timesteps)
 
     writer.close()
-
 
     ## if movep, save scatter plot
     # if args.env_id == "MoveP-v0":
@@ -782,7 +955,6 @@ if __name__ == "__main__":
     #     ## test model and save trajectories
     #     #test_env = MujocoTestWrapper(gym.make(args.env_id), eps=args.test_perturbation_eps)
     #     test_env = gym.make(args.env_id)
-
 
     # if args.clip_action and isinstance(test_env.action_space, gym.spaces.Box):
     #     test_env = gym.wrappers.ClipAction(test_env)
@@ -805,10 +977,9 @@ if __name__ == "__main__":
     #     plt.scatter(d_policy['obs'][:,0], d_policy['obs'][:,1], s=5, c='m', alpha=0.3)
     #     plt.savefig(f"runs/{run_name}/swil_scatter_final.png")
 
-    # save df for easier parsing
-    # if args.total_timesteps > 0:    
+    # save df for easier parsing
+    # if args.total_timesteps > 0:
     #     ea = read_tb_file(f"runs/{run_name}")
     #     df = create_df_from_ea(ea, "charts/episodic_return")
     #     df["mu"] = mu
     #     df.to_pickle(f"results_{run_name}_df.pkl")
-
