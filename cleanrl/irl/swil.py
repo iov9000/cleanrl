@@ -222,7 +222,7 @@ class SWILDiscriminator(nn.Module):
                     #                                     out_features=self.n_proj,
                     #                                     bias=bias)]
                     self.reward_layers += [
-                        linlayer(self.layer_dims[-1], self.opt.n_proj, bias, opt.use_ll_weight_norm, opt.use_spectral_norm)]
+                        linlayer(self.layer_dims[-1], self.opt.n_proj, bias, opt.use_ll_weight_norm, opt.use_spectral_norm), nonlin]
                         #linlayer(self.layer_dims[-1], self.n_proj, bias, opt.use_ll_weight_norm, opt.use_spectral_norm), nn.Sigmoid()]
                     self.reward = nn.Sequential(*self.reward_layers)
                 else:
