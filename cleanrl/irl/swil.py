@@ -146,6 +146,9 @@ class SWILDiscriminator(nn.Module):
         bias = self.bias
         self.n_proj = opt.n_proj
         self.reward_type = opt.swil_reward_type
+        self.reward_variant = getattr(opt, 'swil_reward_variant', None)
+        self.reward_aggregation = getattr(opt, 'swil_reward_aggregation', 'mean')
+        self.reward_softmax_tau = getattr(opt, 'swil_reward_softmax_tau', 0.5)
         self.is_atari = 'atari' in self.opt.exp_name
         self.swil_vb = opt.swil_vb
         self.i_c = opt.i_c
@@ -222,7 +225,7 @@ class SWILDiscriminator(nn.Module):
                     #                                     out_features=self.n_proj,
                     #                                     bias=bias)]
                     self.reward_layers += [
-                        linlayer(self.layer_dims[-1], self.opt.n_proj, bias, opt.use_ll_weight_norm, opt.use_spectral_norm), nonlin]
+                        linlayer(self.layer_dims[-1], self.opt.n_proj, bias, wnorm=False, snorm=opt.use_spectral_norm)]
                         #linlayer(self.layer_dims[-1], self.n_proj, bias, opt.use_ll_weight_norm, opt.use_spectral_norm), nn.Sigmoid()]
                     self.reward = nn.Sequential(*self.reward_layers)
                 else:
@@ -234,6 +237,11 @@ class SWILDiscriminator(nn.Module):
                 #                                         bias=bias), torch.nn.Tanh())
                 self.proj_layer = nn.Sequential(
                     linlayer(self.opt.n_proj, 1, bias, opt.use_weight_norm, opt.use_spectral_norm), torch.nn.Tanh())
+                
+                #self.proj_layer.apply(layer_init)
+                # self.proj_layer = nn.Parameter(
+                #     torch.randn(final_dim, hidden_dim)
+                # )
 
             if self.opt.swil_rew == 'replacement_nn':
                 self.base_rew_replnn = copy.deepcopy(self.base)
@@ -319,6 +327,7 @@ class SWILDiscriminator(nn.Module):
         else:
             # XXX: additional noise?
             rew = self.reward(vb_out)
+            #rew /= torch.linalg.vector_norm(rew,-1) # Added normalization for the projections
             # perturb with noise -> TODO: sample from stochastic (e.g. Gaussian) process?
             if self.opt.n_proj > 1:
                 rew + torch.randn_like(rew)*0.01
@@ -389,6 +398,167 @@ class SWILDiscriminator(nn.Module):
         vb_out = self.decoder_z(z)
 
         return vb_out, z, mu, std
+
+    def _resolve_reward_variant(self):
+        variant = getattr(self.opt, 'swil_reward_variant', self.reward_variant)
+        if variant:
+            return variant.lower()
+        fallback = getattr(self.opt, 'swil_rew', None)
+        if isinstance(fallback, str):
+            fallback = fallback.lower()
+            if fallback in {'sr', 'sr_reward', 'squared_residual'}:
+                return 'sr'
+            if fallback in {'dual', 'dual_reward', 'dual_potential'}:
+                return 'dual'
+            if fallback in {'rpl', 'replacement', 'replacement_loss', 'repl_loss'}:
+                return 'rpl'
+        return None
+
+    def _get_aggregation_mode(self):
+        mode = getattr(self.opt, 'swil_reward_aggregation', self.reward_aggregation)
+        if isinstance(mode, str):
+            return mode.lower()
+        return 'mean'
+
+    def _aggregate_tensor(self, values, prototype):
+        if values.numel() == 0:
+            return prototype.new_zeros(())
+        mode = self._get_aggregation_mode()
+        if mode == 'max':
+            return values.max()
+        if mode in {'softmax', 'softmax_tau'}:
+            tau = getattr(self.opt, 'swil_reward_softmax_tau', self.reward_softmax_tau)
+            tau = max(float(tau), 1e-6)
+            scaled = values / tau
+            scaled = scaled - scaled.max()
+            weights = scaled.exp()
+            total = weights.sum()
+            if total.item() <= 0:
+                return values.mean()
+            weights = weights / total
+            return (weights * values).sum()
+        return values.mean()
+
+    @staticmethod
+    def _quantile_match(policy_sorted, expert_sorted, values):
+        if policy_sorted.numel() == 0 or expert_sorted.numel() == 0:
+            return torch.zeros_like(values)
+        pos = torch.searchsorted(policy_sorted, values, right=False)
+        q = (pos.to(values.dtype) + 0.5) / float(policy_sorted.shape[0])
+        idx_f = q * float(expert_sorted.shape[0]) - 0.5
+        i0 = torch.clamp(idx_f.floor().to(torch.long), 0, expert_sorted.shape[0] - 1)
+        i1 = torch.clamp(i0 + 1, 0, expert_sorted.shape[0] - 1)
+        t = torch.clamp(idx_f - i0.to(idx_f.dtype), 0.0, 1.0)
+        return (1.0 - t) * expert_sorted[i0] + t * expert_sorted[i1]
+
+    @staticmethod
+    def _isotonic_regression(values):
+        values = values.clone().detach()
+        if values.numel() == 0:
+            return values
+        avg = values.tolist()
+        weights = [1] * len(avg)
+        i = 0
+        while i < len(avg) - 1:
+            if avg[i] > avg[i + 1]:
+                total = avg[i] * weights[i] + avg[i + 1] * weights[i + 1]
+                weight = weights[i] + weights[i + 1]
+                avg[i] = total / weight
+                weights[i] = weight
+                avg.pop(i + 1)
+                weights.pop(i + 1)
+                if i > 0:
+                    i -= 1
+            else:
+                i += 1
+        out = values.new_empty(values.numel())
+        idx = 0
+        for value, weight in zip(avg, weights):
+            out[idx:idx + weight] = value
+            idx += weight
+        return out
+
+    @staticmethod
+    def _interp1d_sorted(xp, fp, x):
+        if xp.numel() == 0:
+            return torch.zeros_like(x)
+        if xp.numel() == 1:
+            return fp[0].expand_as(x)
+        idx = torch.searchsorted(xp, x, right=False)
+        idx = torch.clamp(idx, 1, xp.numel() - 1)
+        x0 = xp[idx - 1]
+        x1 = xp[idx]
+        y0 = fp[idx - 1]
+        y1 = fp[idx]
+        t = (x - x0) / (x1 - x0 + 1e-12)
+        return torch.lerp(y0, y1, t)
+
+    def _sr_residual_value(self, policy_sorted, expert_sorted, value):
+        matched = self._quantile_match(policy_sorted, expert_sorted, value.unsqueeze(0))[0]
+        return (value - matched) ** 2
+
+    def _dual_potential_value(self, policy_sorted, expert_sorted, value):
+        if policy_sorted.numel() == 0 or expert_sorted.numel() == 0:
+            return value.new_zeros(())
+        matched = self._quantile_match(policy_sorted, expert_sorted, policy_sorted)
+        residual = policy_sorted - matched
+        slope = self._isotonic_regression(residual)
+        phi = policy_sorted.new_zeros(policy_sorted.shape)
+        if slope.numel() > 1:
+            dz = policy_sorted[1:] - policy_sorted[:-1]
+            phi[1:] = torch.cumsum(0.5 * (slope[1:] + slope[:-1]) * dz, dim=0)
+        phi = phi - phi.mean()
+        return self._interp1d_sorted(policy_sorted, phi, value.unsqueeze(0))[0]
+
+    def compute_sr_reward(self, ob, ac, nob=None, d=None):
+        with torch.no_grad():
+            base_out = self.base_fwd(self.base, ob, ac, nob, d)
+            if self.swil_vb > 0:
+                vb_out, _, _, _ = self.vb(base_out, noise=False)
+            else:
+                vb_out = base_out
+            obs_slice = self.reward(vb_out)
+            if obs_slice.dim() == 1:
+                obs_slice = obs_slice.unsqueeze(0)
+            values = []
+            for sorted_proj, sorted_proj_tgt in zip(self.pi_atoms_sorted, self.exp_atoms_sorted):
+                if sorted_proj is None or sorted_proj_tgt is None:
+                    continue
+                if sorted_proj.numel() == 0 or sorted_proj_tgt.numel() == 0:
+                    continue
+                for col in range(sorted_proj.shape[1]):
+                    policy_col = sorted_proj[:, col]
+                    expert_col = sorted_proj_tgt[:, col]
+                    values.append(self._sr_residual_value(policy_col, expert_col, obs_slice[0, col]))
+            value_tensor = torch.stack(values) if values else obs_slice.new_empty(0)
+            agg = self._aggregate_tensor(value_tensor, obs_slice)
+            reward_value = -agg
+            return reward_value.unsqueeze(0)
+
+    def compute_dual_reward(self, ob, ac, nob=None, d=None):
+        with torch.no_grad():
+            base_out = self.base_fwd(self.base, ob, ac, nob, d)
+            if self.swil_vb > 0:
+                vb_out, _, _, _ = self.vb(base_out, noise=False)
+            else:
+                vb_out = base_out
+            obs_slice = self.reward(vb_out)
+            if obs_slice.dim() == 1:
+                obs_slice = obs_slice.unsqueeze(0)
+            values = []
+            for sorted_proj, sorted_proj_tgt in zip(self.pi_atoms_sorted, self.exp_atoms_sorted):
+                if sorted_proj is None or sorted_proj_tgt is None:
+                    continue
+                if sorted_proj.numel() == 0 or sorted_proj_tgt.numel() == 0:
+                    continue
+                for col in range(sorted_proj.shape[1]):
+                    policy_col = sorted_proj[:, col]
+                    expert_col = sorted_proj_tgt[:, col]
+                    values.append(self._dual_potential_value(policy_col, expert_col, obs_slice[0, col]))
+            value_tensor = torch.stack(values) if values else obs_slice.new_empty(0)
+            agg = self._aggregate_tensor(value_tensor, obs_slice)
+            reward_value = -agg
+            return reward_value.unsqueeze(0)
 
     def compute_replacement_reward(self, ob, ac, nob=None,d=None, step=None):
         with torch.no_grad(): 
@@ -501,6 +671,9 @@ class SWILDiscriminator(nn.Module):
                                 if self.opt.repl_loss_type == 'diff':
                                     rew_j = a_new-a_prev
                                     rew += w*(rew_j)
+                                elif self.opt.repl_loss_type == 'abs_diff':
+                                    rew_j = a_new
+                                    rew += w*a_new
                                 elif self.opt.repl_loss_type == 'diffmax0':
                                     rew_j = a_new-a_prev
                                     if rew_j > 0: # > 0 bc we flip it later
@@ -515,6 +688,16 @@ class SWILDiscriminator(nn.Module):
                                     else:
                                         rew += w*(a_new_i-a_i)
                                         rew_j = a_new_i-a_i
+                                        #rew += w*(a_new - a_prev)
+                                elif self.opt.repl_loss_type == 'abs_diff2':
+                                    #if sorted_proj[i,j] > sorted_proj_tgt[i,j]:
+                                        #print("api>ae")
+                                    if rew_incr > rew_decr:
+                                        rew += w*(a_new_h)  
+                                        rew_j = a_new_h
+                                    else:
+                                        rew += w*(a_new_i)
+                                        rew_j = a_new_i
                                         #rew += w*(a_new - a_prev)
                                 elif self.opt.repl_loss_type == 'diff2max0':
                                     #print(sorted_proj[i,j] > sorted_proj_tgt[i,j])
@@ -594,12 +777,18 @@ class SWILDiscriminator(nn.Module):
             return gsw_dist
 
     def get_reward(self, ob, ac, nob=None,d=None, step=None):
+        variant = self._resolve_reward_variant()
+        if variant == 'sr':
+            return self.compute_sr_reward(ob, ac, nob, d)
+        if variant == 'dual':
+            return self.compute_dual_reward(ob, ac, nob, d)
+        if variant == 'rpl':
+            return self.compute_replacement_reward(ob, ac, nob, d, step)
         if self.opt.swil_rew == 'old_swil':
             return self.swil_reward(ob,ac,nob,d)
-        elif self.opt.swil_rew == 'replacement_nn':
+        if self.opt.swil_rew == 'replacement_nn':
             return self.rew_replnn(self.base_fwd(self.base_rew_replnn,ob,ac,nob))
-        else:
-            return self.compute_replacement_reward(ob, ac, nob, d, step)
+        return self.compute_replacement_reward(ob, ac, nob, d, step)
 
 
     def compute_replacement_reward_loss(self, update_dict, update_dict_2):

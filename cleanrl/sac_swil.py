@@ -113,7 +113,13 @@ def parse_args():
     parser.add_argument("--n_proj", type=int, default=1, help="number of projections for SWIL")
     parser.add_argument("--poly_degree", type=int, default=4, help="degree of polynomial for SWIL")
     parser.add_argument("--swil_reward_type", type=str, default='linear', help="SWIL reward type (linear / attn")
-    parser.add_argument("--swil_rew", type=str, default='repl_loss', help="mean or replacement")
+    parser.add_argument("--swil_rew", type=str, default='repl_loss', help="legacy reward selector (kept for backward compatibility)")
+    parser.add_argument("--swil_reward_variant", type=str, default='legacy', choices=['legacy', 'sr', 'dual', 'rpl'],
+        help="choose between legacy reward ('legacy') and the new SR / DUAL / RPL formulations")
+    parser.add_argument("--swil_reward_aggregation", type=str, default='mean', choices=['mean', 'max', 'softmax'],
+        help="aggregation used for SR/DUAL rewards (mean/max/softmax)")
+    parser.add_argument("--swil_reward_softmax_tau", type=float, default=0.5,
+        help="temperature for softmax aggregation (SR/DUAL)")
     parser.add_argument("--repl_loss_type", type=str, default='diff', help="replacement type: diff or a")
     parser.add_argument("--atom_weight", type=str, default='1/n', help="atom weight: 1/n or 1")
 
